@@ -15,7 +15,7 @@ func NewOnboardCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "onboard",
-		Aliases: []string{"o"},
+		Aliases: []string{"o", "install"},
 		Short:   "Initialize jameclaw configuration and workspace",
 		// Run without subcommands → original onboard flow
 		Run: func(cmd *cobra.Command, args []string) {

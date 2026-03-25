@@ -15,8 +15,9 @@ func TestNewOnboardCommand(t *testing.T) {
 	assert.Equal(t, "onboard", cmd.Use)
 	assert.Equal(t, "Initialize jameclaw configuration and workspace", cmd.Short)
 
-	assert.Len(t, cmd.Aliases, 1)
+	assert.Len(t, cmd.Aliases, 2)
 	assert.True(t, cmd.HasAlias("o"))
+	assert.True(t, cmd.HasAlias("install"))
 
 	assert.NotNil(t, cmd.Run)
 	assert.Nil(t, cmd.RunE)

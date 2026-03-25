@@ -45,6 +45,7 @@ func TestNewJameclawCommand(t *testing.T) {
 		"onboard",
 		"skills",
 		"status",
+		"uninstall",
 		"version",
 	}
 
@@ -156,7 +157,6 @@ func TestRunInteractiveDefaultCommandPromptsAgainAfterInvalidChoice(t *testing.T
 
 func TestRunInteractiveDefaultCommandStopsAfterOnboardOnFirstRun(t *testing.T) {
 	originalIsInteractive := defaultCommandIsInteractive
-	originalOnboard := runStartupOnboard
 	originalOnboardComplete := startupOnboardComplete
 	originalSelector := defaultCommandSelector
 	originalWeb := runDefaultWebCommand
@@ -165,7 +165,6 @@ func TestRunInteractiveDefaultCommandStopsAfterOnboardOnFirstRun(t *testing.T) {
 	originalOutput := defaultCommandOutput
 	t.Cleanup(func() {
 		defaultCommandIsInteractive = originalIsInteractive
-		runStartupOnboard = originalOnboard
 		startupOnboardComplete = originalOnboardComplete
 		defaultCommandSelector = originalSelector
 		runDefaultWebCommand = originalWeb
@@ -175,14 +174,10 @@ func TestRunInteractiveDefaultCommandStopsAfterOnboardOnFirstRun(t *testing.T) {
 	})
 
 	defaultCommandIsInteractive = func() bool { return true }
-	defaultCommandOutput = io.Discard
+	var output bytes.Buffer
+	defaultCommandOutput = &output
 
-	onboardComplete := false
-	runStartupOnboard = func() bool {
-		onboardComplete = true
-		return false
-	}
-	startupOnboardComplete = func() bool { return onboardComplete }
+	startupOnboardComplete = func() bool { return false }
 	selectorCalled := false
 	defaultCommandSelector = func() (string, error) {
 		selectorCalled = true
@@ -205,9 +200,10 @@ func TestRunInteractiveDefaultCommandStopsAfterOnboardOnFirstRun(t *testing.T) {
 
 	err := runInteractiveDefaultCommand()
 	require.NoError(t, err)
-	assert.True(t, onboardComplete)
 	assert.False(t, selectorCalled)
 	assert.False(t, launched)
+	assert.Contains(t, output.String(), "JameClaw is not installed yet")
+	assert.Contains(t, output.String(), "jameclaw install")
 }
 
 func TestNormalizeStartupChoice(t *testing.T) {

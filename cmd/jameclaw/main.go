@@ -28,6 +28,7 @@ import (
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/onboard"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/skills"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/status"
+	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/uninstall"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/version"
 	"github.com/sipeed/jameclaw/pkg/config"
 )
@@ -35,9 +36,6 @@ import (
 var runDefaultWebCommand = runWebCommand
 var runDefaultAgentCommand = runAgentChatCommand
 var runDefaultTUICommand = runTUICommand
-var runStartupOnboard = func() bool {
-	return onboard.Run(false)
-}
 var startupOnboardComplete = func() bool {
 	return onboard.IsComplete()
 }
@@ -105,6 +103,7 @@ func NewJameclawCommand() *cobra.Command {
 		skills.NewSkillsCommand(),
 		model.NewModelCommand(),
 		version.NewVersionCommand(),
+		uninstall.NewUninstallCommand(),
 	)
 
 	return cmd
@@ -124,15 +123,13 @@ const (
 )
 
 func runInteractiveDefaultCommand() error {
-	if !defaultCommandIsInteractive() {
-		return runDefaultAgentCommand()
+	if !startupOnboardComplete() {
+		renderSetupRequired()
+		return nil
 	}
 
-	if !startupOnboardComplete() {
-		if cancelled := runStartupOnboard(); cancelled {
-			return nil
-		}
-		return nil
+	if !defaultCommandIsInteractive() {
+		return runDefaultAgentCommand()
 	}
 
 	for {
@@ -159,6 +156,15 @@ func runInteractiveDefaultCommand() error {
 	}
 }
 
+func renderSetupRequired() {
+	fmt.Fprintln(defaultCommandOutput)
+	fmt.Fprintf(defaultCommandOutput, "%sJameClaw is not installed yet.%s\n", startupANSITitle, startupANSIReset)
+	fmt.Fprintf(defaultCommandOutput, "%sRun the setup command first, then come back to `jameclaw`.%s\n", startupANSIDim, startupANSIReset)
+	fmt.Fprintln(defaultCommandOutput)
+	fmt.Fprintf(defaultCommandOutput, "%sInstall:%s jameclaw install\n", startupANSIOption, startupANSIReset)
+	fmt.Fprintf(defaultCommandOutput, "%sLegacy alias:%s jameclaw onboard\n", startupANSIOption, startupANSIReset)
+}
+
 func runAgentChatCommand() error {
 	cfg, err := internal.LoadConfig()
 	if err != nil {
@@ -170,7 +176,7 @@ func runAgentChatCommand() error {
 		fmt.Fprintf(defaultCommandOutput, "%sNo default model configured.%s\n", startupANSITitle, startupANSIReset)
 		fmt.Fprintf(defaultCommandOutput, "%sAdd a model API key or set a default model first.%s\n", startupANSIDim, startupANSIReset)
 		fmt.Fprintln(defaultCommandOutput)
-		fmt.Fprintf(defaultCommandOutput, "%sTry next:%s jameclaw onboard\n", startupANSIOption, startupANSIReset)
+		fmt.Fprintf(defaultCommandOutput, "%sTry next:%s jameclaw install\n", startupANSIOption, startupANSIReset)
 		fmt.Fprintf(defaultCommandOutput, "%sOr set a model:%s jameclaw model <model-name>\n", startupANSIOption, startupANSIReset)
 		return nil
 	}
