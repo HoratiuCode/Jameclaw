@@ -1,0 +1,44 @@
+services:
+  # ─────────────────────────────────────────────
+  # JameClaw Agent (one-shot query) - Full MCP Support
+  #   docker compose -f docker/docker-compose.full.yml run --rm jameclaw-agent -m "Hello"
+  # ─────────────────────────────────────────────
+  jameclaw-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.full
+    container_name: jameclaw-agent-full
+    profiles:
+      - agent
+    volumes:
+      - ../config/config.json:/root/.jameclaw/config.json:ro
+      - jameclaw-workspace:/root/.jameclaw/workspace
+      - jameclaw-npm-cache:/root/.npm # npm cache for faster MCP server installs
+    entrypoint: ["jameclaw", "agent"]
+    stdin_open: true
+    tty: true
+
+  # ─────────────────────────────────────────────
+  # JameClaw Gateway (Long-running Bot) - Full MCP Support
+  #   docker compose -f docker/docker-compose.full.yml --profile gateway up
+  # ─────────────────────────────────────────────
+  jameclaw-gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.full
+    container_name: jameclaw-gateway-full
+    restart: unless-stopped
+    profiles:
+      - gateway
+    volumes:
+      # Configuration file
+      - ../config/config.json:/root/.jameclaw/config.json:ro
+      # Persistent workspace (sessions, memory, logs)
+      - jameclaw-workspace:/root/.jameclaw/workspace
+      # NPM cache for faster MCP server installs
+      - jameclaw-npm-cache:/root/.npm
+    command: ["gateway"]
+
+volumes:
+  jameclaw-workspace:
+  jameclaw-npm-cache: # Cache npm packages to speed up MCP server installations

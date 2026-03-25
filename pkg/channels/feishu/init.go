@@ -1,0 +1,13 @@
+package feishu
+
+import (
+	"github.com/sipeed/jameclaw/pkg/bus"
+	"github.com/sipeed/jameclaw/pkg/channels"
+	"github.com/sipeed/jameclaw/pkg/config"
+)
+
+func init() {
+	channels.RegisterFactory("feishu", func(cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
+		return NewFeishuChannel(cfg.Channels.Feishu, b)
+	})
+}

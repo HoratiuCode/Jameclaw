@@ -1,0 +1,1 @@
+function o(n,r=""){const t=typeof n=="string"?n.trim():"";if(!t)return r;if(t.length<=6){const e=t[0],s=t[t.length-1];return`${e}***${s}`}if(t.length<=12){const e=t.slice(0,2),s=t.slice(-2);return`${e}****${s}`}const c=t.slice(0,3),i=t.slice(-4);return`${c}*****${i}`}export{o as m};

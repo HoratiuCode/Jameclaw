@@ -1,0 +1,12 @@
+FROM alpine:3.21
+
+ARG TARGETPLATFORM
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY $TARGETPLATFORM/jameclaw /usr/local/bin/jameclaw
+COPY $TARGETPLATFORM/jameclaw-launcher /usr/local/bin/jameclaw-launcher
+COPY $TARGETPLATFORM/jameclaw-launcher-tui /usr/local/bin/jameclaw-launcher-tui
+
+ENTRYPOINT ["jameclaw-launcher"]
+CMD ["-public", "-no-browser"]

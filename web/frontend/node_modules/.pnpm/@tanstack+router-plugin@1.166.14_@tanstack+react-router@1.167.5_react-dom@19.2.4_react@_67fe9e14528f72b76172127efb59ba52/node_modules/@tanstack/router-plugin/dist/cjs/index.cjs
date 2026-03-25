@@ -1,0 +1,12 @@
+Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+const require_config = require("./core/config.cjs");
+const require_constants = require("./core/constants.cjs");
+const require_router_code_splitter_plugin = require("./core/router-code-splitter-plugin.cjs");
+const require_router_generator_plugin = require("./core/router-generator-plugin.cjs");
+exports.configSchema = require_config.configSchema;
+exports.defaultCodeSplitGroupings = require_constants.defaultCodeSplitGroupings;
+exports.getConfig = require_config.getConfig;
+exports.splitRouteIdentNodes = require_constants.splitRouteIdentNodes;
+exports.tsrSplit = require_constants.tsrSplit;
+exports.unpluginRouterCodeSplitterFactory = require_router_code_splitter_plugin.unpluginRouterCodeSplitterFactory;
+exports.unpluginRouterGeneratorFactory = require_router_generator_plugin.unpluginRouterGeneratorFactory;

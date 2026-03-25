@@ -1,0 +1,52 @@
+services:
+  # ─────────────────────────────────────────────
+  # JameClaw Agent (one-shot query)
+  #   docker compose -f docker/docker-compose.yml run --rm jameclaw-agent -m "Hello"
+  # ─────────────────────────────────────────────
+  jameclaw-agent:
+    image: docker.io/sipeed/jameclaw:latest
+    container_name: jameclaw-agent
+    profiles:
+      - agent
+    # Uncomment to access host network; leave commented unless needed.
+    #extra_hosts:
+    #  - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/root/.jameclaw
+    entrypoint: ["jameclaw", "agent"]
+    stdin_open: true
+    tty: true
+
+  # ─────────────────────────────────────────────
+  # JameClaw Gateway (Long-running Bot)
+  #   docker compose -f docker/docker-compose.yml --profile gateway up
+  # ─────────────────────────────────────────────
+  jameclaw-gateway:
+    image: docker.io/sipeed/jameclaw:latest
+    container_name: jameclaw-gateway
+    restart: on-failure
+    profiles:
+      - gateway
+    # Uncomment to access host network; leave commented unless needed.
+    #extra_hosts:
+    #  - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/root/.jameclaw
+
+  # ─────────────────────────────────────────────
+  # JameClaw Launcher (Web Console + Gateway)
+  #   docker compose -f docker/docker-compose.yml --profile launcher up
+  # ─────────────────────────────────────────────
+  jameclaw-launcher:
+    image: docker.io/sipeed/jameclaw:launcher
+    container_name: jameclaw-launcher
+    restart: on-failure
+    profiles:
+      - launcher
+    environment:
+      - JAMECLAW_GATEWAY_HOST=0.0.0.0
+    ports:
+      - "127.0.0.1:18800:18800"
+      - "127.0.0.1:18790:18790"
+    volumes:
+      - ./data:/root/.jameclaw

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=JameClaw Launcher
+Comment=Web-based configuration and management UI for JameClaw
+Exec=jameclaw-launcher
+Icon=jameclaw-launcher
+Terminal=true
+Type=Application
+Categories=Utility;Network;
+Keywords=jameclaw;ai;agent;bot;

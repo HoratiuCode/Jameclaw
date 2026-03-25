@@ -1,0 +1,13 @@
+Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+require("./_virtual/_rolldown/runtime.cjs");
+const require_ast = require("./ast.cjs");
+const require_logger = require("./logger.cjs");
+const require_copy_files_plugin = require("./copy-files-plugin.cjs");
+let babel_dead_code_elimination = require("babel-dead-code-elimination");
+exports.copyFilesPlugin = require_copy_files_plugin.copyFilesPlugin;
+exports.deadCodeElimination = require_ast.deadCodeElimination;
+exports.findReferencedIdentifiers = babel_dead_code_elimination.findReferencedIdentifiers;
+exports.generateFromAst = require_ast.generateFromAst;
+exports.logDiff = require_logger.logDiff;
+exports.parseAst = require_ast.parseAst;
+exports.stripTypeExports = require_ast.stripTypeExports;
