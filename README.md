@@ -1,9 +1,9 @@
 <div align="center">
 <img src="assets/logo.png" alt="JameClaw" width="512">
 
-<h1>JameClaw: Ultra-Efficient AI Assistant in Go</h1>
+<h1>JameClaw: Local-First AI Assistant in Go</h1>
 
-<h3>$10 Hardware · 10MB RAM · ms Boot · Let's Go, JameClaw!</h3>
+<h3>Web Console · TUI Launcher · Multi-Channel Gateway</h3>
   <p>
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
     <img src="https://img.shields.io/badge/Arch-x86__64%2C%20ARM64%2C%20MIPS%2C%20RISC--V%2C%20LoongArch-blue" alt="Hardware">
@@ -12,7 +12,6 @@
     <a href="https://jameclaw.io"><img src="https://img.shields.io/badge/Website-jameclaw.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
     <a href="https://docs.jameclaw.io/"><img src="https://img.shields.io/badge/Docs-Official-007acc?style=flat&logo=read-the-docs&logoColor=white" alt="Docs"></a>
     <br>
-    <a href="./assets/wechat.png"><img src="https://img.shields.io/badge/WeChat-Group-41d56b?style=flat&logo=wechat&logoColor=white"></a>
     <a href="https://discord.gg/V4sAZ9XWpN"><img src="https://img.shields.io/badge/Discord-Community-4c60eb?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 
@@ -22,26 +21,16 @@
 
 ---
 
-> **JameClaw** is an independent open-source project written entirely in **Go** from scratch — not a fork of OpenClaw, NanoBot, or any other project.
+> **JameClaw** is a local-first AI assistant written in **Go** with a browser launcher, terminal launcher, and multi-channel gateway.
 
-**JameClaw** is an ultra-lightweight personal AI assistant inspired by [NanoBot](https://github.com/HKUDS/nanobot). It was rebuilt from the ground up in **Go** through a "self-bootstrapping" process — the AI Agent itself drove the architecture migration and code optimization.
+This repository is tuned around the workflow that exists in the code today:
 
-**Runs on $10 hardware with <10MB RAM** — that's 99% less memory than OpenClaw and 98% cheaper than a Mac mini!
+- run a local web console at `http://localhost:18800`
+- manage credentials, models, channels, tools, skills, config, and logs from one UI
+- keep runtime state under `~/.jameclaw`
+- use the TUI launcher when working over SSH or on headless machines
 
-<table align="center">
-<tr align="center">
-<td align="center" valign="top">
-<p align="center">
-<img src="assets/jameclaw_mem.gif" width="360" height="240">
-</p>
-</td>
-<td align="center" valign="top">
-<p align="center">
-<img src="assets/licheervnano.png" width="400" height="240">
-</p>
-</td>
-</tr>
-</table>
+If you are using this fork day to day, the launcher experience is the main entry point, not the older promo-heavy hardware/demo copy.
 
 > [!CAUTION]
 > **Security Notice**
@@ -52,99 +41,24 @@
 > * **NOTE:** JameClaw is in early rapid development. There may be unresolved security issues. Do not deploy to production before v1.0.
 > * **NOTE:** JameClaw has recently merged many PRs. Recent builds may use 10-20MB RAM. Resource optimization is planned after feature stabilization.
 
-## 📢 News
+## ✨ What This Fork Focuses On
 
-2026-03-17 🚀 **v0.2.3 Released!** System tray UI (Windows & Linux), sub-agent status query (`spawn_status`), experimental Gateway hot-reload, Cron security gating, and 2 security fixes. JameClaw has reached **25K Stars**!
+- **Web console first**: local browser UI for chat, configuration, and day-to-day operations
+- **Launcher workflow**: launcher settings, auto-start support, gateway controls, and logs
+- **Provider management**: dedicated credentials and models pages with one local config source
+- **Channel management**: configure Telegram, Discord, Slack, Matrix, LINE, WeCom, Feishu, OneBot, MaixCam, and more from one place
+- **Agent operations**: inspect tools, skills, raw config, and runtime status without leaving the app
+- **Desktop and headless use**: browser launcher for local use and TUI launcher for SSH/server workflows
 
-2026-03-09 🎉 **v0.2.1 — Biggest update yet!** MCP protocol support, 4 new channels (Matrix/IRC/WeCom/Discord Proxy), 3 new providers (Kimi/Minimax/Avian), vision pipeline, JSONL memory store, model routing.
+## 🗂️ Project Layout
 
-2026-02-28 📦 **v0.2.0** released with Docker Compose and Web UI Launcher support.
+- `web/frontend`: React/TanStack web console
+- `web/backend`: Go launcher backend and embedded UI server
+- `cmd/jameclaw-launcher-tui`: terminal launcher for headless environments
+- `cmd/jameclaw`: CLI entry point for onboarding, chat, gateway control, and auth flows
+- `pkg/`: providers, channels, tools, config, gateway, memory, and shared runtime packages
 
-2026-02-26 🎉 JameClaw hits **20K Stars** in just 17 days! Channel auto-orchestration and capability interfaces are live.
-
-<details>
-<summary>Earlier news...</summary>
-
-2026-02-16 🎉 JameClaw breaks 12K Stars in one week! Community maintainer roles and [Roadmap](ROADMAP.md) officially launched.
-
-2026-02-13 🎉 JameClaw breaks 5000 Stars in 4 days! Project roadmap and developer groups in progress.
-
-2026-02-09 🎉 **JameClaw Released!** Built in 1 day to bring AI Agents to $10 hardware with <10MB RAM. Let's Go, JameClaw!
-
-</details>
-
-## ✨ Features
-
-🪶 **Ultra-lightweight**: Core memory footprint <10MB — 99% smaller than OpenClaw.*
-
-💰 **Minimal cost**: Efficient enough to run on $10 hardware — 98% cheaper than a Mac mini.
-
-⚡️ **Lightning-fast boot**: 400x faster startup. Boots in <1s even on a 0.6GHz single-core processor.
-
-🌍 **Truly portable**: Single binary across RISC-V, ARM, MIPS, and x86 architectures. One binary, runs everywhere!
-
-🤖 **AI-bootstrapped**: Pure Go native implementation — 95% of core code was generated by an Agent and fine-tuned through human-in-the-loop review.
-
-🔌 **MCP support**: Native [Model Context Protocol](https://modelcontextprotocol.io/) integration — connect any MCP server to extend Agent capabilities.
-
-👁️ **Vision pipeline**: Send images and files directly to the Agent — automatic base64 encoding for multimodal LLMs.
-
-🧠 **Smart routing**: Rule-based model routing — simple queries go to lightweight models, saving API costs.
-
-_*Recent builds may use 10-20MB due to rapid PR merges. Resource optimization is planned. Boot speed comparison based on 0.8GHz single-core benchmarks (see table below)._
-
-<div align="center">
-
-|                                | OpenClaw      | NanoBot                  | **JameClaw**                           |
-| ------------------------------ | ------------- | ------------------------ | -------------------------------------- |
-| **Language**                   | TypeScript    | Python                   | **Go**                                 |
-| **RAM**                        | >1GB          | >100MB                   | **< 10MB***                            |
-| **Boot time**</br>(0.8GHz core) | >500s         | >30s                     | **<1s**                                |
-| **Cost**                       | Mac Mini $599 | Most Linux boards ~$50   | **Any Linux board**</br>**from $10**   |
-
-<img src="assets/compare.jpg" alt="JameClaw" width="512">
-
-</div>
-
-> **[Hardware Compatibility List](docs/hardware-compatibility.md)** — See all tested boards, from $5 RISC-V to Raspberry Pi to Android phones. Your board not listed? Submit a PR!
-
-<p align="center">
-<img src="assets/hardware-banner.jpg" alt="JameClaw Hardware Compatibility" width="100%">
-</p>
-
-## 🦾 Demonstration
-
-### 🛠️ Standard Assistant Workflows
-
-<table align="center">
-<tr align="center">
-<th><p align="center">Full-Stack Engineer Mode</p></th>
-<th><p align="center">Logging & Planning</p></th>
-<th><p align="center">Web Search & Learning</p></th>
-</tr>
-<tr>
-<td align="center"><p align="center"><img src="assets/jameclaw_code.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/jameclaw_memory.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/jameclaw_search.gif" width="240" height="180"></p></td>
-</tr>
-<tr>
-<td align="center">Develop · Deploy · Scale</td>
-<td align="center">Schedule · Automate · Remember</td>
-<td align="center">Discover · Insights · Trends</td>
-</tr>
-</table>
-
-### 🐜 Innovative Low-Footprint Deployment
-
-JameClaw can be deployed on virtually any Linux device!
-
-- $9.9 [LicheeRV-Nano](https://www.aliexpress.com/item/1005006519668532.html) E(Ethernet) or W(WiFi6) edition, for a minimal home assistant
-- $30~50 [NanoKVM](https://www.aliexpress.com/item/1005007369816019.html), or $100 [NanoKVM-Pro](https://www.aliexpress.com/item/1005010048471263.html), for automated server operations
-- $50 [MaixCAM](https://www.aliexpress.com/item/1005008053333693.html) or $100 [MaixCAM2](https://www.kickstarter.com/projects/zepan/maixcam2-build-your-next-gen-4k-ai-camera), for smart surveillance
-
-<https://private-user-images.githubusercontent.com/83055338/547056448-e7b031ff-d6f5-4468-bcca-5726b6fecb5c.mp4>
-
-🌟 More Deployment Cases Await!
+For broader product docs, use the official docs site. This README is intentionally focused on the current launcher-centric setup in this repo.
 
 ## 📦 Install
 
@@ -170,6 +84,9 @@ make build
 # Build Web UI Launcher (required for WebUI mode)
 make build-launcher
 
+# Optional: build the TUI launcher
+go build -o build/jameclaw-launcher-tui ./cmd/jameclaw-launcher-tui
+
 # Build for multiple platforms
 make build-all
 
@@ -186,7 +103,7 @@ make install
 
 ### 🌐 WebUI Launcher (Recommended for Desktop)
 
-The WebUI Launcher provides a browser-based interface for configuration and chat. This is the easiest way to get started — no command-line knowledge required.
+The WebUI Launcher is the main workflow in this repo. It provides a browser-based interface for configuration, credentials, models, channels, tools, skills, logs, and chat.
 
 **Option 1: Double-click (Desktop)**
 
@@ -198,6 +115,8 @@ After downloading from [jameclaw.io](https://jameclaw.io), double-click `jamecla
 jameclaw-launcher
 # Open http://localhost:18800 in your browser
 ```
+
+If port `18800` is already in use, stop the existing launcher or start on another port with `jameclaw-launcher -port 18801`.
 
 > [!TIP]
 > **Remote access / Docker / VM:** Add the `-public` flag to listen on all interfaces:
@@ -211,7 +130,13 @@ jameclaw-launcher
 
 **Getting started:** 
 
-Open the WebUI, then: **1)** Configure a Provider (add your LLM API key) -> **2)** Configure a Channel (e.g., Telegram) -> **3)** Start the Gateway -> **4)** Chat!
+Open the WebUI, then:
+
+**1)** Add a credential  
+**2)** Add or select a model  
+**3)** Enable the channel you want to use  
+**4)** Review launcher/config settings and start the gateway  
+**5)** Use the chat and logs pages to verify everything is working
 
 For detailed WebUI documentation, see [docs.jameclaw.io](https://docs.jameclaw.io).
 
@@ -266,7 +191,7 @@ jameclaw-launcher-tui
 
 **Getting started:** 
 
-Use the TUI menus to: **1)** Configure a Provider -> **2)** Configure a Channel -> **3)** Start the Gateway -> **4)** Chat!
+Use the TUI menus to: **1)** Configure credentials and models -> **2)** Enable a channel -> **3)** Start the gateway -> **4)** Monitor logs and chat.
 
 For detailed TUI documentation, see [docs.jameclaw.io](https://docs.jameclaw.io).
 
@@ -289,11 +214,9 @@ termux-chroot ./jameclaw onboard   # chroot provides a standard Linux filesystem
 
 Then follow the Terminal Launcher section below to complete configuration.
 
-<img src="assets/termux.jpg" alt="JameClaw on Termux" width="512">
-
 **Option 2: APK Install (coming soon)**
 
-A standalone Android APK with built-in WebUI is in development. Stay tuned!
+A standalone Android APK with built-in WebUI is planned.
 
 <details>
 <summary><b>Terminal Launcher (for resource-constrained environments)</b></summary>
@@ -417,7 +340,6 @@ Talk to your JameClaw through 17+ messaging platforms:
 | **Telegram** | Easy (bot token) | Long polling | [Guide](docs/channels/telegram/README.md) |
 | **Discord** | Easy (bot token + intents) | WebSocket | [Guide](docs/channels/discord/README.md) |
 | **WhatsApp** | Easy (QR scan or bridge URL) | Native / Bridge | [Guide](docs/chat-apps.md#whatsapp) |
-| **Weixin** | Easy (Native QR scan) | iLink API | [Guide](docs/chat-apps.md#weixin) |
 | **QQ** | Easy (AppID + AppSecret) | WebSocket | [Guide](docs/channels/qq/README.md) |
 | **Slack** | Easy (bot + app token) | Socket Mode | [Guide](docs/channels/slack/README.md) |
 | **Matrix** | Medium (homeserver + token) | Sync API | [Guide](docs/channels/matrix/README.md) |
@@ -521,7 +443,6 @@ Connect JameClaw to the Agent Social Network simply by sending a single message 
 | Command                   | Description                      |
 | ------------------------- | -------------------------------- |
 | `jameclaw onboard`        | Initialize config & workspace    |
-| `jameclaw auth weixin` | Connect WeChat account via QR |
 | `jameclaw agent -m "..."` | Chat with the agent              |
 | `jameclaw agent`          | Interactive chat mode            |
 | `jameclaw gateway`        | Start the gateway                |
@@ -571,9 +492,6 @@ See our [Community Roadmap](./issues/988) and [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Developer group building, join after your first merged PR!
 
-User Groups:
+Community:
 
 Discord: <https://discord.gg/V4sAZ9XWpN>
-
-WeChat:
-<img src="assets/wechat.png" alt="WeChat group QR code" width="512">
