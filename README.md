@@ -32,6 +32,25 @@ This repository is tuned around the workflow that exists in the code today:
 
 If you are using this fork day to day, the launcher experience is the main entry point, not the older promo-heavy hardware/demo copy.
 
+## 🧭 How JameClaw Works
+
+JameClaw in this repo is one local agent with four practical entry points:
+
+- **Web Console**: browser UI for chat, credentials, models, channels, tools, config, launcher settings, and logs
+- **TUI Launcher**: terminal dashboard for headless servers, SSH sessions, and Raspberry Pi-style setups
+- **Terminal Agent**: direct CLI chat with `jameclaw agent` for one-shot questions or interactive sessions
+- **Gateway**: background bridge that connects the same agent and config to Telegram and other channels
+
+All of those entry points share the same local runtime state under `~/.jameclaw`.
+
+## 🎯 What The Agent Does
+
+- uses your configured default model to chat and act on your local workspace
+- keeps one local config source for models, channels, skills, tools, and runtime behavior
+- lets you manage setup visually in the Web Console, from menus in the TUI, or directly from the CLI
+- can expose the same agent through chat apps once the gateway is running
+- stores workspace templates, logs, auth state, and launcher settings locally
+
 > [!CAUTION]
 > **Security Notice**
 >
@@ -110,6 +129,20 @@ make install
 **Raspberry Pi Zero 2 W:** Use the binary that matches your OS: 32-bit Raspberry Pi OS -> `make build-linux-arm`; 64-bit -> `make build-linux-arm64`. Or run `make build-pi-zero` to build both.
 
 ## 🚀 Quick Start Guide
+
+### ✅ First-Time Setup
+
+There are two different first-run paths in this repo:
+
+- **Core CLI**: run `jameclaw install` first, then run `jameclaw`
+- **Web Console / launcher**: the launcher can create the initial config automatically if it does not exist
+
+If you want to wipe the local setup and start again from scratch:
+
+```bash
+jameclaw uninstall
+jameclaw install
+```
 
 ### 🌐 WebUI Launcher (Recommended for Desktop)
 
@@ -207,6 +240,23 @@ Use the TUI menus to: **1)** Configure credentials and models -> **2)** Enable a
 
 For detailed TUI documentation, see [docs.jameclaw.io](https://docs.jameclaw.io).
 
+### ⌨️ Terminal Agent
+
+If you want the fastest path without the launchers, use the core CLI agent directly:
+
+```bash
+jameclaw install
+jameclaw agent
+```
+
+Or send a one-shot message:
+
+```bash
+jameclaw agent -m "Summarize this workspace and tell me where to start."
+```
+
+This mode is the best fit when you want a direct shell workflow instead of the browser UI or TUI.
+
 ### 📱 Android
 
 Give your decade-old phone a second life! Turn it into a smart AI Assistant with JameClaw.
@@ -281,36 +331,17 @@ jameclaw gateway
 
 </details>
 
-## 🔌 Providers (LLM)
+## 🔌 Models And Providers
 
-JameClaw supports 30+ LLM providers through the `model_list` configuration. Use the `protocol/model` format:
+The agent runs on whichever default model you configure in `config.json`.
 
-| Provider | Protocol | API Key | Notes |
-|----------|----------|---------|-------|
-| [OpenAI](https://platform.openai.com/api-keys) | `openai/` | Required | GPT-5.4, GPT-4o, o3, etc. |
-| [Anthropic](https://console.anthropic.com/settings/keys) | `anthropic/` | Required | Claude Opus 4.6, Sonnet 4.6, etc. |
-| [Google Gemini](https://aistudio.google.com/apikey) | `gemini/` | Required | Gemini 3 Flash, 2.5 Pro, etc. |
-| [OpenRouter](https://openrouter.ai/keys) | `openrouter/` | Required | 200+ models, unified API |
-| [Zhipu (GLM)](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) | `zhipu/` | Required | GLM-4.7, GLM-5, etc. |
-| [DeepSeek](https://platform.deepseek.com/api_keys) | `deepseek/` | Required | DeepSeek-V3, DeepSeek-R1 |
-| [Volcengine](https://console.volcengine.com) | `volcengine/` | Required | Doubao, Ark models |
-| [Qwen](https://dashscope.console.aliyun.com/apiKey) | `qwen/` | Required | Qwen3, Qwen-Max, etc. |
-| [Groq](https://console.groq.com/keys) | `groq/` | Required | Fast inference (Llama, Mixtral) |
-| [Moonshot (Kimi)](https://platform.moonshot.cn/console/api-keys) | `moonshot/` | Required | Kimi models |
-| [Minimax](https://platform.minimaxi.com/user-center/basic-information/interface-key) | `minimax/` | Required | MiniMax models |
-| [Mistral](https://console.mistral.ai/api-keys) | `mistral/` | Required | Mistral Large, Codestral |
-| [NVIDIA NIM](https://build.nvidia.com/) | `nvidia/` | Required | NVIDIA hosted models |
-| [Cerebras](https://cloud.cerebras.ai/) | `cerebras/` | Required | Fast inference |
-| [Novita AI](https://novita.ai/) | `novita/` | Required | Various open models |
-| [Ollama](https://ollama.com/) | `ollama/` | Not needed | Local models, self-hosted |
-| [vLLM](https://docs.vllm.ai/) | `vllm/` | Not needed | Local deployment, OpenAI-compatible |
-| [LiteLLM](https://docs.litellm.ai/) | `litellm/` | Varies | Proxy for 100+ providers |
-| [Azure OpenAI](https://portal.azure.com/) | `azure/` | Required | Enterprise Azure deployment |
-| [GitHub Copilot](https://github.com/features/copilot) | `github-copilot/` | OAuth | Device code login |
-| [Antigravity](https://console.cloud.google.com/) | `antigravity/` | OAuth | Google Cloud AI |
-| [AWS Bedrock](https://console.aws.amazon.com/bedrock)* | `bedrock/` | AWS credentials | Claude, Llama, Mistral on AWS |
+In this fork, the practical setup paths are:
 
-> \* AWS Bedrock requires build tag: `go build -tags bedrock`. Set `api_base` to a region name (e.g., `us-east-1`) for automatic endpoint resolution across all AWS partitions (aws, aws-cn, aws-us-gov). When using a full endpoint URL instead, you must also configure `AWS_REGION` via environment variable or AWS config/profile.
+- add API-key-based models from the Web Console credentials and models pages
+- pick a local model such as Ollama for offline or self-hosted use
+- switch the default model from the Web Console, TUI, or `jameclaw model`
+
+Common provider families include OpenAI, Anthropic, OpenRouter, local Ollama, and other OpenAI-compatible backends. For the full provider matrix and advanced configuration, see [Providers & Models](docs/providers.md).
 
 <details>
 <summary><b>Local deployment (Ollama, vLLM, etc.)</b></summary>
@@ -345,57 +376,27 @@ For full provider configuration details, see [Providers & Models](docs/providers
 
 </details>
 
-## 💬 Channels (Chat Apps)
+## 💬 Channels And Gateway
 
-Talk to your JameClaw through 17+ messaging platforms:
+The gateway is how the same local agent is exposed to chat apps.
 
-| Channel | Setup | Protocol | Docs |
-|---------|-------|----------|------|
-| **Telegram** | Easy (bot token) | Long polling | [Guide](docs/channels/telegram/README.md) |
-| **Discord** | Easy (bot token + intents) | WebSocket | [Guide](docs/channels/discord/README.md) |
-| **WhatsApp** | Easy (QR scan or bridge URL) | Native / Bridge | [Guide](docs/chat-apps.md#whatsapp) |
-| **QQ** | Easy (AppID + AppSecret) | WebSocket | [Guide](docs/channels/qq/README.md) |
-| **Slack** | Easy (bot + app token) | Socket Mode | [Guide](docs/channels/slack/README.md) |
-| **Matrix** | Medium (homeserver + token) | Sync API | [Guide](docs/channels/matrix/README.md) |
-| **DingTalk** | Medium (client credentials) | Stream | [Guide](docs/channels/dingtalk/README.md) |
-| **Feishu / Lark** | Medium (App ID + Secret) | WebSocket/SDK | [Guide](docs/channels/feishu/README.md) |
-| **LINE** | Medium (credentials + webhook) | Webhook | [Guide](docs/channels/line/README.md) |
-| **WeCom Bot** | Medium (webhook URL) | Webhook | [Guide](docs/channels/wecom/wecom_bot/README.md) |
-| **WeCom App** | Medium (corp credentials) | Webhook | [Guide](docs/channels/wecom/wecom_app/README.md) |
-| **WeCom AI Bot** | Medium (token + AES key) | WebSocket / Webhook | [Guide](docs/channels/wecom/wecom_aibot/README.md) |
-| **IRC** | Medium (server + nick) | IRC protocol | [Guide](docs/chat-apps.md#irc) |
-| **OneBot** | Medium (WebSocket URL) | OneBot v11 | [Guide](docs/channels/onebot/README.md) |
-| **MaixCam** | Easy (enable) | TCP socket | [Guide](docs/channels/maixcam/README.md) |
-| **Jame** | Easy (enable) | Native protocol | Built-in |
-| **Jame Client** | Easy (WebSocket URL) | WebSocket | Built-in |
+Typical flow:
 
-> All webhook-based channels share a single Gateway HTTP server (`gateway.host`:`gateway.port`, default `127.0.0.1:18790`). Feishu uses WebSocket/SDK mode and does not use the shared HTTP server.
+- configure a channel in the Web Console, TUI, or config file
+- start the gateway
+- talk to the same agent through that channel using the same local model and workspace
 
-For detailed channel setup instructions, see [Chat Apps Configuration](docs/chat-apps.md).
+This fork is most clearly tuned around Telegram-first setup in onboarding, but the codebase also includes broader channel support. For the full channel list and setup guides, see [Chat Apps Configuration](docs/chat-apps.md).
 
 ## 🔧 Tools
 
-### 🔍 Web Search
+The agent can be given tools such as shell execution, web search, MCP servers, and skills. In this repo, the main user-facing place to inspect and manage tool availability is the Web Console tools page.
 
-JameClaw can search the web to provide up-to-date information. Configure in `tools.web`:
-
-| Search Engine | API Key | Free Tier | Link |
-|--------------|---------|-----------|------|
-| DuckDuckGo | Not needed | Unlimited | Built-in fallback |
-| [Baidu Search](https://cloud.baidu.com/doc/qianfan-api/s/Wmbq4z7e5) | Required | 1000 queries/day | AI-powered, China-optimized |
-| [Tavily](https://tavily.com) | Required | 1000 queries/month | Optimized for AI Agents |
-| [Brave Search](https://brave.com/search/api) | Required | 2000 queries/month | Fast and private |
-| [Perplexity](https://www.perplexity.ai) | Required | Paid | AI-powered search |
-| [SearXNG](https://github.com/searxng/searxng) | Not needed | Self-hosted | Free metasearch engine |
-| [GLM Search](https://open.bigmodel.cn/) | Required | Varies | Zhipu web search |
-
-### ⚙️ Other Tools
-
-JameClaw includes built-in tools for file operations, code execution, scheduling, and more. See [Tools Configuration](docs/tools_configuration.md) for details.
+For full tool configuration details, see [Tools Configuration](docs/tools_configuration.md).
 
 ## 🎯 Skills
 
-Skills are modular capabilities that extend your Agent. They are loaded from `SKILL.md` files in your workspace.
+Skills are modular capabilities that extend your agent. They are loaded from `SKILL.md` files in your workspace and can be managed from the Web Console or the CLI.
 
 **Install skills from ClawHub:**
 
@@ -425,7 +426,7 @@ For more details, see [Tools Configuration - Skills](docs/tools_configuration.md
 
 ## 🔗 MCP (Model Context Protocol)
 
-JameClaw natively supports [MCP](https://modelcontextprotocol.io/) — connect any MCP server to extend your Agent's capabilities with external tools and data sources.
+JameClaw supports [MCP](https://modelcontextprotocol.io/) so the agent can use external tools and data sources beyond the built-in runtime.
 
 ```json
 {
@@ -450,6 +451,7 @@ For full MCP configuration (stdio, SSE, HTTP transports, Tool Discovery), see [T
 
 | Command                   | Description                      |
 | ------------------------- | -------------------------------- |
+| `jameclaw`                | Start the default chooser after setup |
 | `jameclaw install`        | Initialize config & workspace    |
 | `jameclaw onboard`        | Legacy alias for install         |
 | `jameclaw uninstall`      | Remove local state and reset setup |
@@ -483,9 +485,9 @@ For detailed guides beyond this README:
 | Topic | Description |
 |-------|-------------|
 | [Docker & Quick Start](docs/docker.md) | Docker Compose setup, Launcher/Agent modes |
-| [Chat Apps](docs/chat-apps.md) | All 17+ channel setup guides |
+| [Chat Apps](docs/chat-apps.md) | Channel setup guides and gateway behavior |
 | [Configuration](docs/configuration.md) | Environment variables, workspace layout, security sandbox |
-| [Providers & Models](docs/providers.md) | 30+ LLM providers, model routing, model_list configuration |
+| [Providers & Models](docs/providers.md) | Provider setup, model routing, and `model_list` configuration |
 | [Spawn & Async Tasks](docs/spawn-tasks.md) | Quick tasks, long tasks with spawn, async sub-agent orchestration |
 | [Hooks](docs/hooks/README.md) | Event-driven hook system: observers, interceptors, approval hooks |
 | [Steering](docs/steering.md) | Inject messages into a running agent loop between tool calls |
