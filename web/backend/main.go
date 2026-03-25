@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -223,11 +224,24 @@ func main() {
 		apiHandler.TryAutoStartGateway()
 	}()
 
+	// Bind the socket before logging success so port conflicts are reported accurately.
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			logger.Fatalf(
+				"Server failed to start: %v. Another process is already using %s. Close the existing launcher or start with -port <new-port>.",
+				err,
+				addr,
+			)
+		}
+		logger.Fatalf("Server failed to start: %v", err)
+	}
+
 	// Start the Server in a goroutine
 	server = &http.Server{Addr: addr, Handler: handler}
 	go func() {
 		logger.InfoC("web", fmt.Sprintf("Server listening on %s", addr))
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logger.Fatalf("Server failed to start: %v", err)
 		}
 	}()
