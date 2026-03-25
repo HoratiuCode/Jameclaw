@@ -154,12 +154,14 @@ func TestRunInteractiveDefaultCommandPromptsAgainAfterInvalidChoice(t *testing.T
 	assert.Contains(t, output.String(), `Unknown startup option "bad-option"`)
 }
 
-func TestRunInteractiveDefaultCommandRunsOnboardBeforeSelection(t *testing.T) {
+func TestRunInteractiveDefaultCommandStopsAfterOnboardOnFirstRun(t *testing.T) {
 	originalIsInteractive := defaultCommandIsInteractive
 	originalOnboard := runStartupOnboard
 	originalOnboardComplete := startupOnboardComplete
 	originalSelector := defaultCommandSelector
 	originalWeb := runDefaultWebCommand
+	originalAgent := runDefaultAgentCommand
+	originalTUI := runDefaultTUICommand
 	originalOutput := defaultCommandOutput
 	t.Cleanup(func() {
 		defaultCommandIsInteractive = originalIsInteractive
@@ -167,6 +169,8 @@ func TestRunInteractiveDefaultCommandRunsOnboardBeforeSelection(t *testing.T) {
 		startupOnboardComplete = originalOnboardComplete
 		defaultCommandSelector = originalSelector
 		runDefaultWebCommand = originalWeb
+		runDefaultAgentCommand = originalAgent
+		runDefaultTUICommand = originalTUI
 		defaultCommandOutput = originalOutput
 	})
 
@@ -179,18 +183,31 @@ func TestRunInteractiveDefaultCommandRunsOnboardBeforeSelection(t *testing.T) {
 		return false
 	}
 	startupOnboardComplete = func() bool { return onboardComplete }
-	defaultCommandSelector = func() (string, error) { return "web", nil }
+	selectorCalled := false
+	defaultCommandSelector = func() (string, error) {
+		selectorCalled = true
+		return "web", nil
+	}
 
-	called := false
+	launched := false
 	runDefaultWebCommand = func() error {
-		called = true
+		launched = true
+		return nil
+	}
+	runDefaultAgentCommand = func() error {
+		launched = true
+		return nil
+	}
+	runDefaultTUICommand = func() error {
+		launched = true
 		return nil
 	}
 
 	err := runInteractiveDefaultCommand()
 	require.NoError(t, err)
 	assert.True(t, onboardComplete)
-	assert.True(t, called)
+	assert.False(t, selectorCalled)
+	assert.False(t, launched)
 }
 
 func TestNormalizeStartupChoice(t *testing.T) {

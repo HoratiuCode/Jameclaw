@@ -132,9 +132,7 @@ func runInteractiveDefaultCommand() error {
 		if cancelled := runStartupOnboard(); cancelled {
 			return nil
 		}
-		if !startupOnboardComplete() {
-			return nil
-		}
+		return nil
 	}
 
 	for {
