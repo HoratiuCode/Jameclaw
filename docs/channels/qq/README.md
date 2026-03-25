@@ -30,9 +30,9 @@ JameClaw provides QQ support via the official Bot API from the QQ Open Platform.
 
 ### Quick Setup (Recommended)
 
-The QQ Open Platform provides a one-click creation entry:
+The QQ Open Platform provides a one-click creation entry for JameClaw QQ bots:
 
-1. Open [QQ Bot Quick Create](https://q.qq.com/qqbot/openclaw/index.html) and log in by scanning the QR code
+1. Open [QQ Bot Quick Create](https://q.qq.com/) and log in by scanning the QR code
 2. The system automatically creates a bot — copy the **App ID** and **App Secret**
 3. Fill in the credentials in the JameClaw configuration file
 4. Run `jameclaw gateway` to start the service

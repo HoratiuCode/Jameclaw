@@ -222,9 +222,9 @@ jameclaw gateway
 
 **Quick setup (recommended)**
 
-QQ Open Platform provides a one-click setup page for OpenClaw-compatible bots:
+QQ Open Platform provides a one-click setup page for JameClaw QQ bots:
 
-1. Open [QQ Bot Quick Start](https://q.qq.com/qqbot/openclaw/index.html) and scan the QR code to log in
+1. Open [QQ Bot Quick Start](https://q.qq.com/) and scan the QR code to log in
 2. A bot is created automatically — copy the **App ID** and **App Secret**
 3. Configure JameClaw:
 

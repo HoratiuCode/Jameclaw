@@ -11,8 +11,6 @@
     <br>
     <a href="https://jameclaw.vercel.app/"><img src="https://img.shields.io/badge/Website-jameclaw.vercel.app-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
     <a href="https://docs.jameclaw.io/"><img src="https://img.shields.io/badge/Docs-Official-007acc?style=flat&logo=read-the-docs&logoColor=white" alt="Docs"></a>
-    <br>
-    <a href="https://discord.gg/V4sAZ9XWpN"><img src="https://img.shields.io/badge/Discord-Community-4c60eb?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 
 **English**
@@ -495,4 +493,3 @@ For detailed guides beyond this README:
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
 | [Tools Configuration](docs/tools_configuration.md) | Per-tool enable/disable, exec policies, MCP, Skills |
 | [Hardware Compatibility](docs/hardware-compatibility.md) | Tested boards, minimum requirements |
-
