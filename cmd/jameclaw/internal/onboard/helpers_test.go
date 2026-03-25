@@ -121,6 +121,75 @@ func TestPromptTelegramSetupAcceptsUsernameAllowFrom(t *testing.T) {
 	}
 }
 
+func TestReadAgentSignatureEmojiDefaultsWhenMissing(t *testing.T) {
+	if got := readAgentSignatureEmoji(t.TempDir()); got != defaultAgentSignatureEmoji {
+		t.Fatalf("readAgentSignatureEmoji() = %q, want %q", got, defaultAgentSignatureEmoji)
+	}
+}
+
+func TestApplyAgentSignatureEmojiUpdatesAgentTemplate(t *testing.T) {
+	targetDir := t.TempDir()
+
+	if err := copyEmbeddedToTarget(targetDir); err != nil {
+		t.Fatalf("copyEmbeddedToTarget() error = %v", err)
+	}
+	if err := applyAgentSignatureEmoji(targetDir, "🤖"); err != nil {
+		t.Fatalf("applyAgentSignatureEmoji() error = %v", err)
+	}
+
+	agentPath := filepath.Join(targetDir, "AGENT.md")
+	data, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", agentPath, err)
+	}
+	if !strings.Contains(string(data), "Your name is JameClaw 🤖.") {
+		t.Fatalf("AGENT.md did not contain updated signature:\n%s", string(data))
+	}
+}
+
+func TestPromptAgentSignatureEmojiKeepsCurrentWhenBlank(t *testing.T) {
+	targetDir := t.TempDir()
+
+	if err := copyEmbeddedToTarget(targetDir); err != nil {
+		t.Fatalf("copyEmbeddedToTarget() error = %v", err)
+	}
+	if err := applyAgentSignatureEmoji(targetDir, "🦀"); err != nil {
+		t.Fatalf("applyAgentSignatureEmoji() setup error = %v", err)
+	}
+
+	got, err := promptAgentSignatureEmoji(newLineReader("\n"), targetDir, "🦀")
+	if err != nil {
+		t.Fatalf("promptAgentSignatureEmoji() error = %v", err)
+	}
+	if got != "🦀" {
+		t.Fatalf("promptAgentSignatureEmoji() = %q, want %q", got, "🦀")
+	}
+
+	if current := readAgentSignatureEmoji(targetDir); current != "🦀" {
+		t.Fatalf("readAgentSignatureEmoji() after prompt = %q, want %q", current, "🦀")
+	}
+}
+
+func TestPromptAgentSignatureEmojiSupportsComplexEmoji(t *testing.T) {
+	targetDir := t.TempDir()
+
+	if err := copyEmbeddedToTarget(targetDir); err != nil {
+		t.Fatalf("copyEmbeddedToTarget() error = %v", err)
+	}
+
+	got, err := promptAgentSignatureEmoji(newLineReader("🧑‍💻\n"), targetDir, defaultAgentSignatureEmoji)
+	if err != nil {
+		t.Fatalf("promptAgentSignatureEmoji() error = %v", err)
+	}
+	if got != "🧑‍💻" {
+		t.Fatalf("promptAgentSignatureEmoji() = %q, want %q", got, "🧑‍💻")
+	}
+
+	if current := readAgentSignatureEmoji(targetDir); current != "🧑‍💻" {
+		t.Fatalf("readAgentSignatureEmoji() after prompt = %q, want %q", current, "🧑‍💻")
+	}
+}
+
 func newLineReader(input string) *bufio.Reader {
 	return bufio.NewReader(strings.NewReader(input))
 }

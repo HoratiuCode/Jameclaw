@@ -42,8 +42,14 @@ type onboardModelOption struct {
 type onboardSelection struct {
 	modelName       string
 	modelConfigured bool
+	signatureEmoji  string
 	telegramEnabled bool
 }
+
+const (
+	defaultAgentSignatureEmoji = "🦐"
+	agentNameLinePrefix        = "Your name is JameClaw"
+)
 
 var onboardModelOptions = []onboardModelOption{
 	{
@@ -166,9 +172,13 @@ func onboard(encrypt bool) bool {
 	}
 
 	workspace := cfg.WorkspacePath()
+	existingSignature := readAgentSignatureEmoji(workspace)
 	createWorkspaceTemplates(workspace)
+	if err := applyAgentSignatureEmoji(workspace, existingSignature); err != nil {
+		fmt.Fprintf(onboardOutput, "Error applying agent signature: %v\n", err)
+	}
 
-	selection, wizardErr := runOnboardWizard(cfg, configExists, encrypt, configPath, workspace)
+	selection, wizardErr := runOnboardWizard(cfg, configExists, encrypt, configPath, workspace, existingSignature)
 	if wizardErr != nil {
 		fmt.Fprintf(onboardOutput, "Error during onboarding: %v\n", wizardErr)
 		os.Exit(1)
@@ -227,6 +237,9 @@ func renderOnboardSummary(configExists, encrypt bool, configPath, workspace stri
 		onboardWriteLine("  %s│%s OpenRouter: https://openrouter.ai/keys", onboardANSIRail, onboardANSIReset)
 		onboardWriteLine("  %s│%s Ollama:     https://ollama.com", onboardANSIRail, onboardANSIReset)
 	}
+
+	renderOnboardStep("◆", onboardANSIActive, "Personalization", fmt.Sprintf("Agent signature emoji: %s", selection.signatureEmoji))
+	onboardWriteLine("  %s│%s Applied to %s/AGENT.md.", onboardANSIRail, onboardANSIReset, workspace)
 
 	telegramMarker := "◇"
 	telegramColor := onboardANSIInactive
@@ -330,10 +343,11 @@ func setupSSHKey() error {
 	return nil
 }
 
-func runOnboardWizard(cfg *config.Config, configExists, encrypt bool, configPath, workspace string) (onboardSelection, error) {
+func runOnboardWizard(cfg *config.Config, configExists, encrypt bool, configPath, workspace, currentSignature string) (onboardSelection, error) {
 	reader := bufio.NewReader(onboardInput)
 	selection := onboardSelection{
 		modelConfigured: configReadyForChat(cfg),
+		signatureEmoji:  normalizeAgentSignatureEmoji(currentSignature),
 		telegramEnabled: cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.Token() != "",
 	}
 	selection.modelName = cfg.Agents.Defaults.ModelName
@@ -352,6 +366,12 @@ func runOnboardWizard(cfg *config.Config, configExists, encrypt bool, configPath
 
 	selection.modelConfigured = configReadyForChat(cfg)
 	selection.modelName = cfg.Agents.Defaults.ModelName
+
+	signatureEmoji, err := promptAgentSignatureEmoji(reader, workspace, selection.signatureEmoji)
+	if err != nil {
+		return selection, err
+	}
+	selection.signatureEmoji = signatureEmoji
 
 	if err := promptTelegramSetup(reader, cfg); err != nil {
 		return selection, err
@@ -388,6 +408,10 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 	}
 	onboardWriteLine("  %s│%s 5. Skip for now", onboardANSIRail, onboardANSIReset)
 	onboardWriteLine("  %s│%s %sKeep the current config and finish later.%s", onboardANSIRail, onboardANSIReset, onboardANSIDim, onboardANSIReset)
+
+	renderOnboardStep("◇", onboardANSIInactive, "Personalization", "Choose any emoji used by the default agent identity.")
+	onboardWriteLine("  %s│%s Current signature: %s", onboardANSIRail, onboardANSIReset, selection.signatureEmoji)
+	onboardWriteLine("  %s│%s Press Enter to keep it, or type any emoji you want, such as 🦐, 🤖, 🐙, 🧑‍💻, or 🏴‍☠️.", onboardANSIRail, onboardANSIReset)
 
 	renderOnboardStep("◇", onboardANSIInactive, "Telegram", "Optionally connect your Telegram bot right now.")
 	onboardWriteLine("  %s│%s Paste your bot token and optional allowed user ID or username.", onboardANSIRail, onboardANSIReset)
@@ -497,6 +521,23 @@ func promptTelegramSetup(reader *bufio.Reader, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+func promptAgentSignatureEmoji(reader *bufio.Reader, workspace, current string) (string, error) {
+	current = normalizeAgentSignatureEmoji(current)
+	value, err := promptLine(reader, fmt.Sprintf("Agent signature emoji, any emoji allowed (default %s)", current))
+	if err != nil {
+		return current, err
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = current
+	}
+	value = normalizeAgentSignatureEmoji(value)
+	if err := applyAgentSignatureEmoji(workspace, value); err != nil {
+		return current, err
+	}
+	return value, nil
 }
 
 func promptLine(reader *bufio.Reader, label string) (string, error) {
@@ -631,4 +672,73 @@ func copyEmbeddedToTarget(targetDir string) error {
 	})
 
 	return err
+}
+
+func normalizeAgentSignatureEmoji(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultAgentSignatureEmoji
+	}
+	return value
+}
+
+func readAgentSignatureEmoji(workspace string) string {
+	agentPath := filepath.Join(workspace, "AGENT.md")
+	data, err := os.ReadFile(agentPath)
+	if err != nil {
+		return defaultAgentSignatureEmoji
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, agentNameLinePrefix) {
+			continue
+		}
+		signature := strings.TrimSpace(strings.TrimPrefix(trimmed, agentNameLinePrefix))
+		signature = strings.TrimSuffix(signature, ".")
+		return normalizeAgentSignatureEmoji(signature)
+	}
+
+	return defaultAgentSignatureEmoji
+}
+
+func applyAgentSignatureEmoji(workspace, signature string) error {
+	agentPath := filepath.Join(workspace, "AGENT.md")
+	data, err := os.ReadFile(agentPath)
+	if err != nil {
+		return err
+	}
+
+	signature = normalizeAgentSignatureEmoji(signature)
+	replacementLine := fmt.Sprintf("%s %s.", agentNameLinePrefix, signature)
+
+	lines := strings.Split(string(data), "\n")
+	replaced := false
+	insertAfter := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "You are Jame, the default assistant for this workspace.") {
+			insertAfter = i
+		}
+		if strings.HasPrefix(trimmed, agentNameLinePrefix) {
+			lines[i] = replacementLine
+			replaced = true
+			break
+		}
+	}
+
+	if !replaced {
+		if insertAfter >= 0 {
+			lines = append(lines[:insertAfter+1], append([]string{replacementLine}, lines[insertAfter+1:]...)...)
+		} else {
+			lines = append([]string{replacementLine}, lines...)
+		}
+	}
+
+	output := strings.Join(lines, "\n")
+	if !strings.HasSuffix(output, "\n") {
+		output += "\n"
+	}
+
+	return os.WriteFile(agentPath, []byte(output), 0o644)
 }
