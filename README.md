@@ -496,14 +496,3 @@ For detailed guides beyond this README:
 | [Tools Configuration](docs/tools_configuration.md) | Per-tool enable/disable, exec policies, MCP, Skills |
 | [Hardware Compatibility](docs/hardware-compatibility.md) | Tested boards, minimum requirements |
 
-## 🤝 Contribute & Roadmap
-
-PRs welcome! The codebase is intentionally small and readable.
-
-See our [Community Roadmap](./issues/988) and [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-Developer group building, join after your first merged PR!
-
-Community:
-
-Discord: <https://discord.gg/V4sAZ9XWpN>
