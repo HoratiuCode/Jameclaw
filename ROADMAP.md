@@ -70,7 +70,7 @@
 
 * **Multi-Agent Collaboration**
   * [**Basic Multi-Agent**](https://github.com/sipeed/jameclaw/issues/294) implement
-  * [**Model Routing**](https://github.com/sipeed/jameclaw/issues/295): "Smart Routing" — dispatch simple tasks to small/local models (fast/cheap) and complex tasks to SOTA models (smart).
+  * [**Model Routing**](https://github.com/sipeed/jameclaw/issues/295): "Smart Routing" — dispatch simple tasks to small/local models for affordable high performance, and complex tasks to SOTA models when deeper capability is needed.
   * [**Swarm Mode**](https://github.com/sipeed/jameclaw/issues/284): Collaboration between multiple JameClaw instances on the same network.
   * [**AIEOS**](https://github.com/sipeed/jameclaw/issues/296): Exploring AI-Native Operating System interaction paradigms.
 
