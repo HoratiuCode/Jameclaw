@@ -188,7 +188,7 @@ jameclaw-launcher-tui
 ```
 
 <p align="center">
-<img src="assets/launcher-tui.jpg" alt="TUI Launcher" width="600">
+<img src="assets/launcher-tui.png" alt="TUI Launcher" width="600">
 </p>
 
 **Getting started:** 
