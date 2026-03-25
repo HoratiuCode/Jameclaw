@@ -127,7 +127,7 @@ If port `18800` is already in use, stop the existing launcher or start on anothe
 > ```
 
 <p align="center">
-<img src="assets/launcher-webui.jpg" alt="WebUI Launcher" width="600">
+<img src="assets/launcher-webui.png" alt="WebUI Launcher" width="600">
 </p>
 
 **Getting started:** 
