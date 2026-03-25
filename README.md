@@ -9,9 +9,9 @@
     <img src="https://img.shields.io/badge/Arch-x86__64%2C%20ARM64%2C%20MIPS%2C%20RISC--V%2C%20LoongArch-blue" alt="Hardware">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <br>
-    <img src="https://img.shields.io/badge/Agent-Local--First-c84b31?style=flat" alt="Local-First Agent">
-    <img src="https://img.shields.io/badge/Interface-Web%20Console-f4a261?style=flat" alt="Web Console">
-    <img src="https://img.shields.io/badge/Interface-TUI%20Launcher-2a9d8f?style=flat" alt="TUI Launcher">
+    <img src="https://img.shields.io/badge/Agent-Evolving-c84b31?style=flat" alt="Evolving Agent">
+    <img src="https://img.shields.io/badge/Focus-Helpful%20by%20Design-f4a261?style=flat" alt="Helpful by Design">
+    <img src="https://img.shields.io/badge/Mission-Better%20Workflows-2a9d8f?style=flat" alt="Better Workflows">
     <img src="https://img.shields.io/badge/Mode-Terminal%20Agent-264653?style=flat&logo=gnu-bash&logoColor=white" alt="Terminal Agent">
     <img src="https://img.shields.io/badge/Context-Workspace%20Aware-e76f51?style=flat" alt="Workspace Aware">
     <br>
