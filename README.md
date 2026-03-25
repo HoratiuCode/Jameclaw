@@ -66,6 +66,8 @@ For broader product docs, use the official docs site. This README is intentional
 
 Visit **[jameclaw.vercel.app](https://jameclaw.vercel.app/)** — the official website auto-detects your platform and provides one-click download. No need to manually pick an architecture.
 
+Install and setup docs: **[jameclaw.vercel.app/docs](https://jameclaw.vercel.app/docs/)**.
+
 ### Download precompiled binary
 
 Alternatively, download the binary for your platform from the [GitHub Releases](./releases) page.
