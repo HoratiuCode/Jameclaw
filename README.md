@@ -68,6 +68,14 @@ Visit **[jameclaw.vercel.app](https://jameclaw.vercel.app/)** — the official w
 
 Install and setup docs: **[jameclaw.vercel.app/docs](https://jameclaw.vercel.app/docs/)**.
 
+After installing the binary, the first setup step is:
+
+```bash
+jameclaw install
+```
+
+`jameclaw` by itself no longer starts onboarding automatically. On a fresh machine, or after `jameclaw uninstall`, run `jameclaw install` first, then run `jameclaw` normally.
+
 ### Download precompiled binary
 
 Alternatively, download the binary for your platform from the [GitHub Releases](./releases) page.
@@ -140,6 +148,8 @@ Open the WebUI, then:
 **4)** Review launcher/config settings and start the gateway  
 **5)** Use the chat and logs pages to verify everything is working
 
+If you are using the core CLI without the launcher, the first command is `jameclaw install`, not bare `jameclaw`.
+
 For detailed WebUI documentation, see [docs.jameclaw.io](https://docs.jameclaw.io).
 
 <details>
@@ -211,7 +221,7 @@ Give your decade-old phone a second life! Turn it into a smart AI Assistant with
 wget <releases-url>/latest/download/jameclaw_Linux_arm64.tar.gz
 tar xzf jameclaw_Linux_arm64.tar.gz
 pkg install proot
-termux-chroot ./jameclaw onboard   # chroot provides a standard Linux filesystem layout
+termux-chroot ./jameclaw install   # chroot provides a standard Linux filesystem layout
 ```
 
 Then follow the Terminal Launcher section below to complete configuration.
@@ -228,10 +238,12 @@ For minimal environments where only the `jameclaw` core binary is available (no 
 **1. Initialize**
 
 ```bash
-jameclaw onboard
+jameclaw install
 ```
 
 This creates `~/.jameclaw/config.json` and the workspace directory.
+
+After setup is complete, run `jameclaw` again to choose how to start, or use `jameclaw agent` directly.
 
 **2. Configure** (`~/.jameclaw/config.json`)
 
@@ -438,7 +450,9 @@ For full MCP configuration (stdio, SSE, HTTP transports, Tool Discovery), see [T
 
 | Command                   | Description                      |
 | ------------------------- | -------------------------------- |
-| `jameclaw onboard`        | Initialize config & workspace    |
+| `jameclaw install`        | Initialize config & workspace    |
+| `jameclaw onboard`        | Legacy alias for install         |
+| `jameclaw uninstall`      | Remove local state and reset setup |
 | `jameclaw agent -m "..."` | Chat with the agent              |
 | `jameclaw agent`          | Interactive chat mode            |
 | `jameclaw gateway`        | Start the gateway                |
