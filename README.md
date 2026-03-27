@@ -15,8 +15,8 @@
     <img src="https://img.shields.io/badge/Mode-Terminal%20Agent-264653?style=flat&logo=gnu-bash&logoColor=white" alt="Terminal Agent">
     <img src="https://img.shields.io/badge/Context-Workspace%20Aware-e76f51?style=flat" alt="Workspace Aware">
     <br>
-    <a href="https://jameclaw.vercel.app/"><img src="https://img.shields.io/badge/Website-jameclaw.vercel.app-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
-    <a href="https://jameclaw.vercel.app/docs/"><img src="https://img.shields.io/badge/Docs-Official-007acc?style=flat&logo=read-the-docs&logoColor=white" alt="Docs"></a>
+    <a href="https://jameclaw.xyz/"><img src="https://img.shields.io/badge/Website-jameclaw.xyz-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
+    <a href="https://jameclaw.xyz/docs/"><img src="https://img.shields.io/badge/Docs-Official-007acc?style=flat&logo=read-the-docs&logoColor=white" alt="Docs"></a>
   </p>
 
 **English**
@@ -59,7 +59,7 @@ All of those entry points share the same local runtime state under `~/.jameclaw`
 > **Security Notice**
 >
 > * **NO CRYPTO:** JameClaw has **not** issued any official tokens or cryptocurrency. All claims on `pump.fun` or other trading platforms are **scams**.
-> * **OFFICIAL DOMAIN:** The **ONLY** official website is **[jameclaw.vercel.app](https://jameclaw.vercel.app/)**
+> * **OFFICIAL DOMAIN:** The **ONLY** official website is **[jameclaw.xyz](https://jameclaw.xyz/)**
 > * **BEWARE:** Many `.ai/.org/.com/.net/...` domains have been registered by third parties. Do not trust them.
 > * **NOTE:** JameClaw is in early rapid development. There may be unresolved security issues. Do not deploy to production before v1.0.
 > * **NOTE:** JameClaw has recently merged many PRs. Recent builds may use 10-20MB RAM. Resource optimization is planned after feature stabilization.
@@ -85,11 +85,11 @@ For broader product docs, use the official docs site. This README is intentional
 
 ## 📦 Install
 
-### Download from jameclaw.vercel.app (Recommended)
+### Download from jameclaw.xyz (Recommended)
 
-Visit **[jameclaw.vercel.app](https://jameclaw.vercel.app/)** — the official website auto-detects your platform and provides one-click download. No need to manually pick an architecture.
+Visit **[jameclaw.xyz](https://jameclaw.xyz/)** — the official website auto-detects your platform and provides one-click download. No need to manually pick an architecture.
 
-Install and setup docs: **[jameclaw.vercel.app/docs](https://jameclaw.vercel.app/docs/)**.
+Install and setup docs: **[jameclaw.xyz/docs](https://jameclaw.xyz/docs/)**.
 
 After installing the binary, the first setup step is:
 
@@ -154,7 +154,7 @@ The WebUI Launcher is the main workflow in this repo. It provides a browser-base
 
 **Option 1: Double-click (Desktop)**
 
-After downloading from [jameclaw.vercel.app](https://jameclaw.vercel.app/), double-click `jameclaw-launcher` (or `jameclaw-launcher.exe` on Windows). Your browser will open automatically at `http://localhost:18800`.
+After downloading from [jameclaw.xyz](https://jameclaw.xyz/), double-click `jameclaw-launcher` (or `jameclaw-launcher.exe` on Windows). Your browser will open automatically at `http://localhost:18800`.
 
 **Option 2: Command line**
 
