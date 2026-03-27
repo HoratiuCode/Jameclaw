@@ -29,11 +29,19 @@ type autoStartResponse struct {
 	Message   string `json:"message,omitempty"`
 }
 
+type hostInfoResponse struct {
+	Hostname      string `json:"hostname"`
+	Username      string `json:"username"`
+	DocumentsPath string `json:"documents_path"`
+	HomePath      string `json:"home_path"`
+}
+
 var errAutoStartUnsupported = errors.New("autostart is not supported on this platform")
 
 func (h *Handler) registerStartupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system/autostart", h.handleGetAutoStart)
 	mux.HandleFunc("PUT /api/system/autostart", h.handleSetAutoStart)
+	mux.HandleFunc("GET /api/system/host-info", h.handleGetHostInfo)
 }
 
 func (h *Handler) handleGetAutoStart(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +88,36 @@ func (h *Handler) handleSetAutoStart(w http.ResponseWriter, r *http.Request) {
 		Supported: supported,
 		Platform:  runtime.GOOS,
 		Message:   message,
+	})
+}
+
+func (h *Handler) handleGetHostInfo(w http.ResponseWriter, r *http.Request) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to resolve hostname: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to resolve home directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	username := strings.TrimSpace(os.Getenv("USER"))
+	if username == "" {
+		username = strings.TrimSpace(os.Getenv("USERNAME"))
+	}
+	if username == "" {
+		username = filepath.Base(home)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(hostInfoResponse{
+		Hostname:      hostname,
+		Username:      username,
+		DocumentsPath: filepath.Join(home, "Documents"),
+		HomePath:      home,
 	})
 }
 

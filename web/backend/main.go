@@ -113,6 +113,10 @@ func main() {
 		configPath = flag.Arg(0)
 	}
 
+	if err := initLauncherAccessToken(); err != nil {
+		logger.Fatalf("Failed to initialize launcher access token: %v", err)
+	}
+
 	absPath, err := filepath.Abs(configPath)
 	if err != nil {
 		logger.Fatalf("Failed to resolve config path: %v", err)
@@ -182,28 +186,29 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Invalid allowed CIDR configuration: %v", err)
 	}
+	authenticatedMux := middleware.LocalSessionAuth(launcherAccessToken, accessControlledMux)
 
 	// Apply middleware stack
 	handler := middleware.Recoverer(
 		middleware.Logger(
-			middleware.JSONContentType(accessControlledMux),
+			middleware.JSONContentType(authenticatedMux),
 		),
 	)
 
 	// Print startup banner (only in console mode)
-	if enableConsole {
-		fmt.Print(utils.Banner)
-		fmt.Println()
-		fmt.Println("  Open the following URL in your browser:")
-		fmt.Println()
-		fmt.Printf("    >> http://localhost:%s <<\n", effectivePort)
-		if effectivePublic {
-			if ip := utils.GetLocalIP(); ip != "" {
-				fmt.Printf("    >> http://%s:%s <<\n", ip, effectivePort)
+		if enableConsole {
+			fmt.Print(utils.Banner)
+			fmt.Println()
+			fmt.Println("  Open the following URL in your browser:")
+			fmt.Println()
+			fmt.Printf("    >> %s <<\n", launcherOpenURL(fmt.Sprintf("http://localhost:%s", effectivePort)))
+			if effectivePublic {
+				if ip := utils.GetLocalIP(); ip != "" {
+					fmt.Printf("    >> %s <<\n", launcherOpenURL(fmt.Sprintf("http://%s:%s", ip, effectivePort)))
+				}
 			}
+			fmt.Println()
 		}
-		fmt.Println()
-	}
 
 	// Log startup info to file
 	logger.InfoC("web", fmt.Sprintf("Server will listen on http://localhost:%s", effectivePort))

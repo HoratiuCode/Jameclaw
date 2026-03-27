@@ -11,6 +11,13 @@ export interface LauncherConfig {
   allowed_cidrs: string[]
 }
 
+export interface HostInfo {
+  hostname: string
+  username: string
+  documents_path: string
+  home_path: string
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, options)
   if (!res.ok) {
@@ -59,4 +66,8 @@ export async function setLauncherConfig(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   })
+}
+
+export async function getHostInfo(): Promise<HostInfo> {
+  return request<HostInfo>("/api/system/host-info")
 }

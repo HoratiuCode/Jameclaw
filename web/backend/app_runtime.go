@@ -58,5 +58,5 @@ func openBrowser() error {
 	if serverAddr == "" {
 		return fmt.Errorf("server address not set")
 	}
-	return utils.OpenBrowser(serverAddr)
+	return utils.OpenBrowser(launcherOpenURL(serverAddr))
 }
