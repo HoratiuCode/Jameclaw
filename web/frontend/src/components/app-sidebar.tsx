@@ -10,10 +10,12 @@ import {
   IconSparkles,
   IconTools,
 } from "@tabler/icons-react"
+import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
+import { getAppStatus } from "@/api/status"
 import {
   Collapsible,
   CollapsibleContent,
@@ -22,6 +24,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -75,6 +78,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     showAllChannels,
     toggleShowAllChannels,
   } = useSidebarChannels({ t })
+  const { data: appStatus } = useQuery({
+    queryKey: ["app-status"],
+    queryFn: getAppStatus,
+    staleTime: 60_000,
+  })
 
   const navGroups: NavGroup[] = React.useMemo(() => {
     return [
@@ -232,6 +240,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </Collapsible>
         ))}
       </SidebarContent>
+      <SidebarFooter className="bg-background pt-0">
+        <div className="border-sidebar-border/70 from-sidebar via-sidebar-accent/20 to-sidebar rounded-lg border bg-gradient-to-br px-2.5 py-2 shadow-[0_10px_30px_-20px_rgba(0,0,0,0.65)]">
+          <div className="flex items-center gap-1.5">
+            <span className="relative flex size-2 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500/70" />
+              <span className="relative inline-flex size-2 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.95)]" />
+            </span>
+            <span className="text-sidebar-foreground text-[10px] font-semibold tracking-[0.18em] uppercase">
+              Version
+            </span>
+          </div>
+          <p className="text-sidebar-foreground mt-1 text-xs font-medium">
+            {appStatus?.version ? `Version ${appStatus.version}` : "Version 283"}
+          </p>
+        </div>
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )

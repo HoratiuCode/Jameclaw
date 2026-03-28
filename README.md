@@ -103,6 +103,17 @@ jameclaw install
 
 Alternatively, download the binary for your platform from the [GitHub Releases](./releases) page.
 
+### Install via npm
+
+If you prefer a Node-based install flow, JameClaw can also be installed through npm. The npm package is a thin wrapper that downloads the native release binary for your platform during install.
+
+```bash
+npm install -g jameclaw
+jameclaw install
+```
+
+If you want to skip the download during package installation, set `JAMECLAW_NPM_SKIP_DOWNLOAD=1` and let the wrapper fetch the binary on first run instead.
+
 ### Build from source (for development)
 
 ```bash

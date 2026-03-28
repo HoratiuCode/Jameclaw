@@ -31,6 +31,8 @@ const starterPrompts = [
   "Review my config and explain what I should improve.",
 ]
 
+const shellLaunchSplashCookie = "jameclaw_shell_launch"
+
 function StepCard({
   step,
   title,
@@ -59,28 +61,49 @@ function StepCard({
   )
 }
 
-function HostSummaryCard({ hostInfo }: { hostInfo: HostInfo | null }) {
-  if (!hostInfo) {
+function HostSummaryCard({
+  hostInfo,
+  visible,
+}: {
+  hostInfo: HostInfo | null
+  visible: boolean
+}) {
+  if (!hostInfo || !visible) {
     return null
   }
 
   return (
-    <div className="bg-background/85 mb-6 rounded-2xl border px-4 py-3 shadow-sm backdrop-blur">
-      <div className="text-muted-foreground mb-2 text-[11px] font-semibold tracking-[0.24em] uppercase">
-        This Web Console
-      </div>
-      <div className="grid gap-2 text-sm md:grid-cols-3">
-        <div className="flex items-center gap-2">
-          <IconDeviceDesktop className="text-muted-foreground h-4 w-4" />
-          <span className="truncate font-medium">{hostInfo.hostname}</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(239,68,68,0.22),transparent_42%),rgba(10,10,10,0.74)] p-6 backdrop-blur-md">
+      <div className="from-red-50/90 via-background to-red-100/50 w-full max-w-5xl rounded-[2rem] border border-red-200/70 bg-gradient-to-br px-8 py-10 shadow-[0_28px_90px_-30px_rgba(127,29,29,0.65)]">
+        <div className="mb-6 text-center text-xs font-semibold tracking-[0.36em] uppercase text-red-700/80">
+          This Web Console
         </div>
-        <div className="flex items-center gap-2">
-          <IconUser className="text-muted-foreground h-4 w-4" />
-          <span className="truncate">{hostInfo.username}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <IconFolder className="text-muted-foreground h-4 w-4" />
-          <span className="truncate">{hostInfo.documents_path}</span>
+        <div className="grid gap-4 text-center md:grid-cols-3">
+          <div className="rounded-2xl border border-red-200/70 bg-white/70 px-5 py-6">
+            <IconDeviceDesktop className="mx-auto mb-3 h-6 w-6 text-red-500" />
+            <div className="mb-1 text-[11px] font-semibold tracking-[0.22em] uppercase text-red-700/75">
+              Device
+            </div>
+            <span className="block truncate text-lg font-semibold">
+              {hostInfo.hostname}
+            </span>
+          </div>
+          <div className="rounded-2xl border border-red-200/70 bg-white/70 px-5 py-6">
+            <IconUser className="mx-auto mb-3 h-6 w-6 text-red-500" />
+            <div className="mb-1 text-[11px] font-semibold tracking-[0.22em] uppercase text-red-700/75">
+              User
+            </div>
+            <span className="block truncate text-lg">{hostInfo.username}</span>
+          </div>
+          <div className="rounded-2xl border border-red-200/70 bg-white/70 px-5 py-6">
+            <IconFolder className="mx-auto mb-3 h-6 w-6 text-red-500" />
+            <div className="mb-1 text-[11px] font-semibold tracking-[0.22em] uppercase text-red-700/75">
+              Folder
+            </div>
+            <span className="block truncate text-lg">
+              {hostInfo.documents_path}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -95,14 +118,26 @@ export function ChatEmptyState({
 }: ChatEmptyStateProps) {
   const { t } = useTranslation()
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null)
+  const [showHostSplash, setShowHostSplash] = useState(false)
 
   useEffect(() => {
+    const shouldShowSplash = document.cookie
+      .split("; ")
+      .some((part) => part.startsWith(`${shellLaunchSplashCookie}=`))
+
+    if (!shouldShowSplash) {
+      return
+    }
+
+    document.cookie = `${shellLaunchSplashCookie}=; Path=/; Max-Age=0; SameSite=Lax`
+
     let active = true
 
     void getHostInfo()
       .then((data) => {
         if (active) {
           setHostInfo(data)
+          setShowHostSplash(true)
         }
       })
       .catch(() => {
@@ -116,10 +151,24 @@ export function ChatEmptyState({
     }
   }, [])
 
+  useEffect(() => {
+    if (!showHostSplash) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setShowHostSplash(false)
+    }, 1000)
+
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [showHostSplash])
+
   if (!hasConfiguredModels) {
     return (
       <div>
-        <HostSummaryCard hostInfo={hostInfo} />
+        <HostSummaryCard hostInfo={hostInfo} visible={showHostSplash} />
         <div className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-red-50 via-background to-background p-8 shadow-sm">
           <div className="absolute top-0 right-0 h-40 w-40 rounded-full bg-red-400/10 blur-3xl" />
           <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
@@ -178,7 +227,7 @@ export function ChatEmptyState({
   if (!defaultModelName) {
     return (
       <div>
-        <HostSummaryCard hostInfo={hostInfo} />
+        <HostSummaryCard hostInfo={hostInfo} visible={showHostSplash} />
         <div className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-red-50 via-background to-lime-50 p-8 shadow-sm">
           <div className="absolute bottom-0 left-0 h-32 w-32 rounded-full bg-red-400/10 blur-3xl" />
           <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(18rem,0.95fr)]">
@@ -230,7 +279,7 @@ export function ChatEmptyState({
   if (!isConnected) {
     return (
       <div>
-        <HostSummaryCard hostInfo={hostInfo} />
+        <HostSummaryCard hostInfo={hostInfo} visible={showHostSplash} />
         <div className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-emerald-50 via-background to-background p-8 shadow-sm">
           <div className="absolute top-6 right-6 h-28 w-28 rounded-full bg-emerald-400/10 blur-3xl" />
           <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(18rem,0.95fr)]">
@@ -277,7 +326,7 @@ export function ChatEmptyState({
 
   return (
     <div>
-      <HostSummaryCard hostInfo={hostInfo} />
+      <HostSummaryCard hostInfo={hostInfo} visible={showHostSplash} />
       <div className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-zinc-50 via-background to-background p-8 shadow-sm">
         <div className="absolute right-6 bottom-4 h-36 w-36 rounded-full bg-zinc-300/20 blur-3xl" />
         <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(18rem,0.95fr)]">

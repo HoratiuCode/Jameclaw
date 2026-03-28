@@ -1,0 +1,34 @@
+{
+  "name": "jameclaw",
+  "version": "0.0.0-dev",
+  "description": "NPM wrapper for the JameClaw native CLI binary",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sipeed/jameclaw.git"
+  },
+  "homepage": "https://jameclaw.xyz/",
+  "bugs": {
+    "url": "https://github.com/sipeed/jameclaw/issues"
+  },
+  "bin": {
+    "jameclaw": "./bin/jameclaw.js"
+  },
+  "files": [
+    "bin",
+    "scripts"
+  ],
+  "scripts": {
+    "postinstall": "node ./scripts/install.js"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "go",
+    "jameclaw"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

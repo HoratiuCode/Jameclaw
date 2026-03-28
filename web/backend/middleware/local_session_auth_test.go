@@ -38,11 +38,14 @@ func TestLocalSessionAuth_QueryTokenSetsCookieAndRedirects(t *testing.T) {
 	}
 
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("cookie count = %d, want 1", len(cookies))
+	if len(cookies) != 2 {
+		t.Fatalf("cookie count = %d, want 2", len(cookies))
 	}
 	if cookies[0].Name != launcherAccessCookieName || cookies[0].Value != "secret-token" {
 		t.Fatalf("unexpected cookie = %+v", cookies[0])
+	}
+	if cookies[1].Name != launcherSplashCookieName || cookies[1].Value != "1" {
+		t.Fatalf("unexpected splash cookie = %+v", cookies[1])
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 const (
 	launcherAccessCookieName = "jameclaw_launcher_session"
 	launcherAccessQueryParam = "access_token"
+	launcherSplashCookieName = "jameclaw_shell_launch"
 )
 
 // LocalSessionAuth requires a launcher bootstrap token or an established
@@ -32,6 +33,13 @@ func LocalSessionAuth(accessToken string, next http.Handler) http.Handler {
 				Path:     "/",
 				HttpOnly: true,
 				SameSite: http.SameSiteStrictMode,
+			})
+			http.SetCookie(w, &http.Cookie{
+				Name:     launcherSplashCookieName,
+				Value:    "1",
+				Path:     "/",
+				MaxAge:   15,
+				SameSite: http.SameSiteLaxMode,
 			})
 
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {

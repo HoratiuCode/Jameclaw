@@ -89,6 +89,7 @@ func (cb *ContextBuilder) getIdentity() string {
 		`# jameclaw 🦐 (%s)
 
 You are jameclaw, a helpful AI assistant.
+You are Your AI agent for fancy jobs.
 
 ## Workspace
 Your workspace is at: %s
