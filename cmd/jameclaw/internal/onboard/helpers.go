@@ -7,9 +7,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -27,6 +31,8 @@ const (
 	onboardANSIBgClear  = "\033[H\033[2J"
 )
 
+var onboardTUISelectedSkillColor = tcell.NewHexColor(0x78c458)
+
 var onboardInput io.Reader = os.Stdin
 var onboardOutput io.Writer = os.Stdout
 
@@ -42,8 +48,14 @@ type onboardModelOption struct {
 type onboardSelection struct {
 	modelName       string
 	modelConfigured bool
+	skills          []string
 	signatureEmoji  string
 	telegramEnabled bool
+}
+
+type onboardSkillOption struct {
+	name        string
+	description string
 }
 
 const (
@@ -238,6 +250,13 @@ func renderOnboardSummary(configExists, encrypt bool, configPath, workspace stri
 		onboardWriteLine("  %s│%s Ollama:     https://ollama.com", onboardANSIRail, onboardANSIReset)
 	}
 
+	skillsCopy := "No builtin skills selected for the default agent."
+	if len(selection.skills) > 0 {
+		skillsCopy = fmt.Sprintf("Default agent skills: %s", strings.Join(selection.skills, ", "))
+	}
+	renderOnboardStep("◆", onboardANSIActive, "Skills", skillsCopy)
+	onboardWriteLine("  %s│%s Stored on the default agent config.", onboardANSIRail, onboardANSIReset)
+
 	renderOnboardStep("◆", onboardANSIActive, "Personalization", fmt.Sprintf("Agent signature emoji: %s", selection.signatureEmoji))
 	onboardWriteLine("  %s│%s Applied to %s/AGENT.md.", onboardANSIRail, onboardANSIReset, workspace)
 
@@ -347,6 +366,7 @@ func runOnboardWizard(cfg *config.Config, configExists, encrypt bool, configPath
 	reader := bufio.NewReader(onboardInput)
 	selection := onboardSelection{
 		modelConfigured: configReadyForChat(cfg),
+		skills:          currentOnboardSkills(cfg),
 		signatureEmoji:  normalizeAgentSignatureEmoji(currentSignature),
 		telegramEnabled: cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.Token() != "",
 	}
@@ -366,6 +386,12 @@ func runOnboardWizard(cfg *config.Config, configExists, encrypt bool, configPath
 
 	selection.modelConfigured = configReadyForChat(cfg)
 	selection.modelName = cfg.Agents.Defaults.ModelName
+
+	selectedSkills, err := promptSkillSelection(reader, cfg)
+	if err != nil {
+		return selection, err
+	}
+	selection.skills = selectedSkills
 
 	signatureEmoji, err := promptAgentSignatureEmoji(reader, workspace, selection.signatureEmoji)
 	if err != nil {
@@ -408,6 +434,15 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 	}
 	onboardWriteLine("  %s│%s 5. Skip for now", onboardANSIRail, onboardANSIReset)
 	onboardWriteLine("  %s│%s %sKeep the current config and finish later.%s", onboardANSIRail, onboardANSIReset, onboardANSIDim, onboardANSIReset)
+
+	skillOptions := loadOnboardSkillOptions()
+	skillSummary := "Choose which builtin skills the default agent should load."
+	if len(selection.skills) > 0 {
+		skillSummary = fmt.Sprintf("%d skills selected for the default agent.", len(selection.skills))
+	}
+	renderOnboardStep("◇", onboardANSIInactive, "Skills", skillSummary)
+	onboardWriteLine("  %s│%s • Use arrow keys, press Space to toggle, and Enter to confirm.", onboardANSIRail, onboardANSIReset)
+	onboardWriteLine("  %s│%s • %d builtin skills are selected by default.", onboardANSIRail, onboardANSIReset, len(skillOptions))
 
 	renderOnboardStep("◇", onboardANSIInactive, "Personalization", "Choose any emoji used by the default agent identity.")
 	onboardWriteLine("  %s│%s Current signature: %s", onboardANSIRail, onboardANSIReset, selection.signatureEmoji)
@@ -523,6 +558,67 @@ func promptTelegramSetup(reader *bufio.Reader, cfg *config.Config) error {
 	return nil
 }
 
+func promptSkillSelection(reader *bufio.Reader, cfg *config.Config) ([]string, error) {
+	options := loadOnboardSkillOptions()
+	if len(options) == 0 {
+		applySelectedSkills(cfg, nil)
+		return nil, nil
+	}
+
+	defaultSkills := currentOnboardSkills(cfg)
+	if len(defaultSkills) == 0 {
+		defaultSkills = make([]string, 0, len(options))
+		for _, option := range options {
+			defaultSkills = append(defaultSkills, option.name)
+		}
+	}
+
+	if file, ok := onboardInput.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		selected, err := promptSkillSelectionTUI(options, defaultSkills)
+		if err != nil {
+			return nil, err
+		}
+		applySelectedSkills(cfg, selected)
+		return selected, nil
+	}
+
+	onboardWriteLine("")
+	onboardWriteLine("Skills")
+	onboardWriteLine("------")
+	onboardWriteLine("Select builtin skills for the default agent. Press Enter to keep all selected.")
+	for idx, option := range options {
+		onboardWriteLine("%d. [x] %s", idx+1, option.name)
+		onboardWriteLine("   %s", option.description)
+	}
+
+	line, err := promptLine(reader, fmt.Sprintf("Selected skills [1-%d, space-separated, Enter for all]", len(options)))
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(line) == "" {
+		applySelectedSkills(cfg, defaultSkills)
+		return append([]string(nil), defaultSkills...), nil
+	}
+
+	selectedByNumber := make(map[string]struct{})
+	for _, field := range strings.Fields(line) {
+		var idx int
+		if _, scanErr := fmt.Sscanf(field, "%d", &idx); scanErr != nil || idx < 1 || idx > len(options) {
+			return nil, fmt.Errorf("unknown skill selection %q", field)
+		}
+		selectedByNumber[options[idx-1].name] = struct{}{}
+	}
+
+	selected := make([]string, 0, len(selectedByNumber))
+	for _, option := range options {
+		if _, ok := selectedByNumber[option.name]; ok {
+			selected = append(selected, option.name)
+		}
+	}
+	applySelectedSkills(cfg, selected)
+	return selected, nil
+}
+
 func promptAgentSignatureEmoji(reader *bufio.Reader, workspace, current string) (string, error) {
 	current = normalizeAgentSignatureEmoji(current)
 	value, err := promptLine(reader, fmt.Sprintf("Agent signature emoji, any emoji allowed (default %s)", current))
@@ -618,6 +714,242 @@ func lookupModelConfig(cfg *config.Config, modelName string) *config.ModelConfig
 		}
 	}
 	return nil
+}
+
+func currentOnboardSkills(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	if agent := lookupOnboardAgent(cfg); agent != nil {
+		return append([]string(nil), agent.Skills...)
+	}
+
+	options := loadOnboardSkillOptions()
+	selected := make([]string, 0, len(options))
+	for _, option := range options {
+		selected = append(selected, option.name)
+	}
+	return selected
+}
+
+func lookupOnboardAgent(cfg *config.Config) *config.AgentConfig {
+	if cfg == nil {
+		return nil
+	}
+	for i := range cfg.Agents.List {
+		if cfg.Agents.List[i].Default {
+			return &cfg.Agents.List[i]
+		}
+	}
+	for i := range cfg.Agents.List {
+		if strings.EqualFold(strings.TrimSpace(cfg.Agents.List[i].ID), "main") {
+			return &cfg.Agents.List[i]
+		}
+	}
+	return nil
+}
+
+func applySelectedSkills(cfg *config.Config, skills []string) {
+	if cfg == nil {
+		return
+	}
+
+	agent := lookupOnboardAgent(cfg)
+	if agent == nil {
+		cfg.Agents.List = append(cfg.Agents.List, config.AgentConfig{
+			ID:      "main",
+			Default: true,
+		})
+		agent = &cfg.Agents.List[len(cfg.Agents.List)-1]
+	}
+	agent.Skills = append([]string(nil), skills...)
+}
+
+func loadOnboardSkillOptions() []onboardSkillOption {
+	entries, err := fs.ReadDir(embeddedFiles, "workspace/skills")
+	if err != nil {
+		return nil
+	}
+
+	options := make([]onboardSkillOption, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skillFile := filepath.ToSlash(filepath.Join("workspace/skills", entry.Name(), "SKILL.md"))
+		data, readErr := fs.ReadFile(embeddedFiles, skillFile)
+		if readErr != nil {
+			continue
+		}
+		name, description := parseEmbeddedSkillMetadata(entry.Name(), string(data))
+		options = append(options, onboardSkillOption{
+			name:        name,
+			description: description,
+		})
+	}
+
+	sort.Slice(options, func(i, j int) bool {
+		return options[i].name < options[j].name
+	})
+	return options
+}
+
+func parseEmbeddedSkillMetadata(fallbackName, content string) (string, string) {
+	type skillFrontmatter struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+
+	name := strings.TrimSpace(fallbackName)
+	description := "No description available."
+	frontmatter, _ := splitEmbeddedFrontmatter(content)
+	if strings.TrimSpace(frontmatter) == "" {
+		return name, description
+	}
+
+	var parsed skillFrontmatter
+	if err := yaml.Unmarshal([]byte(frontmatter), &parsed); err != nil {
+		return name, description
+	}
+	if strings.TrimSpace(parsed.Name) != "" {
+		name = strings.TrimSpace(parsed.Name)
+	}
+	if strings.TrimSpace(parsed.Description) != "" {
+		description = strings.TrimSpace(parsed.Description)
+	}
+	return name, description
+}
+
+func splitEmbeddedFrontmatter(content string) (frontmatter, body string) {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return "", content
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.Join(lines[1:i], "\n"), strings.Join(lines[i+1:], "\n")
+		}
+	}
+	return "", content
+}
+
+func promptSkillSelectionTUI(options []onboardSkillOption, defaultSelected []string) ([]string, error) {
+	app := tview.NewApplication()
+	table := tview.NewTable().
+		SetSelectable(true, false).
+		SetBorders(false)
+	description := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true)
+	help := tview.NewTextView().
+		SetTextAlign(tview.AlignCenter).
+		SetDynamicColors(true).
+		SetText("[::b]Space[::-] toggle  [::b]Enter[::-] confirm  [::b]Esc[::-] cancel")
+
+	selected := make(map[string]bool, len(options))
+	for _, skill := range defaultSelected {
+		selected[strings.TrimSpace(skill)] = true
+	}
+	for _, option := range options {
+		if _, ok := selected[option.name]; !ok {
+			selected[option.name] = false
+		}
+	}
+
+	refresh := func(currentRow int) {
+		table.Clear()
+		for row, option := range options {
+			marker := "□"
+			markerColor := tcell.ColorSilver
+			if selected[option.name] {
+				marker = "■"
+				markerColor = onboardTUISelectedSkillColor
+			}
+			markerCell := tview.NewTableCell(marker).
+				SetAlign(tview.AlignCenter).
+				SetTextColor(markerColor)
+			nameCell := tview.NewTableCell(option.name).
+				SetExpansion(1)
+			descCell := tview.NewTableCell(option.description).
+				SetExpansion(3).
+				SetTextColor(tcell.ColorSilver)
+			table.SetCell(row, 0, markerCell)
+			table.SetCell(row, 1, nameCell)
+			table.SetCell(row, 2, descCell)
+		}
+		if len(options) > 0 {
+			if currentRow < 0 || currentRow >= len(options) {
+				currentRow = 0
+			}
+			table.Select(currentRow, 0)
+			description.SetText(fmt.Sprintf("[::b]%s[::-]\n\n%s", options[currentRow].name, options[currentRow].description))
+		}
+	}
+
+	refresh(0)
+	table.SetSelectedFunc(func(row, column int) {
+		if row < 0 || row >= len(options) {
+			return
+		}
+		name := options[row].name
+		selected[name] = !selected[name]
+		refresh(row)
+	})
+	table.SetSelectionChangedFunc(func(row, column int) {
+		if row < 0 || row >= len(options) {
+			return
+		}
+		description.SetText(fmt.Sprintf("[::b]%s[::-]\n\n%s", options[row].name, options[row].description))
+	})
+
+	var result []string
+	var promptErr error
+	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyRune:
+			if event.Rune() == ' ' {
+				row, _ := table.GetSelection()
+				if row >= 0 && row < len(options) {
+					name := options[row].name
+					selected[name] = !selected[name]
+					refresh(row)
+				}
+				return nil
+			}
+		case tcell.KeyEnter:
+			result = make([]string, 0, len(options))
+			for _, option := range options {
+				if selected[option.name] {
+					result = append(result, option.name)
+				}
+			}
+			app.Stop()
+			return nil
+		case tcell.KeyEscape:
+			promptErr = fmt.Errorf("skills selection cancelled")
+			app.Stop()
+			return nil
+		}
+		return event
+	})
+
+	layout := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(tview.NewTextView().
+			SetDynamicColors(true).
+			SetText("[::b]Skills🦐[::-]\nSelect the builtin skills the default agent should use."), 2, 0, false).
+		AddItem(tview.NewFlex().
+			AddItem(table, 0, 2, true).
+			AddItem(description, 0, 3, false), 0, 1, true).
+		AddItem(help, 1, 0, false)
+
+	if err := app.SetRoot(layout, true).EnableMouse(false).Run(); err != nil {
+		return nil, err
+	}
+	if promptErr != nil {
+		return nil, promptErr
+	}
+	return result, nil
 }
 
 func createWorkspaceTemplates(workspace string) {

@@ -190,6 +190,83 @@ func TestPromptAgentSignatureEmojiSupportsComplexEmoji(t *testing.T) {
 	}
 }
 
+func TestLoadOnboardSkillOptionsIncludesEmbeddedSkills(t *testing.T) {
+	options := loadOnboardSkillOptions()
+	if len(options) != 8 {
+		t.Fatalf("loadOnboardSkillOptions() len = %d, want 8", len(options))
+	}
+
+	want := map[string]bool{
+		"agent-browser": false,
+		"github":        false,
+		"hardware":      false,
+		"moltbook":      false,
+		"skill-creator": false,
+		"summarize":     false,
+		"tmux":          false,
+		"weather":       false,
+	}
+	for _, option := range options {
+		if _, ok := want[option.name]; ok {
+			want[option.name] = true
+		}
+		if strings.TrimSpace(option.description) == "" {
+			t.Fatalf("skill %q description should not be empty", option.name)
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Fatalf("expected skill %q to be loaded", name)
+		}
+	}
+}
+
+func TestPromptSkillSelectionDefaultsToAllSkills(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	selected, err := promptSkillSelection(newLineReader("\n"), cfg)
+	if err != nil {
+		t.Fatalf("promptSkillSelection() error = %v", err)
+	}
+
+	options := loadOnboardSkillOptions()
+	if len(selected) != len(options) {
+		t.Fatalf("selected len = %d, want %d", len(selected), len(options))
+	}
+	agent := lookupOnboardAgent(cfg)
+	if agent == nil {
+		t.Fatal("expected default agent config to be created")
+	}
+	if len(agent.Skills) != len(options) {
+		t.Fatalf("agent.Skills len = %d, want %d", len(agent.Skills), len(options))
+	}
+}
+
+func TestPromptSkillSelectionStoresExplicitSubset(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	selected, err := promptSkillSelection(newLineReader("2 5\n"), cfg)
+	if err != nil {
+		t.Fatalf("promptSkillSelection() error = %v", err)
+	}
+
+	want := []string{"github", "skill-creator"}
+	if strings.Join(selected, ",") != strings.Join(want, ",") {
+		t.Fatalf("selected = %#v, want %#v", selected, want)
+	}
+
+	agent := lookupOnboardAgent(cfg)
+	if agent == nil {
+		t.Fatal("expected default agent config to be created")
+	}
+	if strings.Join(agent.Skills, ",") != strings.Join(want, ",") {
+		t.Fatalf("agent.Skills = %#v, want %#v", agent.Skills, want)
+	}
+	if !agent.Default || agent.ID != "main" {
+		t.Fatalf("agent = %#v, want default main agent", *agent)
+	}
+}
+
 func newLineReader(input string) *bufio.Reader {
 	return bufio.NewReader(strings.NewReader(input))
 }

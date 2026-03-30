@@ -122,7 +122,7 @@ export function SkillsPage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title={t("navigation.skills")}
+        title="Skills🦐"
         children={
           <>
             <input
