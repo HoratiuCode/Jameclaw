@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -56,6 +57,11 @@ type onboardSelection struct {
 type onboardSkillOption struct {
 	name        string
 	description string
+}
+
+var onboardSkillsDefaultUnchecked = map[string]struct{}{
+	"gog":       {},
+	"twitter-x": {},
 }
 
 const (
@@ -442,7 +448,7 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 	}
 	renderOnboardStep("◇", onboardANSIInactive, "Skills", skillSummary)
 	onboardWriteLine("  %s│%s • Use arrow keys, press Space to toggle, and Enter to confirm.", onboardANSIRail, onboardANSIReset)
-	onboardWriteLine("  %s│%s • %d builtin skills are selected by default.", onboardANSIRail, onboardANSIReset, len(skillOptions))
+	onboardWriteLine("  %s│%s • %d builtin skills are preselected by default.", onboardANSIRail, onboardANSIReset, len(defaultOnboardSkills(skillOptions)))
 
 	renderOnboardStep("◇", onboardANSIInactive, "Personalization", "Choose any emoji used by the default agent identity.")
 	onboardWriteLine("  %s│%s Current signature: %s", onboardANSIRail, onboardANSIReset, selection.signatureEmoji)
@@ -566,12 +572,6 @@ func promptSkillSelection(reader *bufio.Reader, cfg *config.Config) ([]string, e
 	}
 
 	defaultSkills := currentOnboardSkills(cfg)
-	if len(defaultSkills) == 0 {
-		defaultSkills = make([]string, 0, len(options))
-		for _, option := range options {
-			defaultSkills = append(defaultSkills, option.name)
-		}
-	}
 
 	if file, ok := onboardInput.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
 		selected, err := promptSkillSelectionTUI(options, defaultSkills)
@@ -585,13 +585,17 @@ func promptSkillSelection(reader *bufio.Reader, cfg *config.Config) ([]string, e
 	onboardWriteLine("")
 	onboardWriteLine("Skills")
 	onboardWriteLine("------")
-	onboardWriteLine("Select builtin skills for the default agent. Press Enter to keep all selected.")
+	onboardWriteLine("Select builtin skills for the default agent. Press Enter to keep the preselected set.")
 	for idx, option := range options {
-		onboardWriteLine("%d. [x] %s", idx+1, option.name)
+		marker := " "
+		if slices.Contains(defaultSkills, option.name) {
+			marker = "x"
+		}
+		onboardWriteLine("%d. [%s] %s", idx+1, marker, option.name)
 		onboardWriteLine("   %s", option.description)
 	}
 
-	line, err := promptLine(reader, fmt.Sprintf("Selected skills [1-%d, space-separated, Enter for all]", len(options)))
+	line, err := promptLine(reader, fmt.Sprintf("Selected skills [1-%d, space-separated, Enter for preselected]", len(options)))
 	if err != nil {
 		return nil, err
 	}
@@ -724,9 +728,15 @@ func currentOnboardSkills(cfg *config.Config) []string {
 		return append([]string(nil), agent.Skills...)
 	}
 
-	options := loadOnboardSkillOptions()
+	return defaultOnboardSkills(loadOnboardSkillOptions())
+}
+
+func defaultOnboardSkills(options []onboardSkillOption) []string {
 	selected := make([]string, 0, len(options))
 	for _, option := range options {
+		if _, unchecked := onboardSkillsDefaultUnchecked[option.name]; unchecked {
+			continue
+		}
 		selected = append(selected, option.name)
 	}
 	return selected

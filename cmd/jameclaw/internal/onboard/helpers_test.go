@@ -192,17 +192,19 @@ func TestPromptAgentSignatureEmojiSupportsComplexEmoji(t *testing.T) {
 
 func TestLoadOnboardSkillOptionsIncludesEmbeddedSkills(t *testing.T) {
 	options := loadOnboardSkillOptions()
-	if len(options) != 8 {
-		t.Fatalf("loadOnboardSkillOptions() len = %d, want 8", len(options))
+	if len(options) != 10 {
+		t.Fatalf("loadOnboardSkillOptions() len = %d, want 10", len(options))
 	}
 
 	want := map[string]bool{
 		"agent-browser": false,
+		"gog":           false,
 		"github":        false,
 		"hardware":      false,
 		"moltbook":      false,
 		"skill-creator": false,
 		"summarize":     false,
+		"twitter-x":     false,
 		"tmux":          false,
 		"weather":       false,
 	}
@@ -221,7 +223,7 @@ func TestLoadOnboardSkillOptionsIncludesEmbeddedSkills(t *testing.T) {
 	}
 }
 
-func TestPromptSkillSelectionDefaultsToAllSkills(t *testing.T) {
+func TestPromptSkillSelectionDefaultsToPreselectedSkills(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	selected, err := promptSkillSelection(newLineReader("\n"), cfg)
@@ -229,23 +231,32 @@ func TestPromptSkillSelectionDefaultsToAllSkills(t *testing.T) {
 		t.Fatalf("promptSkillSelection() error = %v", err)
 	}
 
-	options := loadOnboardSkillOptions()
-	if len(selected) != len(options) {
-		t.Fatalf("selected len = %d, want %d", len(selected), len(options))
+	want := []string{
+		"agent-browser",
+		"github",
+		"hardware",
+		"moltbook",
+		"skill-creator",
+		"summarize",
+		"tmux",
+		"weather",
+	}
+	if strings.Join(selected, ",") != strings.Join(want, ",") {
+		t.Fatalf("selected = %#v, want %#v", selected, want)
 	}
 	agent := lookupOnboardAgent(cfg)
 	if agent == nil {
 		t.Fatal("expected default agent config to be created")
 	}
-	if len(agent.Skills) != len(options) {
-		t.Fatalf("agent.Skills len = %d, want %d", len(agent.Skills), len(options))
+	if strings.Join(agent.Skills, ",") != strings.Join(want, ",") {
+		t.Fatalf("agent.Skills = %#v, want %#v", agent.Skills, want)
 	}
 }
 
 func TestPromptSkillSelectionStoresExplicitSubset(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	selected, err := promptSkillSelection(newLineReader("2 5\n"), cfg)
+	selected, err := promptSkillSelection(newLineReader("2 6\n"), cfg)
 	if err != nil {
 		t.Fatalf("promptSkillSelection() error = %v", err)
 	}
