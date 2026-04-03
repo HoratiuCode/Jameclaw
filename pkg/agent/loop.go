@@ -214,6 +214,17 @@ func registerSharedTools(
 				agent.Tools.Register(fetchTool)
 			}
 		}
+		if cfg.Tools.IsToolEnabled("webhook_post") {
+			webhookTool, err := tools.NewWebhookPostTool(
+				cfg.Tools.Web.Proxy,
+				cfg.Tools.Web.PrivateHostWhitelist,
+			)
+			if err != nil {
+				logger.ErrorCF("agent", "Failed to create webhook post tool", map[string]any{"error": err.Error()})
+			} else {
+				agent.Tools.Register(webhookTool)
+			}
+		}
 
 		// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
 		if cfg.Tools.IsToolEnabled("i2c") {

@@ -1251,6 +1251,7 @@ type ToolsConfig struct {
 	SpawnStatus     ToolConfig         `json:"spawn_status"                                             envPrefix:"JAMECLAW_TOOLS_SPAWN_STATUS_"`
 	SPI             ToolConfig         `json:"spi"                                                      envPrefix:"JAMECLAW_TOOLS_SPI_"`
 	Subagent        ToolConfig         `json:"subagent"                                                 envPrefix:"JAMECLAW_TOOLS_SUBAGENT_"`
+	WebhookPost     ToolConfig         `json:"webhook_post"                                             envPrefix:"JAMECLAW_TOOLS_WEBHOOK_POST_"`
 	WebFetch        ToolConfig         `json:"web_fetch"                                                envPrefix:"JAMECLAW_TOOLS_WEB_FETCH_"`
 	WriteFile       ToolConfig         `json:"write_file"                                               envPrefix:"JAMECLAW_TOOLS_WRITE_FILE_"`
 }
@@ -2227,6 +2228,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.SPI.Enabled
 	case "subagent":
 		return t.Subagent.Enabled
+	case "webhook_post":
+		return t.WebhookPost.Enabled
 	case "web_fetch":
 		return t.WebFetch.Enabled
 	case "send_file":
