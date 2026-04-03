@@ -96,6 +96,7 @@ Your workspace is at: %s
 - Memory: %s/memory/MEMORY.md
 - Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md
 - Skills: %s/skills/{skill-name}/SKILL.md
+- Tool Notes: %s/TOOLS.md
 
 ## Important Rules
 
@@ -108,7 +109,7 @@ Your workspace is at: %s
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.
 
 %s`,
-		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
+		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
 }
 
 func (cb *ContextBuilder) getDiscoveryRule() string {
@@ -451,6 +452,9 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	}
 	if agentDefinition.User != nil {
 		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "USER.md", agentDefinition.User.Content)
+	}
+	if agentDefinition.Tools != nil {
+		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "TOOLS.md", agentDefinition.Tools.Content)
 	}
 
 	if agentDefinition.Source != AgentDefinitionSourceAgent {

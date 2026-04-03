@@ -405,7 +405,7 @@ This fork is most clearly tuned around Telegram-first setup in onboarding, but t
 
 ## 🔧 Tools
 
-The agent can be given tools such as shell execution, web search, MCP servers, and skills. In this repo, the main user-facing place to inspect and manage tool availability is the Web Console tools page.
+The agent can be given tools such as shell execution, web search, MCP servers, and skills. In this repo, the main user-facing place to inspect and manage tool availability is the Web Console tools page. Workspace-specific tool notes can also live in `workspace/TOOLS.md` for local names, hosts, devices, and other environment details that should not be embedded into shared skills.
 
 For full tool configuration details, see [Tools Configuration](docs/tools_configuration.md).
 

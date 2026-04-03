@@ -59,12 +59,19 @@ type UserDefinition struct {
 	Content string `json:"content"`
 }
 
+// ToolsDefinition represents workspace-local tool notes.
+type ToolsDefinition struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
 // AgentContextDefinition captures the workspace agent definition in a runtime-friendly shape.
 type AgentContextDefinition struct {
 	Source AgentDefinitionSource  `json:"source,omitempty"`
 	Agent  *AgentPromptDefinition `json:"agent,omitempty"`
 	Soul   *SoulDefinition        `json:"soul,omitempty"`
 	User   *UserDefinition        `json:"user,omitempty"`
+	Tools  *ToolsDefinition       `json:"tools,omitempty"`
 }
 
 // LoadAgentDefinition parses the workspace agent bootstrap files.
@@ -79,6 +86,7 @@ func (cb *ContextBuilder) LoadAgentDefinition() AgentContextDefinition {
 func loadAgentDefinition(workspace string) AgentContextDefinition {
 	definition := AgentContextDefinition{}
 	definition.User = loadUserDefinition(workspace)
+	definition.Tools = loadToolsDefinition(workspace)
 	agentPath := filepath.Join(workspace, string(AgentDefinitionSourceAgent))
 	if content, err := os.ReadFile(agentPath); err == nil {
 		prompt := parseAgentPromptDefinition(agentPath, string(content))
@@ -122,6 +130,7 @@ func (definition AgentContextDefinition) trackedPaths(workspace string) []string
 		filepath.Join(workspace, string(AgentDefinitionSourceAgent)),
 		filepath.Join(workspace, "SOUL.md"),
 		filepath.Join(workspace, "USER.md"),
+		filepath.Join(workspace, "TOOLS.md"),
 	}
 	if definition.Source != AgentDefinitionSourceAgent {
 		paths = append(paths,
@@ -137,6 +146,18 @@ func loadUserDefinition(workspace string) *UserDefinition {
 	if content, err := os.ReadFile(userPath); err == nil {
 		return &UserDefinition{
 			Path:    userPath,
+			Content: string(content),
+		}
+	}
+
+	return nil
+}
+
+func loadToolsDefinition(workspace string) *ToolsDefinition {
+	toolsPath := filepath.Join(workspace, "TOOLS.md")
+	if content, err := os.ReadFile(toolsPath); err == nil {
+		return &ToolsDefinition{
+			Path:    toolsPath,
 			Content: string(content),
 		}
 	}

@@ -220,6 +220,25 @@ func TestLoadBootstrapFilesIncludesWorkspaceUserMarkdown(t *testing.T) {
 	}
 }
 
+func TestLoadBootstrapFilesIncludesWorkspaceToolsMarkdown(t *testing.T) {
+	tmpDir := setupWorkspace(t, map[string]string{
+		"AGENT.md": "# Agent\nFollow the new structure.",
+		"SOUL.md":  "# Soul\nSpeak plainly.",
+		"TOOLS.md": "# Tools\nOffice speaker is named den-speaker.",
+	})
+	defer cleanupWorkspace(t, tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	bootstrap := cb.LoadBootstrapFiles()
+
+	if !strings.Contains(bootstrap, "Office speaker is named den-speaker") {
+		t.Fatalf("expected workspace TOOLS.md in bootstrap, got %q", bootstrap)
+	}
+	if !strings.Contains(bootstrap, "## TOOLS.md") {
+		t.Fatalf("expected TOOLS.md heading in bootstrap, got %q", bootstrap)
+	}
+}
+
 func TestStructuredAgentIgnoresIdentityChanges(t *testing.T) {
 	tmpDir := setupWorkspace(t, map[string]string{
 		"AGENT.md":    "# Agent\nFollow the new structure.",
@@ -291,6 +310,43 @@ func TestStructuredAgentUserChangesInvalidateCache(t *testing.T) {
 	promptV2 := cb.BuildSystemPromptWithCache()
 	if !strings.Contains(promptV2, "Updated workspace preferences") {
 		t.Fatalf("expected updated workspace USER.md in prompt, got %q", promptV2)
+	}
+}
+
+func TestStructuredAgentToolsChangesInvalidateCache(t *testing.T) {
+	tmpDir := setupWorkspace(t, map[string]string{
+		"AGENT.md": "# Agent\nFollow the new structure.",
+		"SOUL.md":  "# Soul\nVersion one.",
+		"TOOLS.md": "# Tools\nUse office-speaker for announcements.",
+	})
+	defer cleanupWorkspace(t, tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	promptV1 := cb.BuildSystemPromptWithCache()
+	if !strings.Contains(promptV1, "office-speaker") {
+		t.Fatalf("expected workspace TOOLS.md in prompt, got %q", promptV1)
+	}
+
+	toolsPath := filepath.Join(tmpDir, "TOOLS.md")
+	if err := os.WriteFile(toolsPath, []byte("# Tools\nUse kitchen-speaker for announcements."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(toolsPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	cb.systemPromptMutex.RLock()
+	changed := cb.sourceFilesChangedLocked()
+	cb.systemPromptMutex.RUnlock()
+	if !changed {
+		t.Fatal("workspace TOOLS.md changes should invalidate cache")
+	}
+
+	promptV2 := cb.BuildSystemPromptWithCache()
+	if !strings.Contains(promptV2, "kitchen-speaker") {
+		t.Fatalf("expected updated workspace TOOLS.md in prompt, got %q", promptV2)
 	}
 }
 
