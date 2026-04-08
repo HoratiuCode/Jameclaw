@@ -252,7 +252,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </span>
           </div>
           <p className="text-sidebar-foreground mt-1 text-xs font-medium">
-            {appStatus?.version ? `Version ${appStatus.version}` : "Version 304"}
+            {appStatus?.version ? `Version ${appStatus.version}` : "Version 804"}
           </p>
         </div>
       </SidebarFooter>
