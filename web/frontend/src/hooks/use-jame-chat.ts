@@ -55,12 +55,13 @@ export function formatMessageTime(dateRaw: number | string | Date): string {
 }
 
 export function useJameChat() {
-  const { messages, connectionState, isTyping, activeSessionId } =
+  const { messages, connectionState, errorMessage, isTyping, activeSessionId } =
     useAtomValue(chatAtom)
 
   return {
     messages,
     connectionState,
+    errorMessage,
     isTyping,
     activeSessionId,
     sendMessage: sendChatMessage,

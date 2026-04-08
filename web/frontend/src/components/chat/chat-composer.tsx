@@ -10,6 +10,7 @@ interface ChatComposerProps {
   input: string
   onInputChange: (value: string) => void
   onSend: () => void
+  disabledReason?: string | null
   isConnected: boolean
   hasDefaultModel: boolean
 }
@@ -18,6 +19,7 @@ export function ChatComposer({
   input,
   onInputChange,
   onSend,
+  disabledReason,
   isConnected,
   hasDefaultModel,
 }: ChatComposerProps) {
@@ -50,13 +52,18 @@ export function ChatComposer({
         />
 
         <div className="mt-2 flex items-center justify-between px-1">
-          <div className="flex items-center gap-1">{/* action buttons */}</div>
+          <div className="flex min-h-5 items-center gap-1">
+            {disabledReason && (
+              <p className="text-muted-foreground text-xs">{disabledReason}</p>
+            )}
+          </div>
 
           <Button
             size="icon"
             className="size-8 rounded-full bg-violet-500 text-white transition-transform hover:bg-violet-600 active:scale-95"
             onClick={onSend}
             disabled={!input.trim() || !canInput}
+            title={disabledReason ?? undefined}
           >
             <IconArrowUp className="size-4" />
           </Button>

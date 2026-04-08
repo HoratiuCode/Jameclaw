@@ -1,6 +1,7 @@
 import { IconPlus } from "@tabler/icons-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import { ChatComposer } from "@/components/chat/chat-composer"
@@ -26,6 +27,7 @@ export function ChatPage() {
   const {
     messages,
     connectionState,
+    errorMessage,
     isTyping,
     activeSessionId,
     sendMessage,
@@ -46,6 +48,17 @@ export function ChatPage() {
     handleSetDefault,
   } = useChatModels({ isConnected: isGatewayRunning })
   const canSend = isChatConnected && Boolean(defaultModelName)
+  const disabledReason = !defaultModelName
+    ? "Choose a default model before sending a message."
+    : !isGatewayRunning
+      ? "The gateway is not running."
+      : connectionState === "connecting"
+        ? "Connecting the Web Console to JameClaw..."
+        : connectionState === "error"
+          ? (errorMessage ?? "The Web Console could not connect to JameClaw.")
+          : !isChatConnected
+            ? "The Web Console is not connected to the Jame chat session."
+            : null
 
   const {
     sessions,
@@ -80,7 +93,13 @@ export function ChatPage() {
   }, [messages, isTyping, isAtBottom])
 
   const handleSend = () => {
-    if (!input.trim() || !canSend) return
+    if (!input.trim()) return
+    if (!canSend) {
+      if (disabledReason) {
+        toast.error(disabledReason)
+      }
+      return
+    }
     if (sendMessage(input.trim())) {
       setInput("")
     }
@@ -168,6 +187,7 @@ export function ChatPage() {
         input={input}
         onInputChange={setInput}
         onSend={handleSend}
+        disabledReason={disabledReason}
         isConnected={isChatConnected}
         hasDefaultModel={Boolean(defaultModelName)}
       />

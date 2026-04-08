@@ -60,7 +60,7 @@ export function handleJameMessage(
     }
 
     case "typing.start":
-      updateChatStore({ isTyping: true })
+      updateChatStore({ isTyping: true, errorMessage: null })
       break
 
     case "typing.stop":
@@ -69,7 +69,13 @@ export function handleJameMessage(
 
     case "error":
       console.error("Jame error:", payload)
-      updateChatStore({ isTyping: false })
+      updateChatStore({
+        isTyping: false,
+        errorMessage:
+          (payload.message as string) ||
+          (payload.error as string) ||
+          "JameClaw could not process that message.",
+      })
       break
 
     case "pong":

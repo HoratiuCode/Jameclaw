@@ -103,6 +103,7 @@ function disconnectChatInternal({
 
   updateChatStore({
     connectionState: "disconnected",
+    errorMessage: null,
     isTyping: false,
   })
 }
@@ -128,7 +129,7 @@ export async function connectChat() {
   connectionGeneration = generation
   isConnecting = true
   clearReconnectTimer()
-  updateChatStore({ connectionState: "connecting" })
+  updateChatStore({ connectionState: "connecting", errorMessage: null })
 
   try {
     const { token, ws_url } = await getJameToken()
@@ -141,7 +142,11 @@ export async function connectChat() {
 
     if (!token) {
       console.error("No jame token available")
-      updateChatStore({ connectionState: "error" })
+      updateChatStore({
+        connectionState: "error",
+        errorMessage: "Web Console could not get a Jame session token.",
+      })
+      toast.error("Web Console could not get a Jame session token.")
       isConnecting = false
       scheduleReconnect(generation, sessionId)
       return
@@ -170,7 +175,7 @@ export async function connectChat() {
       ) {
         return
       }
-      updateChatStore({ connectionState: "connected" })
+      updateChatStore({ connectionState: "connected", errorMessage: null })
       isConnecting = false
       reconnectAttempts = 0
     }
@@ -214,6 +219,7 @@ export async function connectChat() {
       isConnecting = false
       updateChatStore({
         connectionState: "disconnected",
+        errorMessage: "Connection to the Jame chat session was closed.",
         isTyping: false,
       })
       scheduleReconnect(generation, sessionId)
@@ -233,7 +239,10 @@ export async function connectChat() {
         return
       }
       isConnecting = false
-      updateChatStore({ connectionState: "error" })
+      updateChatStore({
+        connectionState: "error",
+        errorMessage: "Web Console could not connect to the Jame chat session.",
+      })
       scheduleReconnect(generation, sessionId)
     }
 
@@ -244,7 +253,13 @@ export async function connectChat() {
       return
     }
     console.error("Failed to connect to jame:", error)
-    updateChatStore({ connectionState: "error" })
+    updateChatStore({
+      connectionState: "error",
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : "Web Console could not connect to the Jame chat session.",
+    })
     isConnecting = false
     scheduleReconnect(generation, activeSessionIdRef)
   }
@@ -327,6 +342,11 @@ export async function hydrateActiveSession() {
 export function sendChatMessage(content: string) {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
     console.warn("WebSocket not connected")
+    const message =
+      getChatState().errorMessage ||
+      "Chat is not connected. Start the gateway and wait for the session to reconnect."
+    updateChatStore({ errorMessage: message })
+    toast.error(message)
     return false
   }
 
@@ -338,6 +358,7 @@ export function sendChatMessage(content: string) {
       ...prev.messages,
       { id, role: "user", content, timestamp: Date.now() },
     ],
+    errorMessage: null,
     isTyping: true,
   }))
 
@@ -352,6 +373,12 @@ export function sendChatMessage(content: string) {
     return true
   } catch (error) {
     console.error("Failed to send jame message:", error)
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to send the message to JameClaw."
+    updateChatStore({ errorMessage: message })
+    toast.error(message)
     updateChatStore((prev) => ({
       messages: prev.messages.filter((message) => message.id !== id),
       isTyping: false,
@@ -372,6 +399,7 @@ export async function switchChatSession(sessionId: string) {
     setActiveSessionId(sessionId)
     updateChatStore({
       messages: historyMessages,
+      errorMessage: null,
       isTyping: false,
       hasHydratedActiveSession: true,
     })
@@ -395,6 +423,7 @@ export async function newChatSession() {
   setActiveSessionId(generateSessionId())
   updateChatStore({
     messages: [],
+    errorMessage: null,
     isTyping: false,
     hasHydratedActiveSession: true,
   })
