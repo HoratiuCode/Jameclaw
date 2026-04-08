@@ -253,6 +253,11 @@ export function AddModelSheet({
                 onChange={(v) => setForm((f) => ({ ...f, apiKey: v }))}
                 placeholder={apiKeyPlaceholder}
               />
+              {preset === "openrouter" && (
+                <p className="text-muted-foreground text-xs">
+                  If OpenRouter is already configured, you can leave this blank and JameClaw will reuse the existing key.
+                </p>
+              )}
             </Field>
 
             <Field label={t("models.field.apiBase")}>

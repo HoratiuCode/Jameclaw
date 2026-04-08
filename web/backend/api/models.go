@@ -10,6 +10,7 @@ import (
 
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/sipeed/jameclaw/pkg/providers"
 )
 
 // registerModelRoutes binds model list management endpoints to the ServeMux.
@@ -135,6 +136,12 @@ func (h *Handler) handleAddModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if mc.ModelConfig.APIKey() == "" {
+		if inheritedKey := inheritedProviderAPIKey(cfg.ModelList, &mc.ModelConfig); inheritedKey != "" {
+			mc.ModelConfig.SetAPIKey(inheritedKey)
+		}
+	}
+
 	cfg.ModelList = append(cfg.ModelList, &mc.ModelConfig)
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
@@ -147,6 +154,25 @@ func (h *Handler) handleAddModel(w http.ResponseWriter, r *http.Request) {
 		"status": "ok",
 		"index":  len(cfg.ModelList) - 1,
 	})
+}
+
+func inheritedProviderAPIKey(existing []*config.ModelConfig, target *config.ModelConfig) string {
+	targetRef := providers.ParseModelRef(target.Model, "")
+	if targetRef == nil || targetRef.Provider != "openrouter" {
+		return ""
+	}
+
+	for _, candidate := range existing {
+		if candidate == nil || candidate.APIKey() == "" {
+			continue
+		}
+		ref := providers.ParseModelRef(candidate.Model, "")
+		if ref != nil && ref.Provider == targetRef.Provider {
+			return candidate.APIKey()
+		}
+	}
+
+	return ""
 }
 
 // handleUpdateModel replaces a model configuration entry at the given index.
