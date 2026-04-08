@@ -51,6 +51,7 @@ export function ModelsPage() {
   const [editingModel, setEditingModel] = useState<ModelInfo | null>(null)
   const [deletingModel, setDeletingModel] = useState<ModelInfo | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  const [openrouterAddOpen, setOpenrouterAddOpen] = useState(false)
   const [settingDefaultIndex, setSettingDefaultIndex] = useState<number | null>(
     null,
   )
@@ -140,6 +141,13 @@ export function ModelsPage() {
     <div className="flex h-full flex-col">
       <PageHeader title={t("navigation.models")}>
         <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            onClick={() => setOpenrouterAddOpen(true)}
+          >
+            <IconPlus className="size-4" />
+            Add OpenRouter Model
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
             <IconPlus className="size-4" />
             {t("models.add.button")}
@@ -203,6 +211,14 @@ export function ModelsPage() {
         onClose={() => setAddOpen(false)}
         onSaved={fetchModels}
         existingModelNames={models.map((model) => model.model_name)}
+      />
+
+      <AddModelSheet
+        open={openrouterAddOpen}
+        onClose={() => setOpenrouterAddOpen(false)}
+        onSaved={fetchModels}
+        existingModelNames={models.map((model) => model.model_name)}
+        preset="openrouter"
       />
 
       <DeleteModelDialog

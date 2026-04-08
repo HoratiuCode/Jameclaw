@@ -13,7 +13,8 @@ import {
 
 export function useGateway() {
   const gateway = useAtomValue(gatewayAtom)
-  const { status: state, canStart, restartRequired } = gateway
+  const { status: state, canStart, restartRequired, startReason, pid, owned } =
+    gateway
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -70,5 +71,16 @@ export function useGateway() {
     }
   }, [state])
 
-  return { state, loading, canStart, restartRequired, start, stop, restart }
+  return {
+    state,
+    loading,
+    canStart,
+    restartRequired,
+    startReason,
+    pid,
+    owned,
+    start,
+    stop,
+    restart,
+  }
 }

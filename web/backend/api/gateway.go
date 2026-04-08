@@ -803,6 +803,10 @@ func (h *Handler) gatewayStatusData() map[string]any {
 		}
 	}
 
+	gateway.mu.Lock()
+	data["gateway_owned"] = gateway.owned
+	gateway.mu.Unlock()
+
 	return data
 }
 

@@ -15,6 +15,9 @@ export interface GatewayStoreState {
   status: GatewayState
   canStart: boolean
   restartRequired: boolean
+  startReason: string | null
+  pid: number | null
+  owned: boolean
 }
 
 type GatewayStorePatch = Partial<GatewayStoreState>
@@ -23,6 +26,9 @@ const DEFAULT_GATEWAY_STATE: GatewayStoreState = {
   status: "unknown",
   canStart: true,
   restartRequired: false,
+  startReason: null,
+  pid: null,
+  owned: true,
 }
 
 const GATEWAY_POLL_INTERVAL_MS = 2000
@@ -57,7 +63,10 @@ function normalizeGatewayStoreState(
   if (
     next.status === prev.status &&
     next.canStart === prev.canStart &&
-    next.restartRequired === prev.restartRequired
+    next.restartRequired === prev.restartRequired &&
+    next.startReason === prev.startReason &&
+    next.pid === prev.pid &&
+    next.owned === prev.owned
   ) {
     return prev
   }
@@ -108,7 +117,12 @@ export function applyGatewayStatusToStore(
   data: Partial<
     Pick<
       GatewayStatusResponse,
-      "gateway_status" | "gateway_start_allowed" | "gateway_restart_required"
+      | "gateway_status"
+      | "gateway_start_allowed"
+      | "gateway_start_reason"
+      | "gateway_restart_required"
+      | "gateway_owned"
+      | "pid"
     >
   >,
 ) {
@@ -125,6 +139,12 @@ export function applyGatewayStatusToStore(
       prev.status === "stopping" && data.gateway_status === "running"
         ? false
         : (data.gateway_restart_required ?? prev.restartRequired),
+    startReason:
+      prev.status === "stopping" && data.gateway_status === "running"
+        ? null
+        : (data.gateway_start_reason as string | null | undefined) ?? null,
+    pid: typeof data.pid === "number" ? data.pid : null,
+    owned: typeof data.gateway_owned === "boolean" ? data.gateway_owned : prev.owned,
   }))
 }
 

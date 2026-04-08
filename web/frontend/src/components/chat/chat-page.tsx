@@ -35,7 +35,7 @@ export function ChatPage() {
     newChat,
   } = useJameChat()
 
-  const { state: gwState } = useGateway()
+  const { state: gwState, canStart, startReason, pid, owned } = useGateway()
   const isGatewayRunning = gwState === "running"
   const isChatConnected = connectionState === "connected"
 
@@ -48,8 +48,16 @@ export function ChatPage() {
     handleSetDefault,
   } = useChatModels({ isConnected: isGatewayRunning })
   const canSend = isChatConnected && Boolean(defaultModelName)
+  const gatewayStopHint =
+    gwState === "running" && !owned
+      ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}. Use Stop in the top bar or run ${pid ? `kill ${pid} then kill -9 ${pid}` : "pkill -f 'jameclaw gateway'"}.`
+      : null
   const disabledReason = !defaultModelName
     ? "Choose a default model before sending a message."
+    : !canStart && startReason
+      ? startReason
+    : gatewayStopHint
+      ? gatewayStopHint
     : !isGatewayRunning
       ? "The gateway is not running."
       : connectionState === "connecting"

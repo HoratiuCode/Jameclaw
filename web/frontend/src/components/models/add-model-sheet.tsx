@@ -36,6 +36,8 @@ interface AddForm {
   thinkingLevel: string
 }
 
+type AddModelPreset = "default" | "openrouter"
+
 const EMPTY_ADD_FORM: AddForm = {
   modelName: "",
   model: "",
@@ -51,11 +53,27 @@ const EMPTY_ADD_FORM: AddForm = {
   thinkingLevel: "",
 }
 
+const OPENROUTER_ADD_FORM: AddForm = {
+  modelName: "openrouter-cohere-rerank-4-pro",
+  model: "cohere/rerank-4-pro",
+  apiBase: "https://openrouter.ai/api/v1",
+  apiKey: "",
+  proxy: "",
+  authMethod: "",
+  connectMode: "",
+  workspace: "",
+  rpm: "",
+  maxTokensField: "",
+  requestTimeout: "60",
+  thinkingLevel: "",
+}
+
 interface AddModelSheetProps {
   open: boolean
   onClose: () => void
   onSaved: () => void
   existingModelNames: string[]
+  preset?: AddModelPreset
 }
 
 export function AddModelSheet({
@@ -63,6 +81,7 @@ export function AddModelSheet({
   onClose,
   onSaved,
   existingModelNames,
+  preset = "default",
 }: AddModelSheetProps) {
   const { t } = useTranslation()
   const [form, setForm] = useState<AddForm>(EMPTY_ADD_FORM)
@@ -79,12 +98,12 @@ export function AddModelSheet({
 
   useEffect(() => {
     if (open) {
-      setForm(EMPTY_ADD_FORM)
+      setForm(preset === "openrouter" ? OPENROUTER_ADD_FORM : EMPTY_ADD_FORM)
       setSetAsDefault(false)
       setFieldErrors({})
       setServerError("")
     }
-  }, [open])
+  }, [open, preset])
 
   const validate = (): boolean => {
     const errors: Partial<Record<keyof AddForm, string>> = {}
@@ -101,7 +120,23 @@ export function AddModelSheet({
 
   const setField =
     (key: keyof AddForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
-      setForm((f) => ({ ...f, [key]: e.target.value }))
+      const value = e.target.value
+      setForm((f) => {
+        const next = { ...f, [key]: value }
+        if (preset === "openrouter") {
+          if (key === "model") {
+            const trimmed = value.trim()
+            const normalized = trimmed.replace(/^openrouter\//, "")
+            next.modelName = normalized
+              ? `openrouter-${normalized.replace(/[^\w]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase()}`
+              : "openrouter-model"
+          }
+          if (key === "modelName" && !value.trim()) {
+            next.modelName = "openrouter-model"
+          }
+        }
+        return next
+      })
       if (fieldErrors[key]) {
         setFieldErrors((prev) => ({ ...prev, [key]: undefined }))
       }
@@ -113,7 +148,11 @@ export function AddModelSheet({
     setServerError("")
     try {
       const modelName = form.modelName.trim()
-      const modelId = form.model.trim()
+      const rawModelId = form.model.trim()
+      const modelId =
+        preset === "openrouter" && rawModelId && !rawModelId.startsWith("openrouter/")
+          ? `openrouter/${rawModelId}`
+          : rawModelId
       await addModel({
         model_name: modelName,
         model: modelId,
@@ -149,9 +188,15 @@ export function AddModelSheet({
         className="flex flex-col gap-0 p-0 data-[side=right]:!w-full data-[side=right]:sm:!w-[560px] data-[side=right]:sm:!max-w-[560px]"
       >
         <SheetHeader className="border-b-muted border-b px-6 py-5">
-          <SheetTitle className="text-base">{t("models.add.title")}</SheetTitle>
+          <SheetTitle className="text-base">
+            {preset === "openrouter"
+              ? "Add OpenRouter Model"
+              : t("models.add.title")}
+          </SheetTitle>
           <SheetDescription className="text-xs">
-            {t("models.add.description")}
+            {preset === "openrouter"
+              ? "Creates an OpenRouter model entry with the API base and common defaults already filled in."
+              : t("models.add.description")}
           </SheetDescription>
         </SheetHeader>
 
@@ -159,7 +204,11 @@ export function AddModelSheet({
           <div className="space-y-5 px-6 py-5">
             <Field
               label={t("models.add.modelName")}
-              hint={t("models.add.modelNameHint")}
+              hint={
+                preset === "openrouter"
+                  ? "A ready-to-use local label for this OpenRouter model."
+                  : t("models.add.modelNameHint")
+              }
             >
               <Input
                 value={form.modelName}
@@ -176,12 +225,20 @@ export function AddModelSheet({
 
             <Field
               label={t("models.add.modelId")}
-              hint={t("models.add.modelIdHint")}
+              hint={
+                preset === "openrouter"
+                  ? "Use the OpenRouter model path, for example `cohere/rerank-4-pro`."
+                  : t("models.add.modelIdHint")
+              }
             >
               <Input
                 value={form.model}
                 onChange={setField("model")}
-                placeholder={t("models.add.modelIdPlaceholder")}
+                placeholder={
+                  preset === "openrouter"
+                    ? "cohere/rerank-4-pro"
+                    : t("models.add.modelIdPlaceholder")
+                }
                 className="font-mono text-sm"
                 aria-invalid={!!fieldErrors.model}
               />
@@ -202,7 +259,11 @@ export function AddModelSheet({
               <Input
                 value={form.apiBase}
                 onChange={setField("apiBase")}
-                placeholder="https://api.example.com/v1"
+                placeholder={
+                  preset === "openrouter"
+                    ? "https://openrouter.ai/api/v1"
+                    : "https://api.example.com/v1"
+                }
               />
             </Field>
 

@@ -41,6 +41,9 @@ export function AppHeader() {
     loading: gwLoading,
     canStart,
     restartRequired,
+    startReason,
+    pid,
+    owned,
     start,
     restart,
     stop,
@@ -56,6 +59,13 @@ export function AppHeader() {
     !isStopping &&
     canStart &&
     (gwState === "stopped" || gwState === "error")
+  const stopCommands = pid
+    ? [`kill ${pid}`, `kill -9 ${pid}`]
+    : ["pkill -f 'jameclaw gateway'"]
+  const gatewayConflictHint =
+    gwState === "running" && !owned
+      ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}. Use Stop in the top bar or run ${stopCommands.join(" then ")}.`
+      : startReason
 
   const [showStopDialog, setShowStopDialog] = React.useState(false)
 
@@ -152,48 +162,73 @@ export function AppHeader() {
         {isRunning ? (
           <Tooltip delayDuration={700}>
             <TooltipTrigger asChild>
-              <Button
-                variant="destructive"
-                size="icon-sm"
-                className="size-8"
-                onClick={handleGatewayToggle}
-                disabled={gwLoading}
-                aria-label={t("header.gateway.action.stop")}
-              >
-                <IconPower className="h-4 w-4 opacity-80" />
-              </Button>
+              <div>
+                <Button
+                  variant="destructive"
+                  size="icon-sm"
+                  className="size-8"
+                  onClick={handleGatewayToggle}
+                  disabled={gwLoading}
+                  aria-label={t("header.gateway.action.stop")}
+                >
+                  <IconPower className="h-4 w-4 opacity-80" />
+                </Button>
+              </div>
             </TooltipTrigger>
-            <TooltipContent>{t("header.gateway.action.stop")}</TooltipContent>
+            <TooltipContent className="max-w-sm">
+              <div className="space-y-1 text-xs">
+                <p>{t("header.gateway.action.stop")}</p>
+                {gatewayConflictHint && <p>{gatewayConflictHint}</p>}
+              </div>
+            </TooltipContent>
           </Tooltip>
         ) : (
-          <Button
-            variant={
-              isStarting || isRestarting || isStopping ? "secondary" : "default"
-            }
-            size="sm"
-            className={`h-8 gap-2 px-3 ${
-              isStopped ? "bg-green-500 text-white hover:bg-green-600" : ""
-            }`}
-            onClick={handleGatewayToggle}
-            disabled={
-              gwLoading || isStarting || isRestarting || isStopping || !canStart
-            }
-          >
-            {gwLoading || isStarting || isRestarting || isStopping ? (
-              <IconLoader2 className="h-4 w-4 animate-spin opacity-70" />
-            ) : (
-              <IconPlayerPlay className="h-4 w-4 opacity-80" />
+          <Tooltip delayDuration={700}>
+            <TooltipTrigger asChild>
+              <div>
+                <Button
+                  variant={
+                    isStarting || isRestarting || isStopping
+                      ? "secondary"
+                      : "default"
+                  }
+                  size="sm"
+                  className={`h-8 gap-2 px-3 ${
+                    isStopped ? "bg-green-500 text-white hover:bg-green-600" : ""
+                  }`}
+                  onClick={handleGatewayToggle}
+                  disabled={
+                    gwLoading || isStarting || isRestarting || isStopping || !canStart
+                  }
+                >
+                  {gwLoading || isStarting || isRestarting || isStopping ? (
+                    <IconLoader2 className="h-4 w-4 animate-spin opacity-70" />
+                  ) : (
+                    <IconPlayerPlay className="h-4 w-4 opacity-80" />
+                  )}
+                  <span className="text-xs font-semibold">
+                    {isStopping
+                      ? t("header.gateway.status.stopping")
+                      : isRestarting
+                        ? t("header.gateway.status.restarting")
+                        : isStarting
+                          ? t("header.gateway.status.starting")
+                          : t("header.gateway.action.start")}
+                  </span>
+                </Button>
+              </div>
+            </TooltipTrigger>
+            {gatewayConflictHint && (
+              <TooltipContent className="max-w-sm">
+                <div className="space-y-1 text-xs">
+                  <p>{gatewayConflictHint}</p>
+                  {!owned && (
+                    <p>Commands: {stopCommands.join(" then ")}</p>
+                  )}
+                </div>
+              </TooltipContent>
             )}
-            <span className="text-xs font-semibold">
-              {isStopping
-                ? t("header.gateway.status.stopping")
-                : isRestarting
-                  ? t("header.gateway.status.restarting")
-                  : isStarting
-                    ? t("header.gateway.status.starting")
-                    : t("header.gateway.action.start")}
-            </span>
-          </Button>
+          </Tooltip>
         )}
 
         <Separator

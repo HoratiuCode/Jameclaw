@@ -5,6 +5,7 @@ interface GatewayStatusResponse {
   gateway_start_allowed?: boolean
   gateway_start_reason?: string
   gateway_restart_required?: boolean
+  gateway_owned?: boolean
   pid?: number
   boot_default_model?: string
   config_default_model?: string
