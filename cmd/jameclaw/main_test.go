@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"testing"
 
@@ -63,7 +64,6 @@ func TestNewJameclawCommand(t *testing.T) {
 func TestRunInteractiveDefaultCommandSelection(t *testing.T) {
 	originalIsInteractive := defaultCommandIsInteractive
 	originalOnboardComplete := startupOnboardComplete
-	originalSelector := defaultCommandSelector
 	originalAgent := runDefaultAgentCommand
 	originalWeb := runDefaultWebCommand
 	originalTUI := runDefaultTUICommand
@@ -71,52 +71,37 @@ func TestRunInteractiveDefaultCommandSelection(t *testing.T) {
 	t.Cleanup(func() {
 		defaultCommandIsInteractive = originalIsInteractive
 		startupOnboardComplete = originalOnboardComplete
-		defaultCommandSelector = originalSelector
 		runDefaultAgentCommand = originalAgent
 		runDefaultWebCommand = originalWeb
 		runDefaultTUICommand = originalTUI
 		defaultCommandOutput = originalOutput
+		_ = os.Unsetenv("JAMECLAW_STARTUP_CHOICE")
 	})
 
 	defaultCommandIsInteractive = func() bool { return true }
 	startupOnboardComplete = func() bool { return true }
 	defaultCommandOutput = io.Discard
 
-	cases := []struct {
-		name   string
-		choice string
-		want   string
-	}{
-		{name: "agent", choice: "agent", want: "agent"},
-		{name: "web", choice: "web", want: "web"},
-		{name: "tui", choice: "tui", want: "tui"},
+	var got string
+	runDefaultAgentCommand = func() error {
+		got = "agent"
+		return nil
+	}
+	runDefaultWebCommand = func() error {
+		got = "web"
+		return nil
+	}
+	runDefaultTUICommand = func() error {
+		got = "tui"
+		return nil
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var got string
-			defaultCommandSelector = func() (string, error) { return tc.choice, nil }
-			runDefaultAgentCommand = func() error {
-				got = "agent"
-				return nil
-			}
-			runDefaultWebCommand = func() error {
-				got = "web"
-				return nil
-			}
-			runDefaultTUICommand = func() error {
-				got = "tui"
-				return nil
-			}
-
-			err := runInteractiveDefaultCommand()
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
+	err := runInteractiveDefaultCommand()
+	require.NoError(t, err)
+	assert.Equal(t, "web", got)
 }
 
-func TestRunInteractiveDefaultCommandPromptsAgainAfterInvalidChoice(t *testing.T) {
+func TestRunInteractiveDefaultCommandMenuPromptsAgainAfterInvalidChoice(t *testing.T) {
 	originalIsInteractive := defaultCommandIsInteractive
 	originalOnboardComplete := startupOnboardComplete
 	originalSelector := defaultCommandSelector
@@ -128,10 +113,12 @@ func TestRunInteractiveDefaultCommandPromptsAgainAfterInvalidChoice(t *testing.T
 		defaultCommandSelector = originalSelector
 		runDefaultAgentCommand = originalAgent
 		defaultCommandOutput = originalOutput
+		_ = os.Unsetenv("JAMECLAW_STARTUP_CHOICE")
 	})
 
 	defaultCommandIsInteractive = func() bool { return true }
 	startupOnboardComplete = func() bool { return true }
+	require.NoError(t, os.Setenv("JAMECLAW_STARTUP_CHOICE", "menu"))
 
 	var output bytes.Buffer
 	defaultCommandOutput = &output
@@ -153,6 +140,21 @@ func TestRunInteractiveDefaultCommandPromptsAgainAfterInvalidChoice(t *testing.T
 	require.NoError(t, err)
 	assert.True(t, called)
 	assert.Contains(t, output.String(), `Unknown startup option "bad-option"`)
+}
+
+func TestConfiguredStartupChoice(t *testing.T) {
+	t.Cleanup(func() {
+		_ = os.Unsetenv("JAMECLAW_STARTUP_CHOICE")
+	})
+
+	_ = os.Unsetenv("JAMECLAW_STARTUP_CHOICE")
+	assert.Equal(t, "web", configuredStartupChoice())
+
+	require.NoError(t, os.Setenv("JAMECLAW_STARTUP_CHOICE", "menu"))
+	assert.Equal(t, "menu", configuredStartupChoice())
+
+	require.NoError(t, os.Setenv("JAMECLAW_STARTUP_CHOICE", "agent"))
+	assert.Equal(t, "agent", configuredStartupChoice())
 }
 
 func TestRunInteractiveDefaultCommandStopsAfterOnboardOnFirstRun(t *testing.T) {

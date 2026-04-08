@@ -132,6 +132,17 @@ func runInteractiveDefaultCommand() error {
 		return runDefaultAgentCommand()
 	}
 
+	if directChoice := configuredStartupChoice(); directChoice != "menu" {
+		switch directChoice {
+		case "web":
+			return runDefaultWebCommand()
+		case "agent":
+			return runDefaultAgentCommand()
+		case "tui":
+			return runDefaultTUICommand()
+		}
+	}
+
 	for {
 		choice, err := defaultCommandSelector()
 		if err != nil {
@@ -154,6 +165,21 @@ func runInteractiveDefaultCommand() error {
 			fmt.Fprintf(defaultCommandOutput, "Unknown startup option %q. Choose agent, web, or tui.\n", choice)
 		}
 	}
+}
+
+func configuredStartupChoice() string {
+	if raw := os.Getenv("JAMECLAW_STARTUP_CHOICE"); raw != "" {
+		choice := strings.ToLower(strings.TrimSpace(raw))
+		if choice == "menu" {
+			return "menu"
+		}
+		if normalized := normalizeStartupChoice(choice); normalized != "" {
+			return normalized
+		}
+	}
+
+	// Default interactive startup path: open the Web Console directly.
+	return "web"
 }
 
 func renderSetupRequired() {
