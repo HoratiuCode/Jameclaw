@@ -5,12 +5,30 @@ export interface SkillSupportItem {
   description: string
 }
 
+export interface LearnedSkillOrigin {
+  kind: string
+  registry?: string
+  slug?: string
+  installed_version?: string
+  installed_at?: number
+}
+
+export interface LearnedSkillItem extends SkillSupportItem {
+  content: string
+  command_examples: string[]
+  origin?: LearnedSkillOrigin
+}
+
 export interface SkillDetailResponse extends SkillSupportItem {
   content: string
 }
 
 interface SkillsResponse {
   skills: SkillSupportItem[]
+}
+
+interface LearnedSkillsResponse {
+  skills: LearnedSkillItem[]
 }
 
 interface SkillActionResponse {
@@ -35,6 +53,10 @@ export async function getSkills(): Promise<SkillsResponse> {
 
 export async function getSkill(name: string): Promise<SkillDetailResponse> {
   return request<SkillDetailResponse>(`/api/skills/${encodeURIComponent(name)}`)
+}
+
+export async function getLearnedSkills(): Promise<LearnedSkillsResponse> {
+  return request<LearnedSkillsResponse>("/api/skills/learned")
 }
 
 export async function importSkill(file: File): Promise<SkillActionResponse> {

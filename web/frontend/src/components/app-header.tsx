@@ -1,5 +1,6 @@
 import {
   IconBook,
+  IconBrain,
   IconLoader2,
   IconMenu2,
   IconMoon,
@@ -241,6 +242,12 @@ export function AppHeader() {
           <a href="https://docs.jameclaw.io" target="_blank" rel="noreferrer">
             <IconBook className="size-4.5" />
           </a>
+        </Button>
+
+        <Button variant="ghost" size="icon" className="size-8" asChild>
+          <Link to="/agent/learned" aria-label="Learned">
+            <IconBrain className="size-4.5" />
+          </Link>
         </Button>
 
         {/* Theme Toggle */}

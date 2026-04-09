@@ -18,6 +18,28 @@ type skillSupportResponse struct {
 	Skills []skills.SkillInfo `json:"skills"`
 }
 
+type learnedSkillsResponse struct {
+	Skills []learnedSkillResponse `json:"skills"`
+}
+
+type learnedSkillOrigin struct {
+	Kind             string `json:"kind"`
+	Registry         string `json:"registry,omitempty"`
+	Slug             string `json:"slug,omitempty"`
+	InstalledVersion string `json:"installed_version,omitempty"`
+	InstalledAt      int64  `json:"installed_at,omitempty"`
+}
+
+type learnedSkillResponse struct {
+	Name            string              `json:"name"`
+	Path            string              `json:"path"`
+	Source          string              `json:"source"`
+	Description     string              `json:"description"`
+	Content         string              `json:"content"`
+	CommandExamples []string            `json:"command_examples,omitempty"`
+	Origin          *learnedSkillOrigin `json:"origin,omitempty"`
+}
+
 type skillDetailResponse struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
@@ -30,10 +52,12 @@ var (
 	skillNameSanitizer       = regexp.MustCompile(`[^a-z0-9-]+`)
 	importedSkillFrontmatter = regexp.MustCompile(`(?s)^---(?:\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)---(?:\r\n|\n|\r)*`)
 	skillFrontmatterStripper = regexp.MustCompile(`(?s)^---(?:\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)---(?:\r\n|\n|\r)*`)
+	inlineCodeMatcher        = regexp.MustCompile("`([^`]+)`")
 )
 
 func (h *Handler) registerSkillRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/skills", h.handleListSkills)
+	mux.HandleFunc("GET /api/skills/learned", h.handleListLearnedSkills)
 	mux.HandleFunc("GET /api/skills/{name}", h.handleGetSkill)
 	mux.HandleFunc("POST /api/skills/import", h.handleImportSkill)
 	mux.HandleFunc("DELETE /api/skills/{name}", h.handleDeleteSkill)
@@ -88,6 +112,24 @@ func (h *Handler) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Skill not found", http.StatusNotFound)
+}
+
+func (h *Handler) handleListLearnedSkills(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	loader := newSkillsLoader(cfg.WorkspacePath())
+	items, err := buildLearnedSkills(loader.ListSkills())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load learned skills: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(learnedSkillsResponse{Skills: items})
 }
 
 func (h *Handler) handleImportSkill(w http.ResponseWriter, r *http.Request) {
@@ -306,6 +348,101 @@ func loadSkillContent(path string) (string, error) {
 		return "", err
 	}
 	return skillFrontmatterStripper.ReplaceAllString(string(content), ""), nil
+}
+
+type skillOriginMetaFile struct {
+	Version          int    `json:"version"`
+	Registry         string `json:"registry"`
+	Slug             string `json:"slug"`
+	InstalledVersion string `json:"installed_version"`
+	InstalledAt      int64  `json:"installed_at"`
+}
+
+func buildLearnedSkills(allSkills []skills.SkillInfo) ([]learnedSkillResponse, error) {
+	items := make([]learnedSkillResponse, 0, len(allSkills))
+
+	for _, skill := range allSkills {
+		content, err := loadSkillContent(skill.Path)
+		if err != nil {
+			return nil, err
+		}
+
+		items = append(items, learnedSkillResponse{
+			Name:            skill.Name,
+			Path:            skill.Path,
+			Source:          skill.Source,
+			Description:     skill.Description,
+			Content:         content,
+			CommandExamples: extractSkillCommands(content),
+			Origin:          detectSkillOrigin(skill),
+		})
+	}
+
+	return items, nil
+}
+
+func detectSkillOrigin(skill skills.SkillInfo) *learnedSkillOrigin {
+	metaPath := filepath.Join(filepath.Dir(skill.Path), ".skill-origin.json")
+	data, err := os.ReadFile(metaPath)
+	if err == nil {
+		var meta skillOriginMetaFile
+		if json.Unmarshal(data, &meta) == nil {
+			return &learnedSkillOrigin{
+				Kind:             "registry",
+				Registry:         meta.Registry,
+				Slug:             meta.Slug,
+				InstalledVersion: meta.InstalledVersion,
+				InstalledAt:      meta.InstalledAt,
+			}
+		}
+	}
+
+	switch skill.Source {
+	case "workspace":
+		return &learnedSkillOrigin{Kind: "workspace"}
+	case "global":
+		return &learnedSkillOrigin{Kind: "global"}
+	case "builtin":
+		return &learnedSkillOrigin{Kind: "builtin"}
+	default:
+		return &learnedSkillOrigin{Kind: skill.Source}
+	}
+}
+
+func extractSkillCommands(content string) []string {
+	commandPrefixes := []string{"npx ", "npm run ", "npm exec ", "pnpm ", "yarn ", "go run ", "uv run ", "python ", "python3 "}
+	seen := make(map[string]struct{})
+	commands := make([]string, 0)
+
+	appendIfCommand := func(candidate string) {
+		command := strings.TrimSpace(candidate)
+		command = strings.Trim(command, "`")
+		if command == "" {
+			return
+		}
+		lower := strings.ToLower(command)
+		for _, prefix := range commandPrefixes {
+			if strings.HasPrefix(lower, prefix) {
+				if _, ok := seen[command]; ok {
+					return
+				}
+				seen[command] = struct{}{}
+				commands = append(commands, command)
+				return
+			}
+		}
+	}
+
+	for _, line := range strings.Split(content, "\n") {
+		appendIfCommand(line)
+		for _, match := range inlineCodeMatcher.FindAllStringSubmatch(line, -1) {
+			if len(match) >= 2 {
+				appendIfCommand(match[1])
+			}
+		}
+	}
+
+	return commands
 }
 
 func globalConfigDir() string {

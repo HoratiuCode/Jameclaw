@@ -14,6 +14,71 @@ import (
 	"github.com/sipeed/jameclaw/pkg/config"
 )
 
+func TestHandleListLearnedSkills(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	cfg.Agents.Defaults.Workspace = workspace
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	skillDir := filepath.Join(workspace, "skills", "registry-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(skillDir, "SKILL.md"),
+		[]byte("---\nname: registry-skill\ndescription: Registry skill\n---\nRun `npx create-learned-app`.\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(skillDir, ".skill-origin.json"),
+		[]byte("{\n  \"version\": 1,\n  \"registry\": \"clawhub\",\n  \"slug\": \"registry-skill\",\n  \"installed_version\": \"1.2.3\",\n  \"installed_at\": 123456789\n}\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(.skill-origin.json) error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/skills/learned", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp learnedSkillsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(resp.Skills) != 1 {
+		t.Fatalf("skills count = %d, want 1", len(resp.Skills))
+	}
+	if got := resp.Skills[0]; got.Name != "registry-skill" {
+		t.Fatalf("skill name = %q, want registry-skill", got.Name)
+	} else {
+		if len(got.CommandExamples) != 1 || got.CommandExamples[0] != "npx create-learned-app" {
+			t.Fatalf("command_examples = %#v, want npx create-learned-app", got.CommandExamples)
+		}
+		if got.Origin == nil || got.Origin.Kind != "registry" || got.Origin.Registry != "clawhub" {
+			t.Fatalf("origin = %#v, want registry clawhub", got.Origin)
+		}
+	}
+}
+
 func TestHandleListSkills(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
