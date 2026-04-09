@@ -13,7 +13,7 @@ import (
 //	-X github.com/sipeed/jameclaw/pkg/config.BuildTime=<timestamp>
 //	-X github.com/sipeed/jameclaw/pkg/config.GoVersion=<go-version>
 var (
-	Version   = "dev" // Default value when not built with ldflags
+	Version   = "904" // Default value when not built with ldflags
 	GitCommit string  // Git commit SHA (short)
 	BuildTime string  // Build timestamp in RFC3339 format
 	GoVersion string  // Go version used for building

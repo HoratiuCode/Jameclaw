@@ -49,6 +49,22 @@ interface NavGroup {
   isChannelsGroup?: boolean
 }
 
+const fallbackVersion = 904
+
+function extractVersionNumber(version: string | undefined): number | null {
+  if (!version) {
+    return null
+  }
+
+  const match = version.match(/\d+/)
+  if (!match) {
+    return null
+  }
+
+  const parsed = Number.parseInt(match[0], 10)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
 const baseNavGroups: Omit<NavGroup, "items">[] = [
   {
     label: "navigation.chat",
@@ -83,6 +99,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     queryFn: getAppStatus,
     staleTime: 60_000,
   })
+  const displayedVersion = appStatus?.version || String(fallbackVersion)
+  const currentVersion = extractVersionNumber(displayedVersion)
+  const latestVersion = extractVersionNumber(appStatus?.version)
+  const hasUpdate =
+    currentVersion !== null &&
+    latestVersion !== null &&
+    latestVersion > currentVersion
 
   const navGroups: NavGroup[] = React.useMemo(() => {
     return [
@@ -252,8 +275,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </span>
           </div>
           <p className="text-sidebar-foreground mt-1 text-xs font-medium">
-            {appStatus?.version ? `Version ${appStatus.version}` : "Version 804"}
+            Version {displayedVersion}
           </p>
+          {hasUpdate ? (
+            <p className="mt-1 text-[11px] font-medium text-amber-300">
+              Update available: {latestVersion}
+            </p>
+          ) : null}
         </div>
       </SidebarFooter>
       <SidebarRail />
