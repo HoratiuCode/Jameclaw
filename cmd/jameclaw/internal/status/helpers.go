@@ -24,6 +24,15 @@ func statusCmd() {
 	if build != "" {
 		fmt.Printf("Build: %s\n", build)
 	}
+	if repoStatus, err := detectRepoVersionStatus(); err == nil && repoStatus != nil {
+		if repoStatus.LocalCommit != "" {
+			fmt.Printf("Git Commit: %s\n", repoStatus.LocalCommit)
+		}
+		if repoStatus.IsOutdated {
+			fmt.Printf("Update: newer commit available on %s\n", repoStatus.RemoteRef)
+			fmt.Printf("Latest: %s\n", repoStatus.RemoteCommit)
+		}
+	}
 	fmt.Println()
 
 	if _, err := os.Stat(configPath); err == nil {
