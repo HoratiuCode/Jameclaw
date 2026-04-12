@@ -71,6 +71,7 @@ export function AppHeader() {
   const [showStopDialog, setShowStopDialog] = React.useState(false)
   const headerLogoSrc =
     theme === "dark" ? "/logo_with_text_dark.jpeg" : "/logo_with_text.png"
+  const headerIconSrc = "/jameclaw-mascot.png"
 
   const handleGatewayToggle = () => {
     if (gwLoading || isRestarting || isStopping || (!isRunning && !canStart)) {
@@ -99,9 +100,18 @@ export function AppHeader() {
         <SidebarTrigger className="text-muted-foreground hover:bg-accent hover:text-foreground flex h-9 w-9 items-center justify-center rounded-lg sm:hidden [&>svg]:size-5">
           <IconMenu2 />
         </SidebarTrigger>
-        <div className="hidden w-36 shrink-0 items-center sm:flex">
-          <Link to="/">
-            <img className="w-full" src={headerLogoSrc} alt="JameClaw" />
+        <div className="flex shrink-0 items-center sm:w-44">
+          <Link to="/" className="flex items-center gap-2">
+            <img
+              className="h-9 w-9 shrink-0 object-contain"
+              src={headerIconSrc}
+              alt="JameClaw icon"
+            />
+            <img
+              className="hidden h-8 w-auto object-contain sm:block"
+              src={headerLogoSrc}
+              alt="JameClaw"
+            />
           </Link>
         </div>
       </div>
