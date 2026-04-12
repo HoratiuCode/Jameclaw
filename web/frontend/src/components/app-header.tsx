@@ -70,7 +70,6 @@ export function AppHeader() {
 
   const [showStopDialog, setShowStopDialog] = React.useState(false)
   const headerLogoSrc = theme === "dark" ? "/logo_dark.jpeg" : "/logo_with_text.png"
-  const headerIconSrc = "/jameclaw-mascot.png"
 
   const handleGatewayToggle = () => {
     if (gwLoading || isRestarting || isStopping || (!isRunning && !canStart)) {
@@ -100,17 +99,8 @@ export function AppHeader() {
           <IconMenu2 />
         </SidebarTrigger>
         <div className="flex shrink-0 items-center sm:w-44">
-          <Link to="/" className="flex items-center gap-2">
-            <img
-              className="h-9 w-9 shrink-0 object-contain"
-              src={headerIconSrc}
-              alt="JameClaw icon"
-            />
-            <img
-              className="hidden h-8 w-auto object-contain sm:block"
-              src={headerLogoSrc}
-              alt="JameClaw"
-            />
+          <Link to="/" className="flex items-center">
+            <img className="h-8 w-auto object-contain" src={headerLogoSrc} alt="JameClaw" />
           </Link>
         </div>
       </div>

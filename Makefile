@@ -1,4 +1,4 @@
-.PHONY: all build build-launcher launcher run-launcher install uninstall clean help test
+.PHONY: all build build-launcher launcher run-launcher install install-startup uninstall clean help test
 
 # Build variables
 BINARY_NAME=jameclaw
@@ -203,6 +203,20 @@ install: build
 	@mv -f $(INSTALL_BIN_DIR)/$(BINARY_NAME)$(INSTALL_TMP_SUFFIX) $(INSTALL_BIN_DIR)/$(BINARY_NAME)
 	@echo "Installed binary to $(INSTALL_BIN_DIR)/$(BINARY_NAME)"
 	@echo "Installation complete!"
+
+## install-startup: Install the binaries used by `jameclaw startup`
+install-startup: build build-launcher
+	@echo "Installing startup binaries..."
+	@mkdir -p $(INSTALL_BIN_DIR)
+	@cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_BIN_DIR)/$(BINARY_NAME)$(INSTALL_TMP_SUFFIX)
+	@chmod +x $(INSTALL_BIN_DIR)/$(BINARY_NAME)$(INSTALL_TMP_SUFFIX)
+	@mv -f $(INSTALL_BIN_DIR)/$(BINARY_NAME)$(INSTALL_TMP_SUFFIX) $(INSTALL_BIN_DIR)/$(BINARY_NAME)
+	@cp $(BUILD_DIR)/jameclaw-launcher $(INSTALL_BIN_DIR)/jameclaw-web$(INSTALL_TMP_SUFFIX)
+	@chmod +x $(INSTALL_BIN_DIR)/jameclaw-web$(INSTALL_TMP_SUFFIX)
+	@mv -f $(INSTALL_BIN_DIR)/jameclaw-web$(INSTALL_TMP_SUFFIX) $(INSTALL_BIN_DIR)/jameclaw-web
+	@echo "Installed $(INSTALL_BIN_DIR)/jameclaw"
+	@echo "Installed $(INSTALL_BIN_DIR)/jameclaw-web"
+	@echo "Run \`jameclaw startup\` to open the updated Web Console."
 
 ## uninstall: Remove jameclaw from system
 uninstall:
