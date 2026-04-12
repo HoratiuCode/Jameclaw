@@ -69,8 +69,7 @@ export function AppHeader() {
       : startReason
 
   const [showStopDialog, setShowStopDialog] = React.useState(false)
-  const headerLogoSrc =
-    theme === "dark" ? "/logo_with_text_dark.jpeg" : "/logo_with_text.png"
+  const headerLogoSrc = theme === "dark" ? "/logo_dark.jpeg" : "/logo_with_text.png"
   const headerIconSrc = "/jameclaw-mascot.png"
 
   const handleGatewayToggle = () => {
