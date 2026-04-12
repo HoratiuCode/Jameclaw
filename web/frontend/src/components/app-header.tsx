@@ -69,6 +69,8 @@ export function AppHeader() {
       : startReason
 
   const [showStopDialog, setShowStopDialog] = React.useState(false)
+  const headerLogoSrc =
+    theme === "dark" ? "/logo_with_text_dark.jpeg" : "/logo_with_text.png"
 
   const handleGatewayToggle = () => {
     if (gwLoading || isRestarting || isStopping || (!isRunning && !canStart)) {
@@ -99,7 +101,7 @@ export function AppHeader() {
         </SidebarTrigger>
         <div className="hidden w-36 shrink-0 items-center sm:flex">
           <Link to="/">
-            <img className="w-full" src="/logo_with_text.png" alt="Logo" />
+            <img className="w-full" src={headerLogoSrc} alt="JameClaw" />
           </Link>
         </div>
       </div>
