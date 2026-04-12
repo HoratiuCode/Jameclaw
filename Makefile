@@ -1,4 +1,4 @@
-.PHONY: all build install uninstall clean help test
+.PHONY: all build build-launcher launcher run-launcher install uninstall clean help test
 
 # Build variables
 BINARY_NAME=jameclaw
@@ -117,13 +117,19 @@ build: generate
 build-launcher:
 	@echo "Building jameclaw-launcher for $(PLATFORM)/$(ARCH)..."
 	@mkdir -p $(BUILD_DIR)
-	@if [ ! -f web/backend/dist/index.html ]; then \
-		echo "Building frontend..."; \
-		cd web/frontend && pnpm install && pnpm build:backend; \
-	fi
+	@echo "Building frontend..."
+	@cd web/frontend && pnpm build:backend
 	@$(WEB_GO) build $(GOFLAGS) -o $(BUILD_DIR)/jameclaw-launcher-$(PLATFORM)-$(ARCH) ./web/backend
 	@ln -sf jameclaw-launcher-$(PLATFORM)-$(ARCH) $(BUILD_DIR)/jameclaw-launcher
 	@echo "Build complete: $(BUILD_DIR)/jameclaw-launcher"
+
+## launcher: Build and open the jameclaw-launcher (web console)
+launcher: build-launcher
+	@echo "Starting $(BUILD_DIR)/jameclaw-launcher..."
+	@./$(BUILD_DIR)/jameclaw-launcher
+
+## run-launcher: Alias for launcher
+run-launcher: launcher
 
 ## build-whatsapp-native: Build with WhatsApp native (whatsmeow) support; larger binary
 build-whatsapp-native: generate

@@ -34,6 +34,7 @@ export function LearnedPage() {
     queryKey: ["skills", "learned"],
     queryFn: getLearnedSkills,
   })
+  const skills = data?.skills ?? []
 
   return (
     <div className="flex h-full flex-col">
@@ -50,9 +51,9 @@ export function LearnedPage() {
             <div className="text-destructive py-6 text-sm">
               Failed to load learned skills.
             </div>
-          ) : data?.skills.length ? (
+          ) : skills.length ? (
             <div className="grid gap-4 lg:grid-cols-2">
-              {data.skills.map((skill) => (
+              {skills.map((skill) => (
                 <Card
                   key={`${skill.source}:${skill.name}`}
                   className="border-border/60 gap-4 bg-white/80"
@@ -90,7 +91,7 @@ export function LearnedPage() {
                       </div>
                     </div>
 
-                    {skill.command_examples.length ? (
+                    {skill.command_examples.length > 0 ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-2 text-[11px] tracking-[0.18em] uppercase text-emerald-700 dark:text-emerald-300">
                           <IconCommand className="size-3.5" />

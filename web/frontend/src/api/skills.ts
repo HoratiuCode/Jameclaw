@@ -31,6 +31,22 @@ interface LearnedSkillsResponse {
   skills: LearnedSkillItem[]
 }
 
+function normalizeLearnedSkill(
+  skill: Partial<LearnedSkillItem> & Pick<LearnedSkillItem, "name" | "path" | "source">,
+): LearnedSkillItem {
+  return {
+    name: skill.name,
+    path: skill.path,
+    source: skill.source,
+    description: skill.description ?? "",
+    content: skill.content ?? "",
+    command_examples: Array.isArray(skill.command_examples)
+      ? skill.command_examples
+      : [],
+    origin: skill.origin,
+  }
+}
+
 interface SkillActionResponse {
   status?: string
   name?: string
@@ -56,7 +72,12 @@ export async function getSkill(name: string): Promise<SkillDetailResponse> {
 }
 
 export async function getLearnedSkills(): Promise<LearnedSkillsResponse> {
-  return request<LearnedSkillsResponse>("/api/skills/learned")
+  const response = await request<LearnedSkillsResponse>("/api/skills/learned")
+  return {
+    skills: Array.isArray(response.skills)
+      ? response.skills.map((skill) => normalizeLearnedSkill(skill))
+      : [],
+  }
 }
 
 export async function importSkill(file: File): Promise<SkillActionResponse> {
