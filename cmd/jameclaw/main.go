@@ -178,8 +178,8 @@ func configuredStartupChoice() string {
 		}
 	}
 
-	// Default interactive startup path: open the Web Console directly.
-	return "web"
+	// Default interactive startup path: show the startup selector.
+	return "menu"
 }
 
 func renderSetupRequired() {
