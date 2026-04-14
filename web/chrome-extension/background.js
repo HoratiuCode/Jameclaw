@@ -40,41 +40,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "jameclaw-extension-open-sidepanel") {
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, async (tabs) => {
-      const tab = tabs[0]
-
-      if (chrome.runtime.lastError || !tab?.windowId) {
-        sendResponse({ ok: false, error: "No active browser window." })
+    chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") }, () => {
+      if (chrome.runtime.lastError) {
+        sendResponse({
+          ok: false,
+          error: chrome.runtime.lastError.message || "Could not open docked chat.",
+        })
         return
       }
 
-      try {
-        if (chrome.sidePanel?.open) {
-          await chrome.sidePanel.setOptions({
-            path: "sidepanel.html",
-            enabled: true,
-            tabId: tab.id,
-          })
-          await chrome.sidePanel.open({ tabId: tab.id })
-          sendResponse({ ok: true, mode: "sidepanel" })
-          return
-        }
-      } catch (error) {
-        chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") }, () => {
-          if (chrome.runtime.lastError) {
-            sendResponse({
-              ok: false,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Failed to open side panel.",
-            })
-            return
-          }
-
-          sendResponse({ ok: true, mode: "tab" })
-        })
-      }
+      sendResponse({ ok: true, mode: "tab" })
     })
 
     return true

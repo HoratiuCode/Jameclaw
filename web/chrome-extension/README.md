@@ -19,4 +19,12 @@ It does two things:
 
 - the popup only shows chat
 - the current page context is attached automatically in the background
+- selected text on the page is remembered and reused when you open the extension
+- the header `Pick` action refreshes the current page context and selected text
+- the header `Dock` action opens a persistent JameClaw chat tab so it stays visible while you work on the website
 - it talks to JameClaw through a local extension bootstrap endpoint and websocket proxy on `localhost:18800`
+
+## Notes
+
+- if you want JameClaw to focus on one part of a website, select that text before opening the extension
+- if `Dock` is used, the extension opens a dedicated chat tab instead of a Chrome side panel

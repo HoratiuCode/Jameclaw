@@ -5,8 +5,7 @@
   "version": "0.1.0",
   "permissions": [
     "activeTab",
-    "tabs",
-    "sidePanel"
+    "tabs"
   ],
   "icons": {
     "16": "favicon-96x96.png",
@@ -21,9 +20,6 @@
   ],
   "background": {
     "service_worker": "background.js"
-  },
-  "side_panel": {
-    "default_path": "sidepanel.html"
   },
   "action": {
     "default_icon": {
