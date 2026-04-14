@@ -93,8 +93,9 @@ function requestPageContext() {
 }
 
 function connectWebSocket(wsUrl, token) {
-  const url = `${wsUrl}?session_id=${encodeURIComponent(sessionId)}`
-  socket = new WebSocket(url, [`token.${token}`])
+  const separator = wsUrl.includes("?") ? "&" : "?"
+  const url = `${wsUrl}${separator}token=${encodeURIComponent(token)}&session_id=${encodeURIComponent(sessionId)}`
+  socket = new WebSocket(url)
 
   socket.addEventListener("open", () => {
     setStatus("")

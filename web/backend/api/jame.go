@@ -181,7 +181,7 @@ func (h *Handler) handleExtensionBootstrap(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	changed, err := h.ensureJameChannel(r.Header.Get("Origin"))
+	changed, err := h.ensureExtensionJameChannel(r.Header.Get("Origin"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -202,6 +202,14 @@ func (h *Handler) handleExtensionBootstrap(w http.ResponseWriter, r *http.Reques
 		"enabled": cfg.Channels.Jame.Enabled,
 		"changed": changed,
 	})
+
+	if changed {
+		go func() {
+			if _, err := h.RestartGateway(); err != nil {
+				h.TryAutoStartGateway()
+			}
+		}()
+	}
 }
 
 func (h *Handler) buildExtensionWsURL(r *http.Request) string {
@@ -219,6 +227,43 @@ func containsOrigin(origins []string, origin string) bool {
 		}
 	}
 	return false
+}
+
+func (h *Handler) ensureExtensionJameChannel(callerOrigin string) (bool, error) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	changed := false
+
+	if !cfg.Channels.Jame.Enabled {
+		cfg.Channels.Jame.Enabled = true
+		changed = true
+	}
+
+	if cfg.Channels.Jame.Token() == "" {
+		cfg.Channels.Jame.SetToken(generateSecureToken())
+		changed = true
+	}
+
+	if !cfg.Channels.Jame.AllowTokenQuery {
+		cfg.Channels.Jame.AllowTokenQuery = true
+		changed = true
+	}
+
+	if callerOrigin != "" && !containsOrigin(cfg.Channels.Jame.AllowOrigins, callerOrigin) {
+		cfg.Channels.Jame.AllowOrigins = append(cfg.Channels.Jame.AllowOrigins, callerOrigin)
+		changed = true
+	}
+
+	if changed {
+		if err := config.SaveConfig(h.configPath, cfg); err != nil {
+			return false, fmt.Errorf("failed to save config: %w", err)
+		}
+	}
+
+	return changed, nil
 }
 
 func setExtensionCORSHeaders(w http.ResponseWriter, r *http.Request) bool {
