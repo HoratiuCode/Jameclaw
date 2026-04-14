@@ -43,7 +43,12 @@ func (h *Handler) createWsProxy() *httputil.ReverseProxy {
 func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		proxy := h.createWsProxy()
-		proxy.ServeHTTP(w, r)
+		proxyReq := r.Clone(r.Context())
+		if strings.HasPrefix(proxyReq.URL.Path, "/extension/ws") {
+			proxyReq.URL.Path = "/jame/ws"
+			proxyReq.URL.RawPath = "/jame/ws"
+		}
+		proxy.ServeHTTP(w, proxyReq)
 	}
 }
 
