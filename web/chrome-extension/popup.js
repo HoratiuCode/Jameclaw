@@ -6,6 +6,7 @@ const composerEl = document.getElementById("composer")
 const inputEl = document.getElementById("input")
 const sendEl = document.getElementById("send")
 const refreshContextEl = document.getElementById("refresh-context")
+const isPopup = document.body.classList.contains("popup")
 
 let socket = null
 let currentAssistantMessage = null
@@ -235,7 +236,21 @@ inputEl.addEventListener("keydown", (event) => {
 })
 
 refreshContextEl.addEventListener("click", () => {
-  requestPageContext()
+  if (!isPopup) {
+    requestPageContext()
+    return
+  }
+
+  chrome.runtime.sendMessage(
+    { type: "jameclaw-extension-open-sidepanel" },
+    (response) => {
+      if (!response?.ok) {
+        setStatus(response?.error || "Could not open side panel.")
+        return
+      }
+      window.close()
+    },
+  )
 })
 
 bootstrap()

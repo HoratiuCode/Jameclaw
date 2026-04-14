@@ -1,11 +1,19 @@
 html,
 body {
   margin: 0;
-  width: 380px;
-  height: 560px;
   background: #050505;
   color: #ffffff;
   font: 12px/1.4 Inter, "Segoe UI", sans-serif;
+}
+
+body.popup {
+  width: 380px;
+  height: 560px;
+}
+
+body.sidepanel {
+  width: 100%;
+  height: 100vh;
 }
 
 body {
@@ -123,6 +131,10 @@ body {
 
 .topbar-button:hover {
   background: rgba(239, 68, 68, 0.18);
+}
+
+body.sidepanel .topbar-button {
+  display: none;
 }
 
 .composer {
