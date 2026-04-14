@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JameClaw Chat</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body class="sidepanel">
+    <div class="app">
+      <div class="topbar">
+        <img class="brand-icon" src="favicon-96x96.png" alt="JameClaw" />
+        <div class="topbar-copy">
+          <div class="title">JameClaw Chat</div>
+          <div id="status" class="status">Connecting…</div>
+        </div>
+        <button id="refresh-context" class="topbar-button" type="button">Pick</button>
+      </div>
+
+      <div id="messages" class="messages"></div>
+
+      <form id="composer" class="composer">
+        <textarea
+          id="input"
+          rows="1"
+          placeholder="Ask about this page"
+        ></textarea>
+        <button id="send" type="submit">↗</button>
+      </form>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
