@@ -29,12 +29,12 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.brand-mark {
-  width: 9px;
-  height: 28px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #ef4444, #991b1b);
-  box-shadow: 0 0 18px rgba(239, 68, 68, 0.35);
+.brand-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.28);
 }
 
 .topbar-copy {

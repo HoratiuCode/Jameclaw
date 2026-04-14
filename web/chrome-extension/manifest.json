@@ -7,6 +7,12 @@
     "activeTab",
     "tabs"
   ],
+  "icons": {
+    "16": "favicon-96x96.png",
+    "32": "favicon-96x96.png",
+    "48": "favicon-96x96.png",
+    "128": "favicon.png"
+  },
   "host_permissions": [
     "http://localhost:18800/*",
     "http://127.0.0.1:18800/*",
@@ -16,6 +22,10 @@
     "service_worker": "background.js"
   },
   "action": {
+    "default_icon": {
+      "16": "favicon-96x96.png",
+      "32": "favicon-96x96.png"
+    },
     "default_title": "JameClaw Companion",
     "default_popup": "popup.html"
   },
