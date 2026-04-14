@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,6 +22,11 @@ func LocalSessionAuth(accessToken string, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isLocalExtensionRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if hasLauncherSessionCookie(r, accessToken) {
 			next.ServeHTTP(w, r)
 			return
@@ -54,6 +60,25 @@ func LocalSessionAuth(accessToken string, next http.Handler) http.Handler {
 
 		rejectUnauthorized(w, r)
 	})
+}
+
+func isLocalExtensionRequest(r *http.Request) bool {
+	if !(strings.HasPrefix(r.URL.Path, "/api/extension/") || strings.HasPrefix(r.URL.Path, "/extension/ws")) {
+		return false
+	}
+
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if !strings.HasPrefix(origin, "chrome-extension://") {
+		return false
+	}
+
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = h
+	}
+
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func hasLauncherSessionCookie(r *http.Request, accessToken string) bool {

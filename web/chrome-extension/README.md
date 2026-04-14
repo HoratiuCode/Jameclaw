@@ -1,11 +1,11 @@
 # JameClaw Chrome Extension
 
-This extension is a thin shell around the local JameClaw web launcher.
+This extension is a native popup chat for the local JameClaw launcher.
 
 It does two things:
 
-- opens a compact JameClaw page from `http://localhost:18800/extension`
-- captures the active tab's title, URL, selection, and a short text excerpt, then forwards that context into the compact assistant
+- opens a plain chat popup inside Chrome
+- captures the active tab's title, URL, selection, and a short text excerpt, then attaches that context to each message
 
 ## Load it in Chrome
 
@@ -17,11 +17,6 @@ It does two things:
 
 ## Current behavior
 
-- `Read This`: summarize the current page with actions and notable points
-- `Explain Selection`: explain the selected text in context
-- `Save To Calendar`: asks JameClaw to extract event details and use tools if available
-- `Next Steps`: turns the page into a short action plan
-
-## Current limitation
-
-The embedded page uses the same local session protection as the normal launcher. If the popup shows an auth message, open `http://localhost:18800` in Chrome first so the launcher session cookie is created.
+- the popup only shows chat
+- the current page context is attached automatically in the background
+- it talks to JameClaw through a local extension bootstrap endpoint and websocket proxy on `localhost:18800`

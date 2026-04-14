@@ -3,15 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>JameClaw Companion</title>
+    <title>JameClaw Chat</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <iframe
-      id="jameclaw-frame"
-      title="JameClaw Companion"
-      src="http://localhost:18800/extension"
-    ></iframe>
+    <div class="app">
+      <div class="topbar">
+        <div class="brand-mark"></div>
+        <div class="topbar-copy">
+          <div class="title">JameClaw Chat</div>
+          <div id="status" class="status">Connecting…</div>
+        </div>
+      </div>
+
+      <div id="messages" class="messages"></div>
+
+      <form id="composer" class="composer">
+        <textarea
+          id="input"
+          rows="1"
+          placeholder="Ask about this page"
+        ></textarea>
+        <button id="send" type="submit">↗</button>
+      </form>
+    </div>
 
     <script src="popup.js"></script>
   </body>

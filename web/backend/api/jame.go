@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 	"time"
 
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -17,11 +18,14 @@ func (h *Handler) registerJameRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/jame/token", h.handleGetJameToken)
 	mux.HandleFunc("POST /api/jame/token", h.handleRegenJameToken)
 	mux.HandleFunc("POST /api/jame/setup", h.handleJameSetup)
+	mux.HandleFunc("OPTIONS /api/extension/bootstrap", h.handleExtensionBootstrapOptions)
+	mux.HandleFunc("GET /api/extension/bootstrap", h.handleExtensionBootstrap)
 
 	// WebSocket proxy: forward /jame/ws to gateway
 	// This allows the frontend to connect via the same port as the web UI,
 	// avoiding the need to expose extra ports for WebSocket communication.
 	mux.HandleFunc("GET /jame/ws", h.handleWebSocketProxy())
+	mux.HandleFunc("GET /extension/ws", h.handleWebSocketProxy())
 }
 
 // createWsProxy creates a reverse proxy to the current gateway WebSocket endpoint.
@@ -115,9 +119,9 @@ func (h *Handler) ensureJameChannel(callerOrigin string) (bool, error) {
 		changed = true
 	}
 
-	// Seed origins from the request instead of hardcoding ports.
-	if len(cfg.Channels.Jame.AllowOrigins) == 0 && callerOrigin != "" {
-		cfg.Channels.Jame.AllowOrigins = []string{callerOrigin}
+	// Seed or extend origins from the request instead of hardcoding ports.
+	if callerOrigin != "" && !containsOrigin(cfg.Channels.Jame.AllowOrigins, callerOrigin) {
+		cfg.Channels.Jame.AllowOrigins = append(cfg.Channels.Jame.AllowOrigins, callerOrigin)
 		changed = true
 	}
 
@@ -155,6 +159,74 @@ func (h *Handler) handleJameSetup(w http.ResponseWriter, r *http.Request) {
 		"enabled": true,
 		"changed": changed,
 	})
+}
+
+func (h *Handler) handleExtensionBootstrapOptions(w http.ResponseWriter, r *http.Request) {
+	if !setExtensionCORSHeaders(w, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleExtensionBootstrap(w http.ResponseWriter, r *http.Request) {
+	if !setExtensionCORSHeaders(w, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	changed, err := h.ensureJameChannel(r.Header.Get("Origin"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	wsURL := h.buildExtensionWsURL(r)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"token":   cfg.Channels.Jame.Token(),
+		"ws_url":  wsURL,
+		"enabled": cfg.Channels.Jame.Enabled,
+		"changed": changed,
+	})
+}
+
+func (h *Handler) buildExtensionWsURL(r *http.Request) string {
+	host := r.Host
+	if strings.TrimSpace(host) == "" {
+		host = fmt.Sprintf("localhost:%d", h.serverPort)
+	}
+	return "ws://" + host + "/extension/ws"
+}
+
+func containsOrigin(origins []string, origin string) bool {
+	for _, existing := range origins {
+		if existing == origin {
+			return true
+		}
+	}
+	return false
+}
+
+func setExtensionCORSHeaders(w http.ResponseWriter, r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if !strings.HasPrefix(origin, "chrome-extension://") {
+		return false
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Vary", "Origin")
+	return true
 }
 
 // generateSecureToken creates a random 32-character hex string.

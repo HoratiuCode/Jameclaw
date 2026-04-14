@@ -80,3 +80,19 @@ func TestLocalSessionAuth_RejectsAPIWithoutToken(t *testing.T) {
 		t.Fatalf("body = %q", body)
 	}
 }
+
+func TestLocalSessionAuth_AllowsLocalExtensionBootstrap(t *testing.T) {
+	h := LocalSessionAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/extension/bootstrap", nil)
+	req.RemoteAddr = "127.0.0.1:45678"
+	req.Header.Set("Origin", "chrome-extension://test-extension-id")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
