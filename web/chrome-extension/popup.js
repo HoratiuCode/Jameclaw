@@ -5,6 +5,7 @@ const statusEl = document.getElementById("status")
 const composerEl = document.getElementById("composer")
 const inputEl = document.getElementById("input")
 const sendEl = document.getElementById("send")
+const refreshContextEl = document.getElementById("refresh-context")
 
 let socket = null
 let currentAssistantMessage = null
@@ -45,7 +46,8 @@ function ensureEmptyState() {
 
   const empty = document.createElement("div")
   empty.className = "empty"
-  empty.textContent = "Start typing. The current page context is attached automatically."
+  empty.textContent =
+    "Start typing. The current page context is attached automatically. Select text on the website before opening the popup if you want JameClaw to focus on it."
   messagesEl.appendChild(empty)
 }
 
@@ -88,6 +90,16 @@ function requestPageContext() {
       }
 
       pendingContext = normalizeContext(response.context)
+      if (pendingContext.selection) {
+        setStatus("Using selected text.")
+        return
+      }
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        setStatus("Connecting…")
+      } else {
+        setStatus("")
+      }
     },
   )
 }
@@ -98,7 +110,7 @@ function connectWebSocket(wsUrl, token) {
   socket = new WebSocket(url)
 
   socket.addEventListener("open", () => {
-    setStatus("")
+    setStatus(pendingContext?.selection ? "Using selected text." : "")
     setComposerEnabled(true)
   })
 
@@ -220,6 +232,10 @@ inputEl.addEventListener("keydown", (event) => {
     event.preventDefault()
     composerEl.requestSubmit()
   }
+})
+
+refreshContextEl.addEventListener("click", () => {
+  requestPageContext()
 })
 
 bootstrap()

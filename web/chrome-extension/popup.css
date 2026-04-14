@@ -39,6 +39,7 @@ body {
 
 .topbar-copy {
   min-width: 0;
+  flex: 1;
 }
 
 .title {
@@ -104,6 +105,26 @@ body {
   font-size: 11px;
 }
 
+.topbar-button {
+  align-self: center;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  font: 11px/1 Inter, "Segoe UI", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: none;
+}
+
+.topbar-button:hover {
+  background: rgba(239, 68, 68, 0.18);
+}
+
 .composer {
   display: flex;
   gap: 8px;
@@ -149,6 +170,10 @@ button {
   padding: 0;
   font: 16px/1 Inter, "Segoe UI", sans-serif;
   font-weight: 700;
+  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.24);
+}
+
+#send {
   box-shadow: 0 10px 24px rgba(239, 68, 68, 0.24);
 }
 
