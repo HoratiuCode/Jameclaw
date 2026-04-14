@@ -55,18 +55,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             enabled: true,
             tabId: tab.id,
           })
-          await chrome.sidePanel.open({ windowId: tab.windowId })
+          await chrome.sidePanel.open({ tabId: tab.id })
           sendResponse({ ok: true, mode: "sidepanel" })
           return
         }
-
-        chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") }, () => {
-          sendResponse({ ok: true, mode: "tab" })
-        })
       } catch (error) {
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : "Failed to open side panel.",
+        chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") }, () => {
+          if (chrome.runtime.lastError) {
+            sendResponse({
+              ok: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to open side panel.",
+            })
+            return
+          }
+
+          sendResponse({ ok: true, mode: "tab" })
         })
       }
     })
