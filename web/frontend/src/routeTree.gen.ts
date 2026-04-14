@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as LandingRouteImport } from './routes/landing'
+import { Route as ExtensionRouteImport } from './routes/extension'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as ConfigRouteImport } from './routes/config'
 import { Route as AgentRouteImport } from './routes/agent'
@@ -36,6 +37,11 @@ const LogsRoute = LogsRouteImport.update({
 const LandingRoute = LandingRouteImport.update({
   id: '/landing',
   path: '/landing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExtensionRoute = ExtensionRouteImport.update({
+  id: '/extension',
+  path: '/extension',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CredentialsRoute = CredentialsRouteImport.update({
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/agent': typeof AgentRouteWithChildren
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
+  '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
@@ -110,6 +117,7 @@ export interface FileRoutesByTo {
   '/agent': typeof AgentRouteWithChildren
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
+  '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
@@ -126,6 +134,7 @@ export interface FileRoutesById {
   '/agent': typeof AgentRouteWithChildren
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
+  '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
@@ -143,6 +152,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/config'
     | '/credentials'
+    | '/extension'
     | '/landing'
     | '/logs'
     | '/models'
@@ -158,6 +168,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/config'
     | '/credentials'
+    | '/extension'
     | '/landing'
     | '/logs'
     | '/models'
@@ -173,6 +184,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/config'
     | '/credentials'
+    | '/extension'
     | '/landing'
     | '/logs'
     | '/models'
@@ -189,6 +201,7 @@ export interface RootRouteChildren {
   AgentRoute: typeof AgentRouteWithChildren
   ConfigRoute: typeof ConfigRouteWithChildren
   CredentialsRoute: typeof CredentialsRoute
+  ExtensionRoute: typeof ExtensionRoute
   LandingRoute: typeof LandingRoute
   LogsRoute: typeof LogsRoute
   ModelsRoute: typeof ModelsRoute
@@ -215,6 +228,13 @@ declare module '@tanstack/react-router' {
       path: '/landing'
       fullPath: '/landing'
       preLoaderRoute: typeof LandingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/extension': {
+      id: '/extension'
+      path: '/extension'
+      fullPath: '/extension'
+      preLoaderRoute: typeof ExtensionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/credentials': {
@@ -333,6 +353,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentRoute: AgentRouteWithChildren,
   ConfigRoute: ConfigRouteWithChildren,
   CredentialsRoute: CredentialsRoute,
+  ExtensionRoute: ExtensionRoute,
   LandingRoute: LandingRoute,
   LogsRoute: LogsRoute,
   ModelsRoute: ModelsRoute,

@@ -1,1 +1,0 @@
-import{c as n,r as o}from"./index-CWk28KfI.js";const t=[["path",{d:"M6 9l6 6l6 -6",key:"svg-0"}]],s=n("outline","chevron-down","ChevronDown",t);function u(r){const e=o.useRef({value:r,previous:r});return o.useMemo(()=>(e.current.value!==r&&(e.current.previous=e.current.value,e.current.value=r),e.current.previous),[r])}export{s as I,u};

@@ -7,13 +7,14 @@ import { initializeChatStore } from "@/features/chat/controller"
 
 const RootLayout = () => {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const isStandaloneLanding = pathname === "/landing"
+  const isStandaloneRoute = pathname === "/landing" || pathname === "/extension"
+  const shouldInitChatStore = pathname !== "/landing"
 
   useEffect(() => {
-    if (!isStandaloneLanding) {
+    if (shouldInitChatStore) {
       initializeChatStore()
     }
-  }, [isStandaloneLanding])
+  }, [shouldInitChatStore])
 
   const content = (
     <>
@@ -22,7 +23,7 @@ const RootLayout = () => {
     </>
   )
 
-  if (isStandaloneLanding) {
+  if (isStandaloneRoute) {
     return content
   }
 
