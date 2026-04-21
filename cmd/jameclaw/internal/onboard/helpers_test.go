@@ -192,8 +192,8 @@ func TestPromptAgentSignatureEmojiSupportsComplexEmoji(t *testing.T) {
 
 func TestLoadOnboardSkillOptionsIncludesEmbeddedSkills(t *testing.T) {
 	options := loadOnboardSkillOptions()
-	if len(options) != 10 {
-		t.Fatalf("loadOnboardSkillOptions() len = %d, want 10", len(options))
+	if len(options) != 11 {
+		t.Fatalf("loadOnboardSkillOptions() len = %d, want 11", len(options))
 	}
 
 	want := map[string]bool{
@@ -202,6 +202,7 @@ func TestLoadOnboardSkillOptionsIncludesEmbeddedSkills(t *testing.T) {
 		"github":        false,
 		"hardware":      false,
 		"moltbook":      false,
+		"security":      false,
 		"skill-creator": false,
 		"summarize":     false,
 		"twitter-x":     false,
@@ -237,6 +238,7 @@ func TestPromptSkillSelectionDefaultsToPreselectedSkills(t *testing.T) {
 		"gog",
 		"hardware",
 		"moltbook",
+		"security",
 		"skill-creator",
 		"summarize",
 		"tmux",
@@ -257,7 +259,7 @@ func TestPromptSkillSelectionDefaultsToPreselectedSkills(t *testing.T) {
 func TestPromptSkillSelectionStoresExplicitSubset(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	selected, err := promptSkillSelection(newLineReader("2 6\n"), cfg)
+	selected, err := promptSkillSelection(newLineReader("2 7\n"), cfg)
 	if err != nil {
 		t.Fatalf("promptSkillSelection() error = %v", err)
 	}
