@@ -12,6 +12,8 @@ import (
 	"github.com/sipeed/jameclaw/web/backend/utils"
 )
 
+const githubRepoURL = "https://github.com/HoratiuCode/Jameclaw"
+
 func runTray() {
 	systray.Run(onReady, onExit)
 }
@@ -51,11 +53,16 @@ func onReady() {
 					logger.Errorf("Failed to open browser: %v", err)
 				}
 
+			case <-mAbout.ClickedCh:
+				if err := utils.OpenBrowser(githubRepoURL); err != nil {
+					logger.Errorf("Failed to open About page: %v", err)
+				}
+
 			case <-mVersion.ClickedCh:
 				// Version info - do nothing, just shows current version
 
 			case <-mRepo.ClickedCh:
-				if err := utils.OpenBrowser("https://github.com/sipeed/jameclaw"); err != nil {
+				if err := utils.OpenBrowser(githubRepoURL); err != nil {
 					logger.Errorf("Failed to open GitHub: %v", err)
 				}
 
