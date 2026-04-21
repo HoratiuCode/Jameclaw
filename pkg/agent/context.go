@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sipeed/jameclaw/pkg"
+	"github.com/sipeed/jameclaw/pkg/commands"
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/pkg/providers"
@@ -84,9 +85,10 @@ func (cb *ContextBuilder) getIdentity() string {
 	workspacePath, _ := filepath.Abs(filepath.Join(cb.workspace))
 	toolDiscovery := cb.getDiscoveryRule()
 	version := config.FormatVersion()
+	emoji := commands.ReadAgentSignatureEmoji(cb.workspace)
 
 	return fmt.Sprintf(
-		`# jameclaw 🦐 (%s)
+		`# jameclaw %s (%s)
 
 You are jameclaw, a helpful AI assistant.
 You are Your AI agent for fancy jobs.
@@ -125,7 +127,7 @@ Your workspace is at: %s
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.
 
 %s`,
-		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
+		emoji, version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
 }
 
 func (cb *ContextBuilder) getDiscoveryRule() string {

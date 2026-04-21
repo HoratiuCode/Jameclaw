@@ -3202,6 +3202,13 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 	}
 	if agent != nil && agent.ContextBuilder != nil {
 		rt.ListSkillNames = agent.ContextBuilder.ListSkillNames
+		rt.GetActiveSkills = func() []string {
+			return append([]string(nil), agent.SkillsFilter...)
+		}
+		rt.SetActiveSkills = func(values []string) error {
+			agent.SkillsFilter = append([]string(nil), values...)
+			return nil
+		}
 	}
 	rt.ReloadConfig = func() error {
 		if al.reloadFunc == nil {

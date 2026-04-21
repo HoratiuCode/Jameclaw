@@ -42,6 +42,15 @@ func TestBuiltinHelpHandler_ReturnsFormattedMessage(t *testing.T) {
 	if !strings.Contains(reply, "/list [models|channels|agents|skills]") {
 		t.Fatalf("/help reply missing /list usage, got %q", reply)
 	}
+	if !strings.Contains(reply, "/skills [show|add <skill>|remove <skill>]") {
+		t.Fatalf("/help reply missing /skills usage, got %q", reply)
+	}
+	if !strings.Contains(reply, "/emoji [emoji|show]") {
+		t.Fatalf("/help reply missing /emoji usage, got %q", reply)
+	}
+	if !strings.Contains(reply, "/persona <text>") {
+		t.Fatalf("/help reply missing /persona usage, got %q", reply)
+	}
 	if !strings.Contains(reply, "/use <skill> <message>") {
 		if !strings.Contains(reply, "/use <skill> [message]") {
 			t.Fatalf("/help reply missing /use usage, got %q", reply)

@@ -118,6 +118,11 @@ func NewAgentInstance(
 		agentName = agentCfg.Name
 		subagents = agentCfg.Subagents
 		skillsFilter = agentCfg.Skills
+		if contextBuilder != nil {
+			if definition := contextBuilder.LoadAgentDefinition(); definition.Agent != nil {
+				skillsFilter = mergeStringLists(skillsFilter, definition.Agent.Frontmatter.Skills)
+			}
+		}
 	}
 
 	maxIter := defaults.MaxToolIterations
@@ -206,6 +211,25 @@ func NewAgentInstance(
 		Router:                    router,
 		LightCandidates:           lightCandidates,
 	}
+}
+
+func mergeStringLists(values ...[]string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, list := range values {
+		for _, value := range list {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // resolveAgentWorkspace determines the workspace directory for an agent.

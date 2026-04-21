@@ -57,8 +57,8 @@ export function ExtensionPage() {
 
   const { state: gwState, canStart, startReason, pid, owned } = useGateway()
   const isGatewayRunning = gwState === "running"
-  const isChatConnected = connectionState === "connected"
   const { defaultModelName } = useChatModels({ isConnected: isGatewayRunning })
+  const canSend = isGatewayRunning && Boolean(defaultModelName)
 
   const disabledReason = !defaultModelName
     ? "Choose a default model in JameClaw before sending messages."
@@ -66,15 +66,13 @@ export function ExtensionPage() {
       ? startReason
       : gwState === "running" && !owned
         ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}.`
-        : !isGatewayRunning
-          ? "The gateway is not running."
-          : connectionState === "connecting"
-            ? "Connecting to JameClaw..."
-            : connectionState === "error"
-              ? (errorMessage ?? "Could not connect to the Jame chat session.")
-              : !isChatConnected
-                ? "The assistant is not connected yet."
-                : null
+      : !isGatewayRunning
+        ? "The gateway is not running."
+        : connectionState === "connecting"
+          ? "Connecting to JameClaw..."
+          : connectionState === "error"
+            ? (errorMessage ?? "Could not connect to the Jame chat session.")
+            : null
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
@@ -150,7 +148,7 @@ export function ExtensionPage() {
         onInputChange={setInput}
         onSend={handleSend}
         disabledReason={disabledReason}
-        isConnected={isChatConnected}
+        isConnected={canSend}
         hasDefaultModel={Boolean(defaultModelName)}
       />
       <Toaster position="bottom-center" />

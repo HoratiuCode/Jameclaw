@@ -56,6 +56,11 @@ export function ChatComposer({
             {disabledReason && (
               <p className="text-muted-foreground text-xs">{disabledReason}</p>
             )}
+            {!disabledReason && (
+              <p className="text-muted-foreground text-xs">
+                Try /emoji, /persona, or /skills add &lt;skill&gt; to customize the assistant.
+              </p>
+            )}
           </div>
 
           <Button

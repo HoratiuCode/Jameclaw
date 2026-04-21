@@ -34,6 +34,11 @@ let connectionGeneration = 0
 let reconnectTimer: number | null = null
 let reconnectAttempts = 0
 let shouldMaintainConnection = false
+let pendingMessages: Array<{
+  id: string
+  content: string
+  sessionId: string
+}> = []
 
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
@@ -90,6 +95,7 @@ function disconnectChatInternal({
 }) {
   connectionGeneration += 1
   clearReconnectTimer()
+  pendingMessages = []
 
   if (clearDesiredConnection) {
     shouldMaintainConnection = false
@@ -178,6 +184,26 @@ export async function connectChat() {
       updateChatStore({ connectionState: "connected", errorMessage: null })
       isConnecting = false
       reconnectAttempts = 0
+
+      const queued = pendingMessages.filter((message) => message.sessionId === sessionId)
+      pendingMessages = pendingMessages.filter((message) => message.sessionId !== sessionId)
+      for (const message of queued) {
+        try {
+          socket.send(
+            JSON.stringify({
+              type: "message.send",
+              id: message.id,
+              payload: { content: message.content },
+            }),
+          )
+        } catch (error) {
+          console.error("Failed to flush queued jame message:", error)
+          updateChatStore((prev) => ({
+            messages: prev.messages.filter((item) => item.id !== message.id),
+            isTyping: false,
+          }))
+        }
+      }
     }
 
     socket.onmessage = (event) => {
@@ -340,18 +366,37 @@ export async function hydrateActiveSession() {
 }
 
 export function sendChatMessage(content: string) {
+  const id = `msg-${++msgIdCounter}-${Date.now()}`
+  const sessionId = activeSessionIdRef
+
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
-    console.warn("WebSocket not connected")
-    const message =
-      getChatState().errorMessage ||
-      "Chat is not connected. Start the gateway and wait for the session to reconnect."
-    updateChatStore({ errorMessage: message })
-    toast.error(message)
-    return false
+    if (store.get(gatewayAtom).status !== "running") {
+      console.warn("WebSocket not connected")
+      const message =
+        getChatState().errorMessage ||
+        "Chat is not connected. Start the gateway and wait for the session to reconnect."
+      updateChatStore({ errorMessage: message })
+      toast.error(message)
+      return false
+    }
+
+    shouldMaintainConnection = true
+    pendingMessages.push({ id, content, sessionId })
+    updateChatStore((prev) => ({
+      messages: [
+        ...prev.messages,
+        { id, role: "user", content, timestamp: Date.now() },
+      ],
+      errorMessage: null,
+      isTyping: true,
+      connectionState: prev.connectionState === "connected" ? prev.connectionState : "connecting",
+    }))
+
+    void connectChat()
+    return true
   }
 
   const socket = wsRef
-  const id = `msg-${++msgIdCounter}-${Date.now()}`
 
   updateChatStore((prev) => ({
     messages: [
