@@ -1,4 +1,6 @@
 const BOOTSTRAP_URL = "http://localhost:18800/api/extension/bootstrap"
+const BOOTSTRAP_TIMEOUT_MS = 1500
+const MAX_RETRY_DELAY_MS = 2000
 
 const messagesEl = document.getElementById("messages")
 const statusEl = document.getElementById("status")
@@ -50,7 +52,7 @@ function scheduleReconnect() {
     return
   }
 
-  const delay = Math.min(1000 * 2 ** reconnectAttempts, 5000)
+  const delay = Math.min(250 * 2 ** reconnectAttempts, MAX_RETRY_DELAY_MS)
   reconnectAttempts += 1
   setStatus("Reconnecting…")
   reconnectTimer = setTimeout(() => {
@@ -67,7 +69,7 @@ function scheduleBootstrapRetry() {
     return
   }
 
-  const delay = Math.min(1000 * 2 ** bootstrapRetryAttempts, 5000)
+  const delay = Math.min(250 * 2 ** bootstrapRetryAttempts, MAX_RETRY_DELAY_MS)
   bootstrapRetryAttempts += 1
   setStatus("Connecting…")
   bootstrapRetryTimer = setTimeout(() => {
@@ -234,13 +236,18 @@ function connectWebSocket(wsUrl, token) {
 async function bootstrap() {
   ensureEmptyState()
   setComposerEnabled(false)
+  setStatus("Connecting…")
   requestPageContext()
   clearBootstrapRetryTimer()
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), BOOTSTRAP_TIMEOUT_MS)
 
   try {
     const response = await fetch(BOOTSTRAP_URL, {
       method: "GET",
       headers: { Accept: "application/json" },
+      signal: controller.signal,
     })
 
     if (!response.ok) {
@@ -254,12 +261,18 @@ async function bootstrap() {
 
     connectWebSocket(data.ws_url, data.token)
   } catch (error) {
-    setStatus(
-      error instanceof Error
-        ? error.message
-        : "Could not reach local JameClaw on localhost:18800.",
-    )
+    if (error instanceof Error && error.name === "AbortError") {
+      setStatus("Connecting…")
+    } else {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Could not reach local JameClaw on localhost:18800.",
+      )
+    }
     scheduleBootstrapRetry()
+  } finally {
+    window.clearTimeout(timeoutId)
   }
 }
 
