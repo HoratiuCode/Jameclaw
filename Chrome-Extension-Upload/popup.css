@@ -1,9 +1,44 @@
 html,
 body {
   margin: 0;
-  background: #050505;
-  color: #ffffff;
+  background: var(--background);
+  color: var(--foreground);
   font: 12px/1.4 Inter, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+
+:root {
+  --background: #0f0f0f;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #262626;
+  --accent-foreground: #fafafa;
+  --border: rgba(255, 255, 255, 0.1);
+  --ring: rgba(255, 255, 255, 0.16);
+  --destructive: #dc2626;
+  --destructive-soft: rgba(220, 38, 38, 0.14);
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #ffffff;
+    --foreground: #0f0f0f;
+    --card: #f8fafc;
+    --card-foreground: #0f0f0f;
+    --muted: #e5e7eb;
+    --muted-foreground: #6b7280;
+    --accent: #f3f4f6;
+    --accent-foreground: #0f0f0f;
+    --border: rgba(15, 15, 15, 0.12);
+    --ring: rgba(15, 15, 15, 0.18);
+    --destructive: #dc2626;
+    --destructive-soft: rgba(220, 38, 38, 0.1);
+    --shadow: 0 24px 80px rgba(15, 15, 15, 0.12);
+  }
 }
 
 body.popup {
@@ -25,8 +60,8 @@ body {
   height: 100%;
   flex-direction: column;
   background:
-    radial-gradient(circle at top, rgba(220, 38, 38, 0.22), transparent 34%),
-    linear-gradient(180deg, #0b0b0b, #050505);
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.05), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 20%);
 }
 
 .topbar {
@@ -34,7 +69,9 @@ body {
   align-items: center;
   gap: 10px;
   padding: 10px 12px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 84%, transparent);
+  backdrop-filter: blur(16px);
 }
 
 .brand-icon {
@@ -42,7 +79,7 @@ body {
   height: 24px;
   border-radius: 6px;
   object-fit: cover;
-  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.28);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 }
 
 .topbar-copy {
@@ -53,9 +90,9 @@ body {
 .title {
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #ffffff;
+  color: var(--foreground);
 }
 
 .messages {
@@ -66,12 +103,13 @@ body {
 }
 
 .empty {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #cbd5e1;
+  background: var(--card);
+  color: var(--muted-foreground);
   padding: 11px 12px;
   line-height: 1.55;
+  box-shadow: var(--shadow);
 }
 
 .message {
@@ -81,35 +119,37 @@ body {
   border-radius: 14px;
   white-space: pre-wrap;
   word-break: break-word;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--shadow);
 }
 
 .message.user {
   margin-left: auto;
-  background: linear-gradient(180deg, #ef4444, #b91c1c);
-  color: #ffffff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.08));
+  color: var(--foreground);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-bottom-right-radius: 4px;
 }
 
 .message.assistant {
   margin-right: auto;
-  background: #ffffff;
-  color: #111111;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
 }
 
 .message.error {
   margin-right: auto;
-  background: #2a0c0c;
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.28);
+  background: var(--destructive-soft);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.28);
   border-bottom-left-radius: 4px;
 }
 
 .status {
   min-height: 14px;
   margin-top: 2px;
-  color: #fca5a5;
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 
@@ -119,18 +159,18 @@ body {
   height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  background: rgba(255, 255, 255, 0.05);
-  color: #ffffff;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground);
   font: 11px/1 Inter, "Segoe UI", sans-serif;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  box-shadow: none;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
 }
 
 .topbar-button:hover {
-  background: rgba(239, 68, 68, 0.18);
+  background: color-mix(in srgb, var(--accent) 92%, transparent);
 }
 
 body.sidepanel .topbar-button {
@@ -141,9 +181,9 @@ body.sidepanel .topbar-button {
   display: flex;
   gap: 8px;
   padding: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 84%, transparent);
+  backdrop-filter: blur(16px);
 }
 
 textarea {
@@ -151,23 +191,23 @@ textarea {
   resize: none;
   min-height: 38px;
   max-height: 120px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 9px 11px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #ffffff;
+  background: var(--card);
+  color: var(--foreground);
   outline: none;
   font: inherit;
   line-height: 1.45;
 }
 
 textarea::placeholder {
-  color: #94a3b8;
+  color: var(--muted-foreground);
 }
 
 textarea:focus {
-  border-color: rgba(239, 68, 68, 0.9);
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.16);
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 28%, transparent);
 }
 
 button {
@@ -176,17 +216,17 @@ button {
   height: 38px;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(180deg, #ef4444, #b91c1c);
-  color: #ffffff;
+  background: linear-gradient(180deg, #fafafa, #d4d4d8);
+  color: #111827;
   cursor: pointer;
   padding: 0;
   font: 16px/1 Inter, "Segoe UI", sans-serif;
   font-weight: 700;
-  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.24);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
 #send {
-  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.24);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
 button:disabled,
@@ -200,6 +240,6 @@ textarea:disabled {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--border);
   border-radius: 999px;
 }
