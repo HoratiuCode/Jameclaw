@@ -1,7 +1,6 @@
 ---
 name: session-logs
-description: Search and analyze JameClaw session logs and legacy OpenClaw history using jq and rg.
-metadata: {"openclaw":{"emoji":"📜","requires":{"bins":["jq","rg"]},"install":[{"id":"brew-jq","kind":"brew","formula":"jq","bins":["jq"],"label":"Install jq (brew)"},{"id":"brew-rg","kind":"brew","formula":"ripgrep","bins":["rg"],"label":"Install ripgrep (brew)"}]}}
+description: Search and analyze JameClaw session logs using jq and rg.
 ---
 
 # session-logs
@@ -20,18 +19,6 @@ Files:
 - `*.jsonl` - current append-only message stream
 - `*.meta.json` - summary, count, skip offset, timestamps
 - `*.json` - legacy session snapshots if older storage is still present
-
-Legacy OpenClaw history, if it has not been migrated yet:
-
-- `~/.openclaw/agents/<agentId>/sessions/`
-
-Notes:
-
-- `jameclaw migrate --from openclaw` migrates config and workspace files.
-- It does not automatically rewrite OpenClaw session transcripts into the
-  JameClaw JSONL store.
-- If the user wants old OpenClaw conversations searchable in JameClaw, inspect
-  them in place or copy/convert them into the JameClaw session directory.
 
 ## Quick commands
 
@@ -70,21 +57,3 @@ List tool calls:
 ```bash
 jq -r '.tool_calls[]?.function?.name' <session>.jsonl | sort | uniq -c
 ```
-
-## OpenClaw legacy format
-
-If you are reading an un-migrated OpenClaw transcript directly, its JSONL
-wrapper uses the older nested shape:
-
-```bash
-jq -r 'select(.message.role == "user") | .message.content[]? | select(.type == "text") | .text' <session>.jsonl
-```
-
-For a one-time migration into JameClaw, run the built-in migration first:
-
-```bash
-jameclaw migrate --from openclaw --force
-```
-
-Then inspect the JameClaw workspace session directory again.
-
