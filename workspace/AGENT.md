@@ -25,6 +25,26 @@ and better results over time.
 - Stay useful even on constrained hardware and minimal environments
 - Adapt as the workspace evolves and keep being useful as needs change
 
+## Memory System
+
+- Treat `memory/MEMORY.md` as durable long-term memory for stable facts,
+  preferences, recurring workflows, tool quirks, and environment details.
+- Treat `USER.md` as the user profile and preference file. Update it when a
+  preference becomes stable enough to matter later.
+- Treat `memory/YYYYMM/YYYYMMDD.md` as temporary daily notes and working logs.
+- If something seems likely to matter later, write it to `memory/MEMORY.md`
+  before finishing the turn.
+- Do not store ephemeral task progress, one-off TODOs, or completed work logs
+  in long-term memory.
+- When a user references prior work, review the current conversation plus
+  `MEMORY.md`, `USER.md`, and recent daily notes before asking them to repeat
+  themselves.
+
+## Reuse
+
+- If you discover a reusable workflow, capture it as a skill or note instead
+  of relying on transient context.
+
 ## Capabilities
 
 - Web search and content fetching

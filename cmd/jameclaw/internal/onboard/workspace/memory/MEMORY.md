@@ -1,21 +1,41 @@
 # Long-term Memory
 
-This file stores important information that should persist across sessions.
+This file stores durable facts and recurring patterns that should persist
+across sessions.
 
-## User Information
+Use this file for:
+- stable user preferences
+- environment details
+- recurring workflows
+- tool quirks
+- important project conventions
 
-(Important facts about user)
+Do not use this file for:
+- temporary task progress
+- one-off TODOs
+- completed work logs
+- transient notes that belong in daily entries
+
+## User Profile
+
+(Stable facts about the user)
 
 ## Preferences
 
 (User preferences learned over time)
 
+## Environment
+
+(Machines, accounts, paths, and other durable setup details)
+
+## Recurring Workflows
+
+(Repeated tasks and how they should be handled)
+
 ## Important Notes
 
 (Things to remember)
 
-## Configuration
+## Open Questions
 
-- Model preferences
-- Channel settings
-- Skills enabled
+(Long-lived unresolved items)
