@@ -6,6 +6,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 
@@ -24,6 +25,25 @@ func (a *App) newHomePage() tview.Primitive {
 	list.SetHighlightFullLine(true)
 	list.SetBackgroundColor(uiColorBackground)
 
+	overview := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true)
+	overview.SetBorder(true).
+		SetTitle(" [" + uiTagRed + "::b] CONTROL ROOM ").
+		SetTitleColor(uiColorAccentRed).
+		SetBorderColor(uiColorBorder)
+	overview.SetBackgroundColor(uiColorPanel)
+	overview.SetText(fmt.Sprintf(
+		"[%s::b]%s[-]\n\n[%s]Skin:[-] %s\n[%s]Model:[-] %s\n[%s]Structure:[-] web console, TUI launcher, gateway, chat, skins\n",
+		uiTagGreenBold,
+		currentAgentName,
+		uiTagMuted,
+		currentSkinName,
+		uiTagMuted,
+		a.cfg.CurrentModelLabel(),
+		uiTagMuted,
+	))
+
 	rebuildList := func() {
 		sel := list.GetCurrentItem()
 		list.Clear()
@@ -38,6 +58,9 @@ func (a *App) newHomePage() tview.Primitive {
 				a.navigateTo("channels", a.newChannelsPage())
 			},
 		)
+		list.AddItem("SKINS: Choose launcher theme", "Pick a preset or custom terminal skin", 's', func() {
+			a.navigateTo("skins", a.newSkinsPage())
+		})
 		list.AddItem("GATEWAY MANAGEMENT", "Manage JameClaw gateway daemon", 'g', func() {
 			a.navigateTo("gateway", a.newGatewayPage())
 		})
@@ -61,7 +84,10 @@ func (a *App) newHomePage() tview.Primitive {
 
 	return a.buildShell(
 		"home",
-		list,
-		" ["+uiTagRed+"]m:[-] model  ["+uiTagRed+"]n:[-] channels  ["+uiTagRed+"]g:[-] gateway  ["+uiTagRed+"]c:[-] chat  ["+uiTagDanger+"]q:[-] quit ",
+		tview.NewFlex().
+			SetDirection(tview.FlexRow).
+			AddItem(overview, 0, 1, false).
+			AddItem(list, 0, 2, true),
+		" ["+uiTagRed+"]m:[-] model  ["+uiTagRed+"]n:[-] channels  ["+uiTagRed+"]s:[-] skins  ["+uiTagRed+"]g:[-] gateway  ["+uiTagRed+"]c:[-] chat  ["+uiTagDanger+"]q:[-] quit ",
 	)
 }

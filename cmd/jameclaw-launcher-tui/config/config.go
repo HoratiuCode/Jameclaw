@@ -32,6 +32,7 @@ type TUIConfig struct {
 	Version  string   `toml:"version"`
 	Model    Model    `toml:"model"`
 	Provider Provider `toml:"provider"`
+	Skin     string   `toml:"skin,omitempty"`
 }
 
 type Model struct {
@@ -68,6 +69,7 @@ func DefaultConfig() *TUIConfig {
 	return &TUIConfig{
 		Version: "1.0",
 		Model:   Model{Type: "provider"},
+		Skin:    "default",
 		Provider: Provider{
 			Schemes: []Scheme{},
 			Users:   []User{},
@@ -117,6 +119,9 @@ func applyDefaults(cfg *TUIConfig) {
 	}
 	if cfg.Model.Type == "" {
 		cfg.Model.Type = "provider"
+	}
+	if cfg.Skin == "" {
+		cfg.Skin = "default"
 	}
 	for i := range cfg.Provider.Schemes {
 		if cfg.Provider.Schemes[i].Type == "" {

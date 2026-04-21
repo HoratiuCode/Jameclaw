@@ -25,6 +25,7 @@ type App struct {
 	pageRefreshFns map[string]func()
 	headerModelTV  *tview.TextView
 	modalOpen      map[string]bool
+	skinName       string
 
 	// OnModelSelected is called when a model is selected in the UI.
 	// Can be nil to disable.
@@ -106,6 +107,7 @@ func (a *App) refreshModelCache(onDone func()) {
 
 // New creates and wires up the TUI application.
 func New(cfg *tuicfg.TUIConfig, configPath string) *App {
+	applySkin(cfg.Skin)
 	tview.Styles.PrimitiveBackgroundColor = uiColorBackground
 	tview.Styles.ContrastBackgroundColor = uiColorPanel
 	tview.Styles.MoreContrastBackgroundColor = uiColorPanelAlt
@@ -126,6 +128,7 @@ func New(cfg *tuicfg.TUIConfig, configPath string) *App {
 		configPath:     configPath,
 		pageRefreshFns: make(map[string]func()),
 		modalOpen:      make(map[string]bool),
+		skinName:       currentSkinName,
 	}
 
 	a.tapp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -192,6 +195,22 @@ func (a *App) save() {
 	if err := tuicfg.Save(a.configPath, a.cfg); err != nil {
 		a.showError("save failed: " + err.Error())
 	}
+}
+
+func (a *App) refreshSkin() {
+	applySkin(a.cfg.Skin)
+	a.skinName = currentSkinName
+	tview.Styles.PrimitiveBackgroundColor = uiColorBackground
+	tview.Styles.ContrastBackgroundColor = uiColorPanel
+	tview.Styles.MoreContrastBackgroundColor = uiColorPanelAlt
+	tview.Styles.BorderColor = uiColorBorder
+	tview.Styles.TitleColor = uiColorAccentRed
+	tview.Styles.GraphicsColor = uiColorAccentGreen
+	tview.Styles.PrimaryTextColor = uiColorText
+	tview.Styles.SecondaryTextColor = uiColorAccentRed
+	tview.Styles.TertiaryTextColor = uiColorAccentGreen
+	tview.Styles.InverseTextColor = uiColorInverseText
+	tview.Styles.ContrastSecondaryTextColor = uiColorAccentGreenBold
 }
 
 func (a *App) showError(msg string) {
@@ -263,7 +282,7 @@ func (a *App) buildShell(pageID string, content tview.Primitive, hint string) tv
 	}
 
 	headerLeft := tview.NewTextView().
-		SetText(" [" + uiTagRed + "::b]///[" + uiTagGreen + "] JAMECLAW LAUNCHER [" + uiTagRed + "]///").
+		SetText(fmt.Sprintf(" [%s::b]///[%s] JAMECLAW LAUNCHER [%s]/// [%s]%s[-]", uiTagRed, uiTagGreen, uiTagRed, uiTagMuted, currentSkinName)).
 		SetDynamicColors(true).
 		SetBackgroundColor(uiColorBackground)
 
@@ -295,6 +314,7 @@ func (a *App) buildShell(pageID string, content tview.Primitive, hint string) tv
 	sbText += menuItem("users", "USERS")
 	sbText += menuItem("models", "MODELS")
 	sbText += menuItem("channels", "CHANNELS")
+	sbText += menuItem("skins", "SKINS")
 	sbText += menuItem("gateway", "GATEWAY")
 
 	sidebar.SetText(sbText)

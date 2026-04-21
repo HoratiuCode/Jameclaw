@@ -44,6 +44,7 @@ JameClaw in this repo is one local agent with four practical entry points:
 - **TUI Launcher**: terminal dashboard for headless servers, SSH sessions, and Raspberry Pi-style setups
 - **Terminal Agent**: direct CLI chat with `jameclaw agent` for one-shot questions or interactive sessions
 - **Gateway**: background bridge that connects the same agent and config to Telegram and other channels
+- **Launcher skins**: built-in terminal themes with a Hermes-style selection flow and custom skin support
 
 All of those entry points share the same local runtime state under `~/.jameclaw`.
 
