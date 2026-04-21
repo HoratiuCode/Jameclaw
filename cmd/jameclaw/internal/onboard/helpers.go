@@ -60,7 +60,6 @@ type onboardSkillOption struct {
 }
 
 var onboardSkillsDefaultUnchecked = map[string]struct{}{
-	"gog":       {},
 	"twitter-x": {},
 }
 

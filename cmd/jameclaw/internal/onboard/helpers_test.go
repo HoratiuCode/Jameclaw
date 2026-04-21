@@ -234,6 +234,7 @@ func TestPromptSkillSelectionDefaultsToPreselectedSkills(t *testing.T) {
 	want := []string{
 		"agent-browser",
 		"github",
+		"gog",
 		"hardware",
 		"moltbook",
 		"skill-creator",

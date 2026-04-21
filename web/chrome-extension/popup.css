@@ -1,8 +1,8 @@
 html,
 body {
   margin: 0;
-  background: #050505;
-  color: #ffffff;
+  background: #fffaf2;
+  color: #1f2937;
   font: 12px/1.4 Inter, "Segoe UI", sans-serif;
 }
 
@@ -25,8 +25,8 @@ body {
   height: 100%;
   flex-direction: column;
   background:
-    radial-gradient(circle at top, rgba(220, 38, 38, 0.22), transparent 34%),
-    linear-gradient(180deg, #0b0b0b, #050505);
+    radial-gradient(circle at top, rgba(255, 204, 112, 0.28), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #fff7ea 100%);
 }
 
 .topbar {
@@ -34,7 +34,9 @@ body {
   align-items: center;
   gap: 10px;
   padding: 10px 12px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(249, 168, 37, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
 }
 
 .brand-icon {
@@ -42,7 +44,7 @@ body {
   height: 24px;
   border-radius: 6px;
   object-fit: cover;
-  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.28);
+  box-shadow: 0 6px 18px rgba(249, 115, 22, 0.18);
 }
 
 .topbar-copy {
@@ -55,7 +57,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #ffffff;
+  color: #111827;
 }
 
 .messages {
@@ -66,10 +68,10 @@ body {
 }
 
 .empty {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(249, 168, 37, 0.16);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.92);
+  color: #4b5563;
   padding: 11px 12px;
   line-height: 1.55;
 }
@@ -86,7 +88,7 @@ body {
 
 .message.user {
   margin-left: auto;
-  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  background: linear-gradient(180deg, #fb923c, #ea580c);
   color: #ffffff;
   border-bottom-right-radius: 4px;
 }
@@ -94,22 +96,22 @@ body {
 .message.assistant {
   margin-right: auto;
   background: #ffffff;
-  color: #111111;
+  color: #111827;
   border-bottom-left-radius: 4px;
 }
 
 .message.error {
   margin-right: auto;
-  background: #2a0c0c;
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.28);
+  background: #fff1eb;
+  color: #b45309;
+  border: 1px solid rgba(249, 115, 22, 0.22);
   border-bottom-left-radius: 4px;
 }
 
 .status {
   min-height: 14px;
   margin-top: 2px;
-  color: #fca5a5;
+  color: #c2410c;
   font-size: 11px;
 }
 
@@ -119,18 +121,18 @@ body {
   height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  background: rgba(255, 255, 255, 0.05);
-  color: #ffffff;
+  border: 1px solid rgba(249, 168, 37, 0.28);
+  background: #ffffff;
+  color: #b45309;
   font: 11px/1 Inter, "Segoe UI", sans-serif;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  box-shadow: none;
+  box-shadow: 0 8px 18px rgba(249, 115, 22, 0.08);
 }
 
 .topbar-button:hover {
-  background: rgba(239, 68, 68, 0.18);
+  background: #fff7ed;
 }
 
 body.sidepanel .topbar-button {
@@ -141,9 +143,9 @@ body.sidepanel .topbar-button {
   display: flex;
   gap: 8px;
   padding: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(249, 168, 37, 0.16);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(12px);
 }
 
 textarea {
@@ -151,23 +153,23 @@ textarea {
   resize: none;
   min-height: 38px;
   max-height: 120px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(249, 168, 37, 0.18);
   border-radius: 12px;
   padding: 9px 11px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #ffffff;
+  background: #ffffff;
+  color: #111827;
   outline: none;
   font: inherit;
   line-height: 1.45;
 }
 
 textarea::placeholder {
-  color: #94a3b8;
+  color: #9ca3af;
 }
 
 textarea:focus {
-  border-color: rgba(239, 68, 68, 0.9);
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.16);
+  border-color: rgba(249, 115, 22, 0.82);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
 }
 
 button {
@@ -176,17 +178,17 @@ button {
   height: 38px;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  background: linear-gradient(180deg, #fdba74, #f97316);
   color: #ffffff;
   cursor: pointer;
   padding: 0;
   font: 16px/1 Inter, "Segoe UI", sans-serif;
   font-weight: 700;
-  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.24);
+  box-shadow: 0 10px 24px rgba(249, 115, 22, 0.22);
 }
 
 #send {
-  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.24);
+  box-shadow: 0 10px 24px rgba(249, 115, 22, 0.22);
 }
 
 button:disabled,
@@ -200,6 +202,6 @@ textarea:disabled {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(249, 168, 37, 0.32);
   border-radius: 999px;
 }
