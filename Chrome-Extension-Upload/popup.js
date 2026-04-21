@@ -11,6 +11,11 @@ const isPopup = document.body.classList.contains("popup")
 let socket = null
 let currentAssistantMessage = null
 let pendingContext = null
+let reconnectTimer = null
+let bootstrapRetryTimer = null
+let reconnectAttempts = 0
+let bootstrapRetryAttempts = 0
+let lastBootstrap = null
 const sessionId = crypto.randomUUID()
 
 function scrollToBottom() {
@@ -24,6 +29,51 @@ function setStatus(message) {
 function setComposerEnabled(enabled) {
   inputEl.disabled = !enabled
   sendEl.disabled = !enabled
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+}
+
+function clearBootstrapRetryTimer() {
+  if (bootstrapRetryTimer !== null) {
+    clearTimeout(bootstrapRetryTimer)
+    bootstrapRetryTimer = null
+  }
+}
+
+function scheduleReconnect() {
+  if (!lastBootstrap || reconnectTimer !== null) {
+    return
+  }
+
+  const delay = Math.min(1000 * 2 ** reconnectAttempts, 5000)
+  reconnectAttempts += 1
+  setStatus("Reconnecting…")
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    if (!lastBootstrap) {
+      return
+    }
+    connectWebSocket(lastBootstrap.wsUrl, lastBootstrap.token)
+  }, delay)
+}
+
+function scheduleBootstrapRetry() {
+  if (bootstrapRetryTimer !== null) {
+    return
+  }
+
+  const delay = Math.min(1000 * 2 ** bootstrapRetryAttempts, 5000)
+  bootstrapRetryAttempts += 1
+  setStatus("Connecting…")
+  bootstrapRetryTimer = setTimeout(() => {
+    bootstrapRetryTimer = null
+    void bootstrap()
+  }, delay)
 }
 
 function appendMessage(role, content) {
@@ -106,11 +156,16 @@ function requestPageContext() {
 }
 
 function connectWebSocket(wsUrl, token) {
+  lastBootstrap = { wsUrl, token }
+  clearReconnectTimer()
   const separator = wsUrl.includes("?") ? "&" : "?"
   const url = `${wsUrl}${separator}token=${encodeURIComponent(token)}&session_id=${encodeURIComponent(sessionId)}`
   socket = new WebSocket(url)
 
   socket.addEventListener("open", () => {
+    reconnectAttempts = 0
+    bootstrapRetryAttempts = 0
+    clearBootstrapRetryTimer()
     setStatus(pendingContext?.selection ? "Using selected text." : "")
     setComposerEnabled(true)
   })
@@ -118,11 +173,13 @@ function connectWebSocket(wsUrl, token) {
   socket.addEventListener("close", () => {
     setStatus("Connection closed.")
     setComposerEnabled(false)
+    scheduleReconnect()
   })
 
   socket.addEventListener("error", () => {
     setStatus("Could not connect to local JameClaw.")
     setComposerEnabled(false)
+    scheduleReconnect()
   })
 
   socket.addEventListener("message", (event) => {
@@ -178,6 +235,7 @@ async function bootstrap() {
   ensureEmptyState()
   setComposerEnabled(false)
   requestPageContext()
+  clearBootstrapRetryTimer()
 
   try {
     const response = await fetch(BOOTSTRAP_URL, {
@@ -201,6 +259,7 @@ async function bootstrap() {
         ? error.message
         : "Could not reach local JameClaw on localhost:18800.",
     )
+    scheduleBootstrapRetry()
   }
 }
 
