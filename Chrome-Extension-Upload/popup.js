@@ -1,6 +1,7 @@
 const BOOTSTRAP_URL = "http://localhost:18800/api/extension/bootstrap"
 const BOOTSTRAP_TIMEOUT_MS = 1500
 const MAX_RETRY_DELAY_MS = 2000
+const SESSION_ID_KEY = "jameclaw-extension-session-id"
 
 const messagesEl = document.getElementById("messages")
 const statusEl = document.getElementById("status")
@@ -8,7 +9,7 @@ const composerEl = document.getElementById("composer")
 const inputEl = document.getElementById("input")
 const sendEl = document.getElementById("send")
 const refreshContextEl = document.getElementById("refresh-context")
-const isPopup = document.body.classList.contains("popup")
+const isDock = document.body.classList.contains("dock")
 
 let socket = null
 let currentAssistantMessage = null
@@ -18,7 +19,7 @@ let bootstrapRetryTimer = null
 let reconnectAttempts = 0
 let bootstrapRetryAttempts = 0
 let lastBootstrap = null
-const sessionId = crypto.randomUUID()
+let sessionId = null
 
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight
@@ -45,6 +46,33 @@ function clearBootstrapRetryTimer() {
     clearTimeout(bootstrapRetryTimer)
     bootstrapRetryTimer = null
   }
+}
+
+function getOrCreateSessionId() {
+  return new Promise((resolve) => {
+    if (!chrome.storage?.local) {
+      resolve(crypto.randomUUID())
+      return
+    }
+
+    chrome.storage.local.get([SESSION_ID_KEY], (result) => {
+      if (chrome.runtime.lastError) {
+        resolve(crypto.randomUUID())
+        return
+      }
+
+      const stored = typeof result?.[SESSION_ID_KEY] === "string" ? result[SESSION_ID_KEY] : ""
+      if (stored) {
+        resolve(stored)
+        return
+      }
+
+      const generated = crypto.randomUUID()
+      chrome.storage.local.set({ [SESSION_ID_KEY]: generated }, () => {
+        resolve(generated)
+      })
+    })
+  })
 }
 
 function scheduleReconnect() {
@@ -234,6 +262,7 @@ function connectWebSocket(wsUrl, token) {
 }
 
 async function bootstrap() {
+  sessionId = await getOrCreateSessionId()
   ensureEmptyState()
   setComposerEnabled(false)
   setStatus("Connecting…")
@@ -308,16 +337,23 @@ inputEl.addEventListener("keydown", (event) => {
 })
 
 refreshContextEl.addEventListener("click", () => {
-  if (!isPopup) {
-    requestPageContext()
+  if (isDock) {
+    chrome.runtime.sendMessage(
+      { type: "jameclaw-extension-set-dock-state", enabled: false },
+      () => {
+        if (chrome.runtime.lastError) {
+          setStatus(chrome.runtime.lastError.message || "Could not close dock.")
+        }
+      },
+    )
     return
   }
 
   chrome.runtime.sendMessage(
-    { type: "jameclaw-extension-open-sidepanel" },
+    { type: "jameclaw-extension-set-dock-state", enabled: true },
     (response) => {
       if (!response?.ok) {
-        setStatus(response?.error || "Could not open side panel.")
+        setStatus(response?.error || "Could not open dock.")
         return
       }
       window.close()
@@ -325,4 +361,6 @@ refreshContextEl.addEventListener("click", () => {
   )
 })
 
-bootstrap()
+refreshContextEl.textContent = isDock ? "Undock" : "Dock"
+
+void bootstrap()

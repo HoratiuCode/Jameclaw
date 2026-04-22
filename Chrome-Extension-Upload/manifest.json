@@ -5,8 +5,8 @@
   "version": "0.1.0",
   "permissions": [
     "activeTab",
-    "tabs",
-    "windows"
+    "storage",
+    "tabs"
   ],
   "icons": {
     "16": "favicon-96x96.png",

@@ -1,6 +1,6 @@
 # JameClaw Chrome Extension
 
-This extension is a native popup chat for the local JameClaw launcher.
+This extension is a native popup chat for the local JameClaw launcher, with an optional floating dock.
 
 It does two things:
 
@@ -30,10 +30,11 @@ Developer/source folder:
 - the current page context is attached automatically in the background
 - selected text on the page is remembered and reused when you open the extension
 - the header `Pick` action refreshes the current page context and selected text
-- the header `Dock` action opens a narrow persistent JameClaw chat window on the side so it stays visible while you work on the website
+- the header `Dock` action opens a floating JameClaw panel in the corner of the page so it stays visible while you work
+- when docked, the panel is restored on the next page you open in the same tab
 - it talks to JameClaw through a local extension bootstrap endpoint and websocket proxy on `localhost:18800`
 
 ## Notes
 
 - if you want JameClaw to focus on one part of a website, select that text before opening the extension
-- if `Dock` is used, the extension opens a dedicated narrow chat window instead of a Chrome side panel
+- if `Dock` is used, the extension opens a floating corner panel instead of a separate window
