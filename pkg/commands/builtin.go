@@ -14,6 +14,7 @@ func BuiltinDefinitions() []Definition {
 		skillsCommand(),
 		emojiCommand(),
 		personaCommand(),
+		styleCommand(),
 		switchCommand(),
 		checkCommand(),
 		clearCommand(),

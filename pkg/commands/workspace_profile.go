@@ -14,6 +14,7 @@ const (
 	defaultAgentSignatureEmoji = "🦐"
 	agentNameLinePrefix        = "Your name is JameClaw"
 	personalityHeading         = "## Personality"
+	styleSnapshotHeading       = "## Current Style Snapshot"
 )
 
 func runtimeWorkspace(rt *Runtime) string {
@@ -123,6 +124,29 @@ func UpdateAgentPersona(workspace, persona string) error {
 	}
 
 	rendered := writeMarkdownSection(string(data), personalityHeading, persona)
+	return fileutil.WriteFileAtomic(path, []byte(rendered), 0o644)
+}
+
+func ReadAgentStyle(workspace string) string {
+	data, err := os.ReadFile(filepath.Join(workspace, "STYLE.md"))
+	if err != nil {
+		return ""
+	}
+	style := readMarkdownSection(string(data), styleSnapshotHeading)
+	if strings.TrimSpace(style) != "" {
+		return style
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func UpdateAgentStyle(workspace, style string) error {
+	path := filepath.Join(workspace, "STYLE.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		data = nil
+	}
+
+	rendered := writeMarkdownSection(string(data), styleSnapshotHeading, style)
 	return fileutil.WriteFileAtomic(path, []byte(rendered), 0o644)
 }
 

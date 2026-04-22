@@ -14,6 +14,7 @@ func TestCustomizationCommandsPersistWorkspaceChanges(t *testing.T) {
 	workspace := t.TempDir()
 	agentPath := filepath.Join(workspace, "AGENT.md")
 	soulPath := filepath.Join(workspace, "SOUL.md")
+	stylePath := filepath.Join(workspace, "STYLE.md")
 
 	if err := os.WriteFile(agentPath, []byte(`---
 name: jame
@@ -34,6 +35,13 @@ I am JameClaw: calm, helpful, practical, and memory disciplined.
 
 - Helpful and friendly
 - Concise and to the point
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stylePath, []byte(`# Style
+
+- Tone: concise and warm
+- Formatting: short markdown blocks
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +123,28 @@ I am JameClaw: calm, helpful, practical, and memory disciplined.
 	}
 	if !strings.Contains(string(rawSoul), "Calm, direct, and warm.") {
 		t.Fatalf("SOUL.md did not persist persona:\n%s", string(rawSoul))
+	}
+
+	reply = ""
+	res = ex.Execute(context.Background(), Request{
+		Text: "/style Use concise, friendly, and direct replies.",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/style outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if !strings.Contains(reply, "Updated speaking style") {
+		t.Fatalf("/style reply=%q", reply)
+	}
+	rawStyle, err := os.ReadFile(stylePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawStyle), "Use concise, friendly, and direct replies.") {
+		t.Fatalf("STYLE.md did not persist speaking style:\n%s", string(rawStyle))
 	}
 
 	reply = ""

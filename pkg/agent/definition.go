@@ -65,12 +65,19 @@ type ToolsDefinition struct {
 	Content string `json:"content"`
 }
 
+// StyleDefinition represents workspace-local style and voice notes.
+type StyleDefinition struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
 // AgentContextDefinition captures the workspace agent definition in a runtime-friendly shape.
 type AgentContextDefinition struct {
 	Source AgentDefinitionSource  `json:"source,omitempty"`
 	Agent  *AgentPromptDefinition `json:"agent,omitempty"`
 	Soul   *SoulDefinition        `json:"soul,omitempty"`
 	User   *UserDefinition        `json:"user,omitempty"`
+	Style  *StyleDefinition       `json:"style,omitempty"`
 	Tools  *ToolsDefinition       `json:"tools,omitempty"`
 }
 
@@ -86,6 +93,7 @@ func (cb *ContextBuilder) LoadAgentDefinition() AgentContextDefinition {
 func loadAgentDefinition(workspace string) AgentContextDefinition {
 	definition := AgentContextDefinition{}
 	definition.User = loadUserDefinition(workspace)
+	definition.Style = loadStyleDefinition(workspace)
 	definition.Tools = loadToolsDefinition(workspace)
 	agentPath := filepath.Join(workspace, string(AgentDefinitionSourceAgent))
 	if content, err := os.ReadFile(agentPath); err == nil {
@@ -130,6 +138,7 @@ func (definition AgentContextDefinition) trackedPaths(workspace string) []string
 		filepath.Join(workspace, string(AgentDefinitionSourceAgent)),
 		filepath.Join(workspace, "SOUL.md"),
 		filepath.Join(workspace, "USER.md"),
+		filepath.Join(workspace, "STYLE.md"),
 		filepath.Join(workspace, "TOOLS.md"),
 	}
 	if definition.Source != AgentDefinitionSourceAgent {
@@ -158,6 +167,18 @@ func loadToolsDefinition(workspace string) *ToolsDefinition {
 	if content, err := os.ReadFile(toolsPath); err == nil {
 		return &ToolsDefinition{
 			Path:    toolsPath,
+			Content: string(content),
+		}
+	}
+
+	return nil
+}
+
+func loadStyleDefinition(workspace string) *StyleDefinition {
+	stylePath := filepath.Join(workspace, "STYLE.md")
+	if content, err := os.ReadFile(stylePath); err == nil {
+		return &StyleDefinition{
+			Path:    stylePath,
 			Content: string(content),
 		}
 	}

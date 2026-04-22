@@ -471,6 +471,9 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	if agentDefinition.User != nil {
 		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "USER.md", agentDefinition.User.Content)
 	}
+	if agentDefinition.Style != nil {
+		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "STYLE.md", agentDefinition.Style.Content)
+	}
 	if agentDefinition.Tools != nil {
 		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "TOOLS.md", agentDefinition.Tools.Content)
 	}

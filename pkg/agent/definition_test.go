@@ -30,7 +30,8 @@ metadata:
 
 Act directly and use tools first.
 `,
-		"SOUL.md": "# Soul\nStay precise.",
+		"SOUL.md":  "# Soul\nStay precise.",
+		"STYLE.md": "# Style\nMirror tone carefully.",
 	})
 	defer cleanupWorkspace(t, tmpDir)
 
@@ -76,6 +77,12 @@ Act directly and use tools first.
 	}
 	if definition.Soul.Path != filepath.Join(tmpDir, "SOUL.md") {
 		t.Fatalf("expected default SOUL.md path, got %q", definition.Soul.Path)
+	}
+	if definition.Style == nil {
+		t.Fatal("expected STYLE.md to be loaded")
+	}
+	if !strings.Contains(definition.Style.Content, "Mirror tone carefully") {
+		t.Fatalf("expected style content to be loaded, got %q", definition.Style.Content)
 	}
 }
 
@@ -239,6 +246,25 @@ func TestLoadBootstrapFilesIncludesWorkspaceToolsMarkdown(t *testing.T) {
 	}
 }
 
+func TestLoadBootstrapFilesIncludesWorkspaceStyleMarkdown(t *testing.T) {
+	tmpDir := setupWorkspace(t, map[string]string{
+		"AGENT.md": "# Agent\nFollow the new structure.",
+		"SOUL.md":  "# Soul\nSpeak plainly.",
+		"STYLE.md": "# Style\nUse short, direct replies.",
+	})
+	defer cleanupWorkspace(t, tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	bootstrap := cb.LoadBootstrapFiles()
+
+	if !strings.Contains(bootstrap, "Use short, direct replies") {
+		t.Fatalf("expected workspace STYLE.md in bootstrap, got %q", bootstrap)
+	}
+	if !strings.Contains(bootstrap, "## STYLE.md") {
+		t.Fatalf("expected STYLE.md heading in bootstrap, got %q", bootstrap)
+	}
+}
+
 func TestStructuredAgentIgnoresIdentityChanges(t *testing.T) {
 	tmpDir := setupWorkspace(t, map[string]string{
 		"AGENT.md":    "# Agent\nFollow the new structure.",
@@ -310,6 +336,43 @@ func TestStructuredAgentUserChangesInvalidateCache(t *testing.T) {
 	promptV2 := cb.BuildSystemPromptWithCache()
 	if !strings.Contains(promptV2, "Updated workspace preferences") {
 		t.Fatalf("expected updated workspace USER.md in prompt, got %q", promptV2)
+	}
+}
+
+func TestStructuredAgentStyleChangesInvalidateCache(t *testing.T) {
+	tmpDir := setupWorkspace(t, map[string]string{
+		"AGENT.md": "# Agent\nFollow the new structure.",
+		"SOUL.md":  "# Soul\nVersion one.",
+		"STYLE.md": "# Style\nStart with short replies.",
+	})
+	defer cleanupWorkspace(t, tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	promptV1 := cb.BuildSystemPromptWithCache()
+	if !strings.Contains(promptV1, "Start with short replies") {
+		t.Fatalf("expected workspace STYLE.md in prompt, got %q", promptV1)
+	}
+
+	stylePath := filepath.Join(tmpDir, "STYLE.md")
+	if err := os.WriteFile(stylePath, []byte("# Style\nUse more detailed replies."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(stylePath, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	cb.systemPromptMutex.RLock()
+	changed := cb.sourceFilesChangedLocked()
+	cb.systemPromptMutex.RUnlock()
+	if !changed {
+		t.Fatal("workspace STYLE.md changes should invalidate cache")
+	}
+
+	promptV2 := cb.BuildSystemPromptWithCache()
+	if !strings.Contains(promptV2, "Use more detailed replies") {
+		t.Fatalf("expected updated workspace STYLE.md in prompt, got %q", promptV2)
 	}
 }
 
