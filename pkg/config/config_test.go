@@ -223,6 +223,49 @@ func TestConfig_BackwardCompat_NoAgentsList(t *testing.T) {
 	}
 }
 
+func TestHooksConfig_MappingUnmarshal(t *testing.T) {
+	jsonData := `{
+		"hooks": {
+			"enabled": true,
+			"presets": ["gmail"],
+			"transforms_dir": "~/.jameclaw/hooks/transforms",
+			"mappings": [
+				{
+					"id": "demo",
+					"match": { "path": "custom", "source": "gmail" },
+					"action": "agent",
+					"message_template": "Hello",
+					"deliver": false
+				}
+			]
+		}
+	}`
+
+	cfg := DefaultConfig()
+	if err := json.Unmarshal([]byte(jsonData), cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !cfg.Hooks.Enabled {
+		t.Fatal("hooks.enabled should be true")
+	}
+	if len(cfg.Hooks.Presets) != 1 || cfg.Hooks.Presets[0] != "gmail" {
+		t.Fatalf("hooks.presets = %v, want gmail", cfg.Hooks.Presets)
+	}
+	if cfg.Hooks.TransformsDir != "~/.jameclaw/hooks/transforms" {
+		t.Fatalf("hooks.transforms_dir = %q", cfg.Hooks.TransformsDir)
+	}
+	if len(cfg.Hooks.Mappings) != 1 {
+		t.Fatalf("hooks.mappings len = %d, want 1", len(cfg.Hooks.Mappings))
+	}
+	if cfg.Hooks.Mappings[0].ID != "demo" || cfg.Hooks.Mappings[0].Match.Path != "custom" {
+		t.Fatalf("hooks.mappings[0] = %+v", cfg.Hooks.Mappings[0])
+	}
+	if cfg.Hooks.Mappings[0].Deliver == nil || *cfg.Hooks.Mappings[0].Deliver != false {
+		t.Fatalf("hooks.mappings[0].deliver = %+v, want false", cfg.Hooks.Mappings[0].Deliver)
+	}
+}
+
 // TestDefaultConfig_HeartbeatEnabled verifies heartbeat is enabled by default
 func TestDefaultConfig_HeartbeatEnabled(t *testing.T) {
 	cfg := DefaultConfig()

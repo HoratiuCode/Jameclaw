@@ -74,7 +74,7 @@ func TestHookIngressWake(t *testing.T) {
 			},
 		},
 	}
-	server, err := newHookIngressServer(cfg, runner, nil)
+	server, err := newHookIngressServer(cfg, "", runner, nil)
 	if err != nil {
 		t.Fatalf("newHookIngressServer: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestHookIngressAgentDeliveryAndSessionPolicy(t *testing.T) {
 			},
 		},
 	}
-	server, err := newHookIngressServer(cfg, runner, func(_ context.Context, msg bus.OutboundMessage) error {
+	server, err := newHookIngressServer(cfg, "", runner, func(_ context.Context, msg bus.OutboundMessage) error {
 		published = append(published, msg)
 		return nil
 	})
@@ -184,7 +184,7 @@ func TestHookIngressRejectsSessionKeyOverride(t *testing.T) {
 			},
 		},
 	}
-	server, err := newHookIngressServer(cfg, runner, nil)
+	server, err := newHookIngressServer(cfg, "", runner, nil)
 	if err != nil {
 		t.Fatalf("newHookIngressServer: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestHookIngressRejectsInvalidToken(t *testing.T) {
 				Token:   "secret",
 			},
 		},
-	}, &fakeHookRunner{}, nil)
+	}, "", &fakeHookRunner{}, nil)
 	if err != nil {
 		t.Fatalf("newHookIngressServer: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestHookIngressRejectsUnknownAgentId(t *testing.T) {
 				AllowedAgentIds: config.FlexibleStringSlice{"main"},
 			},
 		},
-	}, &fakeHookRunner{}, nil)
+	}, "", &fakeHookRunner{}, nil)
 	if err != nil {
 		t.Fatalf("newHookIngressServer: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestHookIngressDeliveryRequiresLastChannel(t *testing.T) {
 				Token:   "secret",
 			},
 		},
-	}, &fakeHookRunner{directResult: "done"}, nil)
+	}, "", &fakeHookRunner{directResult: "done"}, nil)
 	if err != nil {
 		t.Fatalf("newHookIngressServer: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestHookIngressRunnerError(t *testing.T) {
 				Token:   "secret",
 			},
 		},
-	}, &fakeHookRunner{wakeErr: errors.New("boom")}, nil)
+	}, "", &fakeHookRunner{wakeErr: errors.New("boom")}, nil)
 	if err != nil {
 		t.Fatalf("newHookIngressServer: %v", err)
 	}

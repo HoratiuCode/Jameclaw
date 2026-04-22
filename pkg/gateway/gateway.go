@@ -100,6 +100,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
 	}
+	configDir := filepath.Dir(configPath)
 
 	logger.SetLevelFromString(cfg.Gateway.LogLevel)
 
@@ -134,7 +135,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 			"skills_available": skillsInfo["available"],
 		})
 
-	runningServices, err := setupAndStartServices(cfg, agentLoop, msgBus)
+	runningServices, err := setupAndStartServices(cfg, configDir, agentLoop, msgBus)
 	if err != nil {
 		return err
 	}
@@ -188,7 +189,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				logger.Warn("Config reload skipped: another reload is in progress")
 				continue
 			}
-			err := executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup)
+			err := executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, configDir)
 			if err != nil {
 				logger.Errorf("Config reload failed: %v", err)
 			}
@@ -205,7 +206,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				runningServices.reloading.Store(false)
 				continue
 			}
-			err = executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup)
+			err = executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, configDir)
 			if err != nil {
 				logger.Errorf("Manual reload failed: %v", err)
 			} else {
@@ -223,9 +224,10 @@ func executeReload(
 	runningServices *services,
 	msgBus *bus.MessageBus,
 	allowEmptyStartup bool,
+	configDir string,
 ) error {
 	defer runningServices.reloading.Store(false)
-	return handleConfigReload(ctx, agentLoop, newCfg, provider, runningServices, msgBus, allowEmptyStartup)
+	return handleConfigReload(ctx, agentLoop, newCfg, provider, runningServices, msgBus, allowEmptyStartup, configDir)
 }
 
 func createStartupProvider(
@@ -247,6 +249,7 @@ func createStartupProvider(
 
 func setupAndStartServices(
 	cfg *config.Config,
+	configDir string,
 	agentLoop *agent.AgentLoop,
 	msgBus *bus.MessageBus,
 ) (*services, error) {
@@ -316,7 +319,7 @@ func setupAndStartServices(
 
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
-	hookIngressRegistrar := createHookIngressRegistrar(cfg, agentLoop, msgBus.PublishOutbound)
+	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, agentLoop, msgBus.PublishOutbound)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
 
 	if err = runningServices.ChannelManager.StartAll(context.Background()); err != nil {
@@ -394,6 +397,7 @@ func handleConfigReload(
 	runningServices *services,
 	msgBus *bus.MessageBus,
 	allowEmptyStartup bool,
+	configDir string,
 ) error {
 	logger.Info("🔄 Config file changed, reloading...")
 
@@ -408,7 +412,7 @@ func handleConfigReload(
 	if err != nil {
 		logger.Errorf("  ⚠ Error creating new provider: %v", err)
 		logger.Warn("  Attempting to restart services with old provider and config...")
-		if restartErr := restartServices(al, runningServices, msgBus); restartErr != nil {
+		if restartErr := restartServices(al, runningServices, msgBus, configDir); restartErr != nil {
 			logger.Errorf("  ⚠ Failed to restart services: %v", restartErr)
 		}
 		return fmt.Errorf("error creating new provider: %w", err)
@@ -427,7 +431,7 @@ func handleConfigReload(
 			cp.Close()
 		}
 		logger.Warn("  Attempting to restart services with old provider and config...")
-		if restartErr := restartServices(al, runningServices, msgBus); restartErr != nil {
+		if restartErr := restartServices(al, runningServices, msgBus, configDir); restartErr != nil {
 			logger.Errorf("  ⚠ Failed to restart services: %v", restartErr)
 		}
 		return fmt.Errorf("error reloading agent loop: %w", err)
@@ -436,7 +440,7 @@ func handleConfigReload(
 	*providerRef = newProvider
 
 	logger.Info("  Restarting all services with new configuration...")
-	if err := restartServices(al, runningServices, msgBus); err != nil {
+	if err := restartServices(al, runningServices, msgBus, configDir); err != nil {
 		logger.Errorf("  ⚠ Error restarting services: %v", err)
 		return fmt.Errorf("error restarting services: %w", err)
 	}
@@ -449,6 +453,7 @@ func restartServices(
 	al *agent.AgentLoop,
 	runningServices *services,
 	msgBus *bus.MessageBus,
+	configDir string,
 ) error {
 	cfg := al.GetConfig()
 
@@ -510,7 +515,7 @@ func restartServices(
 	if runningServices.HealthServer == nil {
 		runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	}
-	hookIngressRegistrar := createHookIngressRegistrar(cfg, al, msgBus.PublishOutbound)
+	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, al, msgBus.PublishOutbound)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
 
 	if err = runningServices.ChannelManager.Reload(context.Background(), cfg); err != nil {

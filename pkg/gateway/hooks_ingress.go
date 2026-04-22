@@ -60,6 +60,7 @@ type hookIngressServer struct {
 	runner      hookRunner
 	publish     func(context.Context, bus.OutboundMessage) error
 	authLimiter *hookAuthLimiter
+	mappings    []hookMappingResolved
 }
 
 type hookAuthLimiter struct {
@@ -144,6 +145,7 @@ func pruneHookAttempts(attempts []time.Time, cutoff time.Time) []time.Time {
 
 func newHookIngressServer(
 	cfg *config.Config,
+	configDir string,
 	runner hookRunner,
 	publish func(context.Context, bus.OutboundMessage) error,
 ) (*hookIngressServer, error) {
@@ -189,6 +191,11 @@ func newHookIngressServer(
 		)
 	}
 
+	mappings, err := resolveHookMappings(cfg.Hooks, configDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &hookIngressServer{
 		cfg: hookIngressResolvedConfig{
 			basePath:                  basePath,
@@ -203,15 +210,17 @@ func newHookIngressServer(
 		runner:      runner,
 		publish:     publish,
 		authLimiter: newHookAuthLimiter(),
+		mappings:    mappings,
 	}, nil
 }
 
 func createHookIngressRegistrar(
 	cfg *config.Config,
+	configDir string,
 	runner hookRunner,
 	publish func(context.Context, bus.OutboundMessage) error,
 ) func(*http.ServeMux) {
-	server, err := newHookIngressServer(cfg, runner, publish)
+	server, err := newHookIngressServer(cfg, configDir, runner, publish)
 	if err != nil {
 		logger.ErrorCF("gateway", "Failed to configure hook ingress", map[string]any{
 			"error": err.Error(),
@@ -269,7 +278,9 @@ func (s *hookIngressServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "agent":
 		s.handleAgent(w, r, payload)
 	default:
-		http.NotFound(w, r)
+		if !s.handleMappedHook(w, r, payload) {
+			http.NotFound(w, r)
+		}
 	}
 }
 
@@ -296,7 +307,69 @@ func (s *hookIngressServer) authorizeRequest(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *hookIngressServer) handleWake(w http.ResponseWriter, r *http.Request, payload map[string]any) {
-	text := stringField(payload["text"])
+	s.handleWakeAction(w, r, hookAction{
+		kind:           hookMappingActionWake,
+		text:           stringField(payload["text"]),
+		mode:           normalizeHookWakeMode(stringField(payload["mode"])),
+		timeoutSeconds: intField(payload["timeoutSeconds"], defaultHookWakeTimeoutSeconds),
+	})
+}
+
+func (s *hookIngressServer) handleAgent(w http.ResponseWriter, r *http.Request, payload map[string]any) {
+	s.handleAgentAction(w, r, hookAction{
+		kind:           hookMappingActionAgent,
+		message:        stringField(payload["message"]),
+		name:           stringField(payload["name"]),
+		agentID:        stringField(payload["agentId"]),
+		sessionKey:     stringField(payload["sessionKey"]),
+		deliver:        boolPtr(boolField(payload["deliver"], true)),
+		channel:        stringField(payload["channel"]),
+		to:             stringField(payload["to"]),
+		timeoutSeconds: intField(payload["timeoutSeconds"], defaultHookAgentTimeoutSeconds),
+	})
+}
+
+func (s *hookIngressServer) handleMappedHook(w http.ResponseWriter, r *http.Request, payload map[string]any) bool {
+	outcome, err := applyHookMappings(s.mappings, hookTemplateContext{
+		Payload: payload,
+		Headers: normalizeHookHeaders(r.Header),
+		URL:     r.URL.String(),
+		Path:    resolveHookSubPath(s.cfg.basePath, r.URL.Path),
+	})
+	if err != nil {
+		writeHookJSON(w, http.StatusInternalServerError, map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return true
+	}
+	if !outcome.Matched {
+		return false
+	}
+	if outcome.Skipped {
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+	if outcome.Action == nil {
+		return false
+	}
+
+	switch outcome.Action.kind {
+	case hookMappingActionWake:
+		s.handleWakeAction(w, r, *outcome.Action)
+	case hookMappingActionAgent:
+		s.handleAgentAction(w, r, *outcome.Action)
+	default:
+		writeHookJSON(w, http.StatusInternalServerError, map[string]any{
+			"ok":    false,
+			"error": "unsupported hook action",
+		})
+	}
+	return true
+}
+
+func (s *hookIngressServer) handleWakeAction(w http.ResponseWriter, r *http.Request, action hookAction) {
+	text := strings.TrimSpace(action.text)
 	if text == "" {
 		writeHookJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -305,12 +378,12 @@ func (s *hookIngressServer) handleWake(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 
-	mode := stringField(payload["mode"])
-	if mode == "" {
-		mode = "now"
+	mode := normalizeHookWakeMode(action.mode)
+	timeoutSeconds := action.timeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = defaultHookWakeTimeoutSeconds
 	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(defaultHookWakeTimeoutSeconds)*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
 	response, err := s.runner.ProcessHeartbeat(ctx, text, "system", "hooks:wake")
@@ -332,8 +405,8 @@ func (s *hookIngressServer) handleWake(w http.ResponseWriter, r *http.Request, p
 	writeHookJSON(w, http.StatusOK, resp)
 }
 
-func (s *hookIngressServer) handleAgent(w http.ResponseWriter, r *http.Request, payload map[string]any) {
-	message := stringField(payload["message"])
+func (s *hookIngressServer) handleAgentAction(w http.ResponseWriter, r *http.Request, action hookAction) {
+	message := strings.TrimSpace(action.message)
 	if message == "" {
 		writeHookJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -342,12 +415,12 @@ func (s *hookIngressServer) handleAgent(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	name := stringField(payload["name"])
+	name := strings.TrimSpace(action.name)
 	if name == "" {
 		name = "Hook"
 	}
 
-	agentID := stringField(payload["agentId"])
+	agentID := strings.TrimSpace(action.agentID)
 	if !s.isAgentAllowed(agentID) {
 		writeHookJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -356,7 +429,7 @@ func (s *hookIngressServer) handleAgent(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	sessionKey, err := s.resolveSessionKey(payload)
+	sessionKey, err := s.resolveConfiguredSessionKey(action.sessionKey)
 	if err != nil {
 		writeHookJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -365,8 +438,8 @@ func (s *hookIngressServer) handleAgent(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	deliver := boolField(payload["deliver"], true)
-	channel, chatID, err := s.resolveDeliveryTarget(deliver, stringField(payload["channel"]), stringField(payload["to"]))
+	deliver := boolValue(action.deliver, true)
+	channel, chatID, err := s.resolveDeliveryTarget(deliver, action.channel, action.to)
 	if err != nil {
 		writeHookJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -375,7 +448,10 @@ func (s *hookIngressServer) handleAgent(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	timeoutSeconds := intField(payload["timeoutSeconds"], defaultHookAgentTimeoutSeconds)
+	timeoutSeconds := action.timeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = defaultHookAgentTimeoutSeconds
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -435,6 +511,13 @@ func (s *hookIngressServer) resolveSessionKey(payload map[string]any) (string, e
 		if !s.cfg.allowRequestSessionKey {
 			return "", fmt.Errorf("sessionKey is disabled for external hook payloads")
 		}
+	}
+	return s.resolveConfiguredSessionKey(requested)
+}
+
+func (s *hookIngressServer) resolveConfiguredSessionKey(requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested != "" {
 		if len(s.cfg.allowedSessionKeyPrefixes) > 0 && !isSessionKeyAllowedByPrefix(requested, s.cfg.allowedSessionKeyPrefixes) {
 			return "", fmt.Errorf("sessionKey must start with one of: %s", strings.Join(s.cfg.allowedSessionKeyPrefixes, ", "))
 		}
@@ -689,6 +772,31 @@ func stringField(raw any) string {
 	default:
 		return ""
 	}
+}
+
+func normalizeHookHeaders(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(headers))
+	for key, values := range headers {
+		if len(values) == 0 {
+			continue
+		}
+		out[strings.ToLower(key)] = strings.Join(values, ", ")
+	}
+	return out
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func boolValue(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
 }
 
 func max(a, b int) int {

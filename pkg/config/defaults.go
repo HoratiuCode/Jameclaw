@@ -179,6 +179,8 @@ func DefaultConfig() *Config {
 				InterceptorTimeoutMS: 5000,
 				ApprovalTimeoutMS:    60000,
 			},
+			Presets:       FlexibleStringSlice{},
+			TransformsDir: "",
 			Ingress: WebhookIngressConfig{
 				Enabled:         false,
 				Path:            "/hooks",

@@ -135,11 +135,14 @@ func (c *Config) FilterSensitiveData(content string) string {
 }
 
 type HooksConfig struct {
-	Enabled   bool                         `json:"enabled"`
-	Defaults  HookDefaultsConfig           `json:"defaults,omitempty"`
-	Builtins  map[string]BuiltinHookConfig `json:"builtins,omitempty"`
-	Processes map[string]ProcessHookConfig `json:"processes,omitempty"`
-	Ingress   WebhookIngressConfig         `json:"ingress,omitempty"`
+	Enabled       bool                         `json:"enabled"`
+	Defaults      HookDefaultsConfig           `json:"defaults,omitempty"`
+	Builtins      map[string]BuiltinHookConfig `json:"builtins,omitempty"`
+	Processes     map[string]ProcessHookConfig `json:"processes,omitempty"`
+	Presets       FlexibleStringSlice          `json:"presets,omitempty" env:"JAMECLAW_HOOKS_PRESETS"`
+	TransformsDir string                       `json:"transforms_dir,omitempty" env:"JAMECLAW_HOOKS_TRANSFORMS_DIR"`
+	Mappings      []WebhookMappingConfig       `json:"mappings,omitempty"`
+	Ingress       WebhookIngressConfig         `json:"ingress,omitempty"`
 }
 
 type HookDefaultsConfig struct {
@@ -163,6 +166,33 @@ type ProcessHookConfig struct {
 	Env       map[string]string `json:"env,omitempty"`
 	Observe   []string          `json:"observe,omitempty"`
 	Intercept []string          `json:"intercept,omitempty"`
+}
+
+type WebhookMappingConfig struct {
+	ID              string                         `json:"id,omitempty"`
+	Match           WebhookMappingMatchConfig      `json:"match,omitempty"`
+	Action          string                         `json:"action,omitempty"`
+	WakeMode        string                         `json:"wake_mode,omitempty"`
+	Name            string                         `json:"name,omitempty"`
+	AgentID         string                         `json:"agent_id,omitempty"`
+	SessionKey      string                         `json:"session_key,omitempty"`
+	MessageTemplate string                         `json:"message_template,omitempty"`
+	TextTemplate    string                         `json:"text_template,omitempty"`
+	Deliver         *bool                          `json:"deliver,omitempty"`
+	Channel         string                         `json:"channel,omitempty"`
+	To              string                         `json:"to,omitempty"`
+	TimeoutSeconds  int                            `json:"timeout_seconds,omitempty"`
+	Transform       *WebhookMappingTransformConfig `json:"transform,omitempty"`
+}
+
+type WebhookMappingMatchConfig struct {
+	Path   string `json:"path,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+type WebhookMappingTransformConfig struct {
+	Module string `json:"module,omitempty"`
+	Export string `json:"export,omitempty"`
 }
 
 type WebhookIngressConfig struct {

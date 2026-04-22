@@ -61,8 +61,33 @@ Example:
       "enabled": true,
       "token": "shared-secret",
       "path": "/hooks"
-    }
+    },
+    "presets": ["gmail"],
+    "transforms_dir": "hooks/transforms",
+    "mappings": [
+      {
+        "id": "custom-note",
+        "match": { "path": "note" },
+        "action": "agent",
+        "message_template": "Note: {{path \"title\"}}",
+        "deliver": false
+      }
+    ]
   }
+}
+```
+
+Transform files live under `hooks/transforms` by default. A transform is a
+local template file that renders JSON overrides for a mapping, which keeps the
+system native to JameClaw without pulling in the OpenClaw runtime.
+
+Example transform file:
+
+```json
+{
+  "kind": "wake",
+  "text": "{{path \"title\"}}",
+  "mode": "now"
 }
 ```
 
@@ -84,6 +109,10 @@ Notes:
 - `hooks.ingress.allowed_session_key_prefixes` can restrict generated or caller-supplied session keys
 - `hooks.ingress.allowed_agent_ids` can restrict explicit `agentId` routing
 - When `deliver` is `true`, the webhook response is published to the selected channel
+- `hooks.mappings` are evaluated in order before preset mappings
+- `hooks.presets: ["gmail"]` enables the built-in Gmail mapping
+- `hooks.transforms_dir` keeps transform files under the local config root
+- Mapping templates can use helpers such as `{{path "messages.0.subject"}}` and `{{header "x-id"}}`
 
 ## Quick Start
 
