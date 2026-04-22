@@ -84,6 +84,8 @@ All of those entry points share the same local runtime state under `~/.jameclaw`
 
 For broader product docs, use the official docs site. This README is intentionally focused on the current launcher-centric setup in this repo.
 
+For the internal step-by-step implementation checklist, see [docs/implementation/README.md](docs/implementation/README.md).
+
 ## 📦 Install
 
 ### Download from jameclaw.xyz (Recommended)
