@@ -139,6 +139,7 @@ type HooksConfig struct {
 	Defaults  HookDefaultsConfig           `json:"defaults,omitempty"`
 	Builtins  map[string]BuiltinHookConfig `json:"builtins,omitempty"`
 	Processes map[string]ProcessHookConfig `json:"processes,omitempty"`
+	Ingress   WebhookIngressConfig         `json:"ingress,omitempty"`
 }
 
 type HookDefaultsConfig struct {
@@ -162,6 +163,17 @@ type ProcessHookConfig struct {
 	Env       map[string]string `json:"env,omitempty"`
 	Observe   []string          `json:"observe,omitempty"`
 	Intercept []string          `json:"intercept,omitempty"`
+}
+
+type WebhookIngressConfig struct {
+	Enabled                   bool                `json:"enabled" env:"JAMECLAW_HOOKS_INGRESS_ENABLED"`
+	Token                     string              `json:"token,omitempty" env:"JAMECLAW_HOOKS_INGRESS_TOKEN"`
+	Path                      string              `json:"path,omitempty" env:"JAMECLAW_HOOKS_INGRESS_PATH"`
+	MaxBodyBytes              int                 `json:"max_body_bytes,omitempty" env:"JAMECLAW_HOOKS_INGRESS_MAX_BODY_BYTES"`
+	DefaultSessionKey         string              `json:"default_session_key,omitempty" env:"JAMECLAW_HOOKS_INGRESS_DEFAULT_SESSION_KEY"`
+	AllowRequestSessionKey    bool                `json:"allow_request_session_key,omitempty" env:"JAMECLAW_HOOKS_INGRESS_ALLOW_REQUEST_SESSION_KEY"`
+	AllowedSessionKeyPrefixes FlexibleStringSlice `json:"allowed_session_key_prefixes,omitempty" env:"JAMECLAW_HOOKS_INGRESS_ALLOWED_SESSION_KEY_PREFIXES"`
+	AllowedAgentIds           FlexibleStringSlice `json:"allowed_agent_ids,omitempty" env:"JAMECLAW_HOOKS_INGRESS_ALLOWED_AGENT_IDS"`
 }
 
 // BuildInfo contains build-time version information

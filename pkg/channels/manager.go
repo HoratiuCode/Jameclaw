@@ -408,14 +408,25 @@ func (m *Manager) initChannels(channels *config.ChannelsConfig) error {
 }
 
 // SetupHTTPServer creates a shared HTTP server with the given listen address.
-// It registers health endpoints from the health server and discovers channels
-// that implement WebhookHandler and/or HealthChecker to register their handlers.
-func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
+// It registers health endpoints from the health server, any extra mux
+// registrars passed by the gateway, and discovers channels that implement
+// WebhookHandler and/or HealthChecker to register their handlers.
+func (m *Manager) SetupHTTPServer(
+	addr string,
+	healthServer *health.Server,
+	extraRegistrars ...func(*http.ServeMux),
+) {
 	m.mux = http.NewServeMux()
 
 	// Register health endpoints
 	if healthServer != nil {
 		healthServer.RegisterOnMux(m.mux)
+	}
+
+	for _, register := range extraRegistrars {
+		if register != nil {
+			register(m.mux)
+		}
 	}
 
 	// Discover and register webhook handlers and health checkers

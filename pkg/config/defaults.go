@@ -179,6 +179,12 @@ func DefaultConfig() *Config {
 				InterceptorTimeoutMS: 5000,
 				ApprovalTimeoutMS:    60000,
 			},
+			Ingress: WebhookIngressConfig{
+				Enabled:         false,
+				Path:            "/hooks",
+				MaxBodyBytes:    256 * 1024,
+				AllowedAgentIds: FlexibleStringSlice{},
+			},
 		},
 		ModelList: []*ModelConfig{
 			// ============================================

@@ -18,11 +18,11 @@ import (
 	_ "github.com/sipeed/jameclaw/pkg/channels/discord"
 	_ "github.com/sipeed/jameclaw/pkg/channels/feishu"
 	_ "github.com/sipeed/jameclaw/pkg/channels/irc"
+	_ "github.com/sipeed/jameclaw/pkg/channels/jame"
 	_ "github.com/sipeed/jameclaw/pkg/channels/line"
 	_ "github.com/sipeed/jameclaw/pkg/channels/maixcam"
 	_ "github.com/sipeed/jameclaw/pkg/channels/matrix"
 	_ "github.com/sipeed/jameclaw/pkg/channels/onebot"
-	_ "github.com/sipeed/jameclaw/pkg/channels/jame"
 	_ "github.com/sipeed/jameclaw/pkg/channels/qq"
 	_ "github.com/sipeed/jameclaw/pkg/channels/slack"
 	_ "github.com/sipeed/jameclaw/pkg/channels/telegram"
@@ -316,7 +316,8 @@ func setupAndStartServices(
 
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
-	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
+	hookIngressRegistrar := createHookIngressRegistrar(cfg, agentLoop, msgBus.PublishOutbound)
+	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
 
 	if err = runningServices.ChannelManager.StartAll(context.Background()); err != nil {
 		return nil, fmt.Errorf("error starting channels: %w", err)
@@ -509,7 +510,8 @@ func restartServices(
 	if runningServices.HealthServer == nil {
 		runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	}
-	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
+	hookIngressRegistrar := createHookIngressRegistrar(cfg, al, msgBus.PublishOutbound)
+	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
 
 	if err = runningServices.ChannelManager.Reload(context.Background(), cfg); err != nil {
 		return fmt.Errorf("error reload channels: %w", err)

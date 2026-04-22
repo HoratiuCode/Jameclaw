@@ -1205,6 +1205,22 @@ func (al *AgentLoop) RecordLastChatID(chatID string) error {
 	return al.state.SetLastChatID(chatID)
 }
 
+// GetLastChannel returns the most recently recorded channel for the workspace.
+func (al *AgentLoop) GetLastChannel() string {
+	if al == nil || al.state == nil {
+		return ""
+	}
+	return al.state.GetLastChannel()
+}
+
+// GetLastChatID returns the most recently recorded chat ID for the workspace.
+func (al *AgentLoop) GetLastChatID() string {
+	if al == nil || al.state == nil {
+		return ""
+	}
+	return al.state.GetLastChatID()
+}
+
 func (al *AgentLoop) ProcessDirect(
 	ctx context.Context,
 	content, sessionKey string,
@@ -1212,9 +1228,11 @@ func (al *AgentLoop) ProcessDirect(
 	return al.ProcessDirectWithChannel(ctx, content, sessionKey, "cli", "direct")
 }
 
-func (al *AgentLoop) ProcessDirectWithChannel(
+// ProcessDirectOnAgent processes a direct turn on a specific agent when agentID is set.
+// Unknown agent IDs fall back to the default agent.
+func (al *AgentLoop) ProcessDirectOnAgent(
 	ctx context.Context,
-	content, sessionKey, channel, chatID string,
+	agentID, content, sessionKey, channel, chatID string,
 ) (string, error) {
 	if err := al.ensureHooksInitialized(ctx); err != nil {
 		return "", err
@@ -1223,15 +1241,32 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 		return "", err
 	}
 
-	msg := bus.InboundMessage{
-		Channel:    channel,
-		SenderID:   "cron",
-		ChatID:     chatID,
-		Content:    content,
-		SessionKey: sessionKey,
+	agent := al.GetRegistry().GetDefaultAgent()
+	if agentID != "" {
+		if resolved, ok := al.GetRegistry().GetAgent(agentID); ok {
+			agent = resolved
+		}
+	}
+	if agent == nil {
+		return "", fmt.Errorf("no agent available for direct processing")
 	}
 
-	return al.processMessage(ctx, msg)
+	return al.runAgentLoop(ctx, agent, processOptions{
+		SessionKey:      sessionKey,
+		Channel:         channel,
+		ChatID:          chatID,
+		UserMessage:     content,
+		DefaultResponse: defaultResponse,
+		EnableSummary:   true,
+		SendResponse:    false,
+	})
+}
+
+func (al *AgentLoop) ProcessDirectWithChannel(
+	ctx context.Context,
+	content, sessionKey, channel, chatID string,
+) (string, error) {
+	return al.ProcessDirectOnAgent(ctx, "", content, sessionKey, channel, chatID)
 }
 
 // ProcessHeartbeat processes a heartbeat request without session history.

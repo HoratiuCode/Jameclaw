@@ -47,6 +47,44 @@ Global defaults live under `hooks.defaults`:
 
 Note: the current implementation does not support per-process-hook `timeout_ms`. Timeouts are global defaults.
 
+## HTTP Ingress
+
+JameClaw also supports an external webhook ingress on the shared gateway server.
+It is disabled by default and configured separately from internal hook mounting.
+
+Example:
+
+```json
+{
+  "hooks": {
+    "ingress": {
+      "enabled": true,
+      "token": "shared-secret",
+      "path": "/hooks"
+    }
+  }
+}
+```
+
+Auth:
+
+- `Authorization: Bearer <token>` is recommended
+- `X-JameClaw-Token: <token>` is also accepted
+- Query-string tokens are rejected
+
+Endpoints:
+
+- `POST /hooks/wake` triggers an immediate wake/heartbeat turn
+- `POST /hooks/agent` runs a direct agent turn
+
+Notes:
+
+- `hooks.ingress.default_session_key` sets the default session for inbound webhook runs
+- `hooks.ingress.allow_request_session_key` controls whether callers may override `sessionKey`
+- `hooks.ingress.allowed_session_key_prefixes` can restrict generated or caller-supplied session keys
+- `hooks.ingress.allowed_agent_ids` can restrict explicit `agentId` routing
+- When `deliver` is `true`, the webhook response is published to the selected channel
+
 ## Quick Start
 
 If your first goal is simply to prove that the hook flow works and observe real requests, the easiest path is the Python process-hook example below:

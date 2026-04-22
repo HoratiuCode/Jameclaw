@@ -491,6 +491,15 @@ func TestDefaultConfig_HooksDefaults(t *testing.T) {
 	if cfg.Hooks.Defaults.ApprovalTimeoutMS != 60000 {
 		t.Fatalf("ApprovalTimeoutMS = %d, want 60000", cfg.Hooks.Defaults.ApprovalTimeoutMS)
 	}
+	if cfg.Hooks.Ingress.Enabled {
+		t.Fatal("DefaultConfig().Hooks.Ingress.Enabled should be false")
+	}
+	if cfg.Hooks.Ingress.Path != "/hooks" {
+		t.Fatalf("Ingress.Path = %q, want /hooks", cfg.Hooks.Ingress.Path)
+	}
+	if cfg.Hooks.Ingress.MaxBodyBytes != 256*1024 {
+		t.Fatalf("Ingress.MaxBodyBytes = %d, want %d", cfg.Hooks.Ingress.MaxBodyBytes, 256*1024)
+	}
 }
 
 func TestDefaultConfig_LogLevel(t *testing.T) {

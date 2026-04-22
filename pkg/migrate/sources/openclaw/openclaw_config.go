@@ -543,7 +543,7 @@ func (c *OpenClawConfig) ConvertToJameClaw(sourceHome string) (*JameClawConfig, 
 		)
 	}
 	if c.HasHooks() {
-		warnings = append(warnings, "Webhook hooks not supported in JameClaw - use event system instead")
+		warnings = append(warnings, "Webhook hooks are only partially migrated in JameClaw - review hooks.ingress manually")
 	}
 	if c.HasSession() {
 		warnings = append(warnings, "Session scope config differs - JameClaw uses per-agent sessions by default")
