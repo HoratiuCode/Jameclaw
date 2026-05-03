@@ -407,21 +407,18 @@ func normalizeModel(model, apiBase string) string {
 }
 
 func buildToolsList(tools []ToolDefinition, nativeSearch bool) []any {
-	result := make([]any, 0, len(tools)+1)
+	result := make([]any, 0, len(tools))
 	for _, t := range tools {
 		if nativeSearch && strings.EqualFold(t.Function.Name, "web_search") {
 			continue
 		}
 		result = append(result, t)
 	}
-	if nativeSearch {
-		result = append(result, map[string]any{"type": "web_search_preview"})
-	}
 	return result
 }
 
 func (p *Provider) SupportsNativeSearch() bool {
-	return isNativeSearchHost(p.apiBase)
+	return false
 }
 
 func isNativeSearchHost(apiBase string) bool {

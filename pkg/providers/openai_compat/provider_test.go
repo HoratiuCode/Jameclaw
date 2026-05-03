@@ -929,23 +929,6 @@ func TestSupportsPromptCacheKey(t *testing.T) {
 	}
 }
 
-func TestBuildToolsList_NativeSearchAddsWebSearchPreview(t *testing.T) {
-	tools := []ToolDefinition{
-		{Type: "function", Function: ToolFunctionDefinition{Name: "read_file", Description: "read"}},
-	}
-	result := buildToolsList(tools, true)
-	if len(result) != 2 {
-		t.Fatalf("len(result) = %d, want 2", len(result))
-	}
-	wsEntry, ok := result[1].(map[string]any)
-	if !ok {
-		t.Fatalf("web search entry is %T, want map[string]any", result[1])
-	}
-	if wsEntry["type"] != "web_search_preview" {
-		t.Fatalf("type = %v, want web_search_preview", wsEntry["type"])
-	}
-}
-
 func TestBuildToolsList_NativeSearchFiltersClientWebSearch(t *testing.T) {
 	tools := []ToolDefinition{
 		{Type: "function", Function: ToolFunctionDefinition{Name: "web_search", Description: "search"}},
@@ -957,8 +940,8 @@ func TestBuildToolsList_NativeSearchFiltersClientWebSearch(t *testing.T) {
 			t.Fatal("client-side web_search should be filtered out when native search is enabled")
 		}
 	}
-	if len(result) != 2 { // read_file + web_search_preview
-		t.Fatalf("len(result) = %d, want 2 (read_file + web_search_preview)", len(result))
+	if len(result) != 1 { // only read_file remains
+		t.Fatalf("len(result) = %d, want 1 (read_file only)", len(result))
 	}
 }
 
@@ -1114,7 +1097,7 @@ func TestProviderChat_NativeSearchNotInjectedWithoutOption(t *testing.T) {
 
 // TestProviderChat_NativeSearchIgnoredOnNonOpenAI verifies that when native_search
 // is true in options but the provider's apiBase is not OpenAI (e.g. fallback to DeepSeek),
-// we do not inject web_search_preview to avoid API errors.
+// we do not inject any native web search tool.
 func TestProviderChat_NativeSearchIgnoredOnNonOpenAI(t *testing.T) {
 	var requestBody map[string]any
 
@@ -1149,7 +1132,7 @@ func TestProviderChat_NativeSearchIgnoredOnNonOpenAI(t *testing.T) {
 		t.Fatalf("Chat() error = %v", err)
 	}
 
-	// Should not have tools at all (no tools passed, and we must not add web_search_preview)
+	// Should not have tools at all (no tools passed)
 	if toolsRaw, ok := requestBody["tools"]; ok {
 		t.Fatalf("tools should be omitted for non-OpenAI when only native_search was requested, got %v", toolsRaw)
 	}

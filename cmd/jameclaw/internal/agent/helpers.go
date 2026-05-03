@@ -75,7 +75,6 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 	}
 
 	fmt.Printf("%s Interactive mode (Ctrl+C to exit)\n\n", agentEmoji)
-	fmt.Println("Tip: use /emoji <emoji>, /persona <text>, or /skills add <skill> to customize JameClaw.")
 	interactiveMode(agentLoop, sessionKey, agentEmoji)
 
 	return nil
