@@ -46,7 +46,10 @@ export function ChatPage() {
     localModels,
     handleSetDefault,
   } = useChatModels({ isConnected: isGatewayRunning })
-  const canSend = isGatewayRunning && Boolean(defaultModelName)
+  const canSend =
+    isGatewayRunning &&
+    connectionState === "connected" &&
+    Boolean(defaultModelName)
   const gatewayStopHint =
     gwState === "running" && !owned
       ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}. Use Stop in the top bar or run ${pid ? `kill ${pid} then kill -9 ${pid}` : "pkill -f 'jameclaw gateway'"}.`
@@ -107,6 +110,10 @@ export function ChatPage() {
     }
     if (sendMessage(input.trim())) {
       setInput("")
+    } else {
+      toast.error(
+        "Web Console could not send the message. Make sure JameClaw is connected and try again.",
+      )
     }
   }
 
@@ -193,7 +200,7 @@ export function ChatPage() {
         onInputChange={setInput}
         onSend={handleSend}
         disabledReason={disabledReason}
-        isConnected={isGatewayRunning}
+        isConnected={canSend}
         hasDefaultModel={Boolean(defaultModelName)}
       />
     </div>

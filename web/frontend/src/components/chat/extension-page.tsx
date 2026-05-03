@@ -58,7 +58,10 @@ export function ExtensionPage() {
   const { state: gwState, canStart, startReason, pid, owned } = useGateway()
   const isGatewayRunning = gwState === "running"
   const { defaultModelName } = useChatModels({ isConnected: isGatewayRunning })
-  const canSend = isGatewayRunning && Boolean(defaultModelName)
+  const canSend =
+    isGatewayRunning &&
+    connectionState === "connected" &&
+    Boolean(defaultModelName)
 
   const disabledReason = !defaultModelName
     ? "Choose a default model in JameClaw before sending messages."
@@ -116,6 +119,10 @@ export function ExtensionPage() {
 
     if (sendMessage(message)) {
       setInput("")
+    } else {
+      toast.error(
+        "Web Console could not send the message. Make sure JameClaw is connected and try again.",
+      )
     }
   }
 
