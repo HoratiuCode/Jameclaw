@@ -23,6 +23,9 @@ export interface CoreConfigForm {
   heartbeatInterval: string
   devicesEnabled: boolean
   monitorUSB: boolean
+  webExtensionModelSize: string
+  webExtensionPackageName: string
+  webExtensionUsageNotes: string
 }
 
 export interface LauncherForm {
@@ -85,6 +88,10 @@ export const EMPTY_FORM: CoreConfigForm = {
   heartbeatInterval: "30",
   devicesEnabled: false,
   monitorUSB: true,
+  webExtensionModelSize: "medium",
+  webExtensionPackageName: "Chrome-Extension-Upload",
+  webExtensionUsageNotes:
+    "1. Open chrome://extensions\n2. Enable Developer mode\n3. Click Load unpacked\n4. Select Chrome-Extension-Upload\n5. Keep JameClaw running on localhost:18800",
 }
 
 export const EMPTY_LAUNCHER_FORM: LauncherForm = {
@@ -129,6 +136,7 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
   const cron = asRecord(tools.cron)
   const exec = asRecord(tools.exec)
   const toolFeedback = asRecord(defaults.tool_feedback)
+  const webExtension = asRecord(root.web_extension)
 
   return {
     workspace: asString(defaults.workspace) || EMPTY_FORM.workspace,
@@ -209,6 +217,13 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       devices.monitor_usb === undefined
         ? EMPTY_FORM.monitorUSB
         : asBool(devices.monitor_usb),
+    webExtensionModelSize:
+      asString(webExtension.model_size) || EMPTY_FORM.webExtensionModelSize,
+    webExtensionPackageName:
+      asString(webExtension.package_name) ||
+      EMPTY_FORM.webExtensionPackageName,
+    webExtensionUsageNotes:
+      asString(webExtension.usage_notes) || EMPTY_FORM.webExtensionUsageNotes,
   }
 }
 

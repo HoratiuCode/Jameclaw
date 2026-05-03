@@ -535,6 +535,11 @@ func DefaultConfig() *Config {
 			Enabled:    false,
 			MonitorUSB: true,
 		},
+		WebExtension: WebExtensionConfig{
+			ModelSize:   "medium",
+			PackageName: "Chrome-Extension-Upload",
+			UsageNotes:  "1. Open chrome://extensions\n2. Enable Developer mode\n3. Click Load unpacked\n4. Select Chrome-Extension-Upload\n5. Keep JameClaw running on localhost:18800",
+		},
 		Voice: VoiceConfig{
 			ModelName:         "",
 			EchoTranscription: false,

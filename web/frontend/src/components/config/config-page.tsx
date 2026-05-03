@@ -19,6 +19,7 @@ import {
   ExecSection,
   LauncherSection,
   RuntimeSection,
+  WebExtensionSection,
 } from "@/components/config/config-sections"
 import {
   type CoreConfigForm,
@@ -219,6 +220,11 @@ export function ConfigPage() {
               summarize_token_percent: summarizeTokenPercent,
             },
           },
+          web_extension: {
+            model_size: form.webExtensionModelSize,
+            package_name: form.webExtensionPackageName.trim(),
+            usage_notes: form.webExtensionUsageNotes.trim(),
+          },
           session: {
             dm_scope: dmScope,
           },
@@ -321,6 +327,8 @@ export function ConfigPage() {
               )}
 
               <AgentDefaultsSection form={form} onFieldChange={updateField} />
+
+              <WebExtensionSection form={form} onFieldChange={updateField} />
 
               <RuntimeSection form={form} onFieldChange={updateField} />
 

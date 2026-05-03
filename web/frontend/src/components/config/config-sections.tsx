@@ -40,6 +40,25 @@ interface ConfigSectionCardProps {
   children: ReactNode
 }
 
+const WEB_EXTENSION_MODEL_SIZE_OPTIONS = [
+  {
+    value: "small",
+    label: "Small",
+  },
+  {
+    value: "medium",
+    label: "Medium",
+  },
+  {
+    value: "large",
+    label: "Large",
+  },
+  {
+    value: "xlarge",
+    label: "Extra Large",
+  },
+] as const
+
 function ConfigSectionCard({
   title,
   description,
@@ -188,6 +207,78 @@ export function AgentDefaultsSection({
           onChange={(e) =>
             onFieldChange("summarizeTokenPercent", e.target.value)
           }
+        />
+      </Field>
+    </ConfigSectionCard>
+  )
+}
+
+interface WebExtensionSectionProps {
+  form: CoreConfigForm
+  onFieldChange: UpdateCoreField
+}
+
+export function WebExtensionSection({
+  form,
+  onFieldChange,
+}: WebExtensionSectionProps) {
+  const { t } = useTranslation()
+
+  return (
+    <ConfigSectionCard
+      title={t("pages.config.sections.web_extension")}
+      description={t("pages.config.web_extension_description")}
+    >
+      <Field
+        label={t("pages.config.web_extension_model_size")}
+        hint={t("pages.config.web_extension_model_size_hint")}
+        layout="setting-row"
+      >
+        <Select
+          value={form.webExtensionModelSize}
+          onValueChange={(value) =>
+            onFieldChange("webExtensionModelSize", value)
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {WEB_EXTENSION_MODEL_SIZE_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label={t("pages.config.web_extension_package")}
+        hint={t("pages.config.web_extension_package_hint")}
+        layout="setting-row"
+      >
+        <Input
+          value={form.webExtensionPackageName}
+          onChange={(e) =>
+            onFieldChange("webExtensionPackageName", e.target.value)
+          }
+          placeholder="Chrome-Extension-Upload"
+        />
+      </Field>
+
+      <Field
+        label={t("pages.config.web_extension_usage_notes")}
+        hint={t("pages.config.web_extension_usage_notes_hint")}
+        layout="setting-row"
+        controlClassName="md:max-w-md"
+      >
+        <Textarea
+          value={form.webExtensionUsageNotes}
+          onChange={(e) =>
+            onFieldChange("webExtensionUsageNotes", e.target.value)
+          }
+          className="min-h-[160px]"
         />
       </Field>
     </ConfigSectionCard>

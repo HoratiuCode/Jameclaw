@@ -83,18 +83,19 @@ const CurrentVersion = 1
 
 // Config is the current config structure with version support
 type Config struct {
-	Version   int             `json:"version"` // Config schema version for migration
-	Agents    AgentsConfig    `json:"agents"`
-	Bindings  []AgentBinding  `json:"bindings,omitempty"`
-	Session   SessionConfig   `json:"session,omitempty"`
-	Channels  ChannelsConfig  `json:"channels"`
-	ModelList []*ModelConfig  `json:"model_list"` // New model-centric provider configuration
-	Gateway   GatewayConfig   `json:"gateway"`
-	Hooks     HooksConfig     `json:"hooks,omitempty"`
-	Tools     ToolsConfig     `json:"tools"`
-	Heartbeat HeartbeatConfig `json:"heartbeat"`
-	Devices   DevicesConfig   `json:"devices"`
-	Voice     VoiceConfig     `json:"voice"`
+	Version      int                `json:"version"` // Config schema version for migration
+	Agents       AgentsConfig       `json:"agents"`
+	Bindings     []AgentBinding     `json:"bindings,omitempty"`
+	Session      SessionConfig      `json:"session,omitempty"`
+	Channels     ChannelsConfig     `json:"channels"`
+	ModelList    []*ModelConfig     `json:"model_list"` // New model-centric provider configuration
+	Gateway      GatewayConfig      `json:"gateway"`
+	Hooks        HooksConfig        `json:"hooks,omitempty"`
+	Tools        ToolsConfig        `json:"tools"`
+	Heartbeat    HeartbeatConfig    `json:"heartbeat"`
+	Devices      DevicesConfig      `json:"devices"`
+	WebExtension WebExtensionConfig `json:"web_extension"`
+	Voice        VoiceConfig        `json:"voice"`
 	// BuildInfo contains build-time version information
 	BuildInfo BuildInfo `json:"build_info,omitempty"`
 
@@ -968,6 +969,12 @@ type HeartbeatConfig struct {
 type DevicesConfig struct {
 	Enabled    bool `json:"enabled"     env:"JAMECLAW_DEVICES_ENABLED"`
 	MonitorUSB bool `json:"monitor_usb" env:"JAMECLAW_DEVICES_MONITOR_USB"`
+}
+
+type WebExtensionConfig struct {
+	ModelSize   string `json:"model_size,omitempty"`
+	PackageName string `json:"package_name,omitempty"`
+	UsageNotes  string `json:"usage_notes,omitempty"`
 }
 
 type VoiceConfig struct {

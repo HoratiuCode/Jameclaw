@@ -143,6 +143,44 @@ func TestHandlePatchConfig_AllowsInvalidExecRegexPatternsWhenExecDisabled(t *tes
 	}
 }
 
+func TestHandlePatchConfig_PersistsWebExtensionSettings(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
+		"web_extension": {
+			"model_size": "large",
+			"package_name": "web/chrome-extension",
+			"usage_notes": "1. Open chrome://extensions\n2. Load unpacked"
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if got := cfg.WebExtension.ModelSize; got != "large" {
+		t.Fatalf("web_extension.model_size = %q, want %q", got, "large")
+	}
+	if got := cfg.WebExtension.PackageName; got != "web/chrome-extension" {
+		t.Fatalf("web_extension.package_name = %q, want %q", got, "web/chrome-extension")
+	}
+	if got := cfg.WebExtension.UsageNotes; got != "1. Open chrome://extensions\n2. Load unpacked" {
+		t.Fatalf("web_extension.usage_notes = %q, want %q", got, "1. Open chrome://extensions\n2. Load unpacked")
+	}
+}
+
 // setupJameEnabledEnv creates a test environment with Jame channel enabled and
 // its token stored only in .security.yml (not in the JSON payload).
 func setupJameEnabledEnv(t *testing.T) (string, func()) {
