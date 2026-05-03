@@ -166,7 +166,16 @@ function requestPageContext() {
   chrome.runtime.sendMessage(
     { type: "jameclaw-extension-request-context" },
     (response) => {
+      if (chrome.runtime.lastError) {
+        setStatus(
+          chrome.runtime.lastError.message ||
+            "Could not read the active page context.",
+        )
+        return
+      }
+
       if (!response?.ok) {
+        setStatus(response?.error || "Could not read the active page context.")
         return
       }
 
@@ -340,9 +349,17 @@ refreshContextEl.addEventListener("click", () => {
   if (isDock) {
     chrome.runtime.sendMessage(
       { type: "jameclaw-extension-set-dock-state", enabled: false },
-      () => {
+      (response) => {
         if (chrome.runtime.lastError) {
-          setStatus(chrome.runtime.lastError.message || "Could not close dock.")
+          setStatus(
+            chrome.runtime.lastError.message || "Could not close dock.",
+          )
+          return
+        }
+
+        if (!response?.ok) {
+          setStatus(response?.error || "Could not close dock.")
+          return
         }
       },
     )
@@ -352,6 +369,13 @@ refreshContextEl.addEventListener("click", () => {
   chrome.runtime.sendMessage(
     { type: "jameclaw-extension-set-dock-state", enabled: true },
     (response) => {
+      if (chrome.runtime.lastError) {
+        setStatus(
+          chrome.runtime.lastError.message || "Could not open dock.",
+        )
+        return
+      }
+
       if (!response?.ok) {
         setStatus(response?.error || "Could not open dock.")
         return
