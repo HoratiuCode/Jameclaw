@@ -106,6 +106,29 @@ func TestCreateProviderFromConfig_OpenAI(t *testing.T) {
 	}
 }
 
+func TestCreateProviderFromConfig_OpenAIPrefersAPIKeyOverOAuthAuthMethod(t *testing.T) {
+	cfg := &config.ModelConfig{
+		ModelName:  "test-openai",
+		Model:      "openai/gpt-4o",
+		AuthMethod: "oauth",
+	}
+	cfg.SetAPIKey("test-key")
+
+	provider, modelID, err := CreateProviderFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("CreateProviderFromConfig() error = %v", err)
+	}
+	if provider == nil {
+		t.Fatal("CreateProviderFromConfig() returned nil provider")
+	}
+	if _, ok := provider.(*HTTPProvider); !ok {
+		t.Fatalf("provider type = %T, want *HTTPProvider", provider)
+	}
+	if modelID != "gpt-4o" {
+		t.Errorf("modelID = %q, want %q", modelID, "gpt-4o")
+	}
+}
+
 func TestCreateProviderFromConfig_DefaultAPIBase(t *testing.T) {
 	tests := []struct {
 		name     string

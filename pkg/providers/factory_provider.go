@@ -75,6 +75,23 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 
 	switch protocol {
 	case "openai":
+		// Prefer API key auth whenever one is configured. This avoids routing
+		// an OpenAI model through the Codex OAuth/token provider just because
+		// an older config still has auth_method set.
+		if cfg.APIKey() != "" || cfg.APIBase != "" {
+			apiBase := cfg.APIBase
+			if apiBase == "" {
+				apiBase = getDefaultAPIBase(protocol)
+			}
+			return NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
+				cfg.APIKey(),
+				apiBase,
+				cfg.Proxy,
+				cfg.MaxTokensField,
+				cfg.RequestTimeout,
+				cfg.ExtraBody,
+			), modelID, nil
+		}
 		// OpenAI with OAuth/token auth (Codex-style)
 		if cfg.AuthMethod == "oauth" || cfg.AuthMethod == "token" {
 			provider, err := createCodexAuthProvider()
@@ -83,22 +100,7 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 			}
 			return provider, modelID, nil
 		}
-		// OpenAI with API key
-		if cfg.APIKey() == "" && cfg.APIBase == "" {
-			return nil, "", fmt.Errorf("api_key or api_base is required for HTTP-based protocol %q", protocol)
-		}
-		apiBase := cfg.APIBase
-		if apiBase == "" {
-			apiBase = getDefaultAPIBase(protocol)
-		}
-		return NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
-			cfg.APIKey(),
-			apiBase,
-			cfg.Proxy,
-			cfg.MaxTokensField,
-			cfg.RequestTimeout,
-			cfg.ExtraBody,
-		), modelID, nil
+		return nil, "", fmt.Errorf("api_key or api_base is required for HTTP-based protocol %q", protocol)
 
 	case "azure", "azure-openai":
 		// Azure OpenAI uses deployment-based URLs, api-key header auth,
