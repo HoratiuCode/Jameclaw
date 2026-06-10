@@ -207,13 +207,6 @@ func TestMtimeAutoInvalidation(t *testing.T) {
 			contentV2:  "# Updated Agent",
 			checkField: "Updated Agent",
 		},
-		{
-			name:       "memory file change",
-			file:       "memory/MEMORY.md",
-			contentV1:  "# Memory\nUser likes Go.",
-			contentV2:  "# Memory\nUser likes Rust.",
-			checkField: "User likes Rust",
-		},
 	}
 
 	for _, tt := range tests {
@@ -346,12 +339,6 @@ func TestNewFileCreationInvalidatesCache(t *testing.T) {
 			file:       "SOUL.md",
 			content:    "# Soul\nBe kind and helpful.",
 			checkField: "Be kind and helpful",
-		},
-		{
-			name:       "new memory file",
-			file:       "memory/MEMORY.md",
-			content:    "# Memory\nUser prefers dark mode.",
-			checkField: "User prefers dark mode",
 		},
 	}
 

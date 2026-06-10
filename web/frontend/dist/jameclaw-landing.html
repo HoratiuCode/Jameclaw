@@ -414,17 +414,75 @@
   .cta-banner-btns { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
 
   footer {
-    border-top: 1px solid var(--border);
-    padding: 2rem max(2rem, calc((100% - 1140px)/2 + 2rem));
-    display: flex; justify-content: space-between; align-items: center;
-    flex-wrap: wrap; gap: 1rem;
+    position: relative;
+    overflow: hidden;
+    background: #101214;
+    color: #fff;
   }
-  .footer-logo { font-weight: 800; font-size: 0.95rem; }
+  footer::before {
+    content: '';
+    position: absolute;
+    width: 360px; height: 360px;
+    right: -120px; top: -220px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(224,31,31,0.22), rgba(224,31,31,0) 68%);
+    pointer-events: none;
+  }
+  .footer-inner {
+    position: relative;
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 4rem 2rem 1.5rem;
+  }
+  .footer-main {
+    display: grid;
+    grid-template-columns: minmax(260px, 1.7fr) repeat(2, minmax(130px, 0.7fr));
+    gap: 4rem;
+    padding-bottom: 3.5rem;
+  }
+  .footer-brand { max-width: 360px; }
+  .footer-logo {
+    display: inline-flex; align-items: center; gap: 0.65rem;
+    font-weight: 800; font-size: 1.2rem; letter-spacing: -0.025em;
+    margin-bottom: 1rem;
+  }
+  .footer-logo img { width: 40px; height: 40px; object-fit: contain; }
   .footer-logo em { font-style: normal; color: var(--orange); }
-  .footer-links { display: flex; gap: 1.25rem; }
-  .footer-links a { font-size: 0.82rem; color: var(--muted); font-weight: 500; transition: color .15s; }
-  .footer-links a:hover { color: var(--ink); }
-  footer small { font-size: 0.78rem; color: var(--muted); }
+  .footer-tagline { color: #9ca3af; font-size: 0.9rem; line-height: 1.75; margin-bottom: 1.5rem; }
+  .footer-socials { display: flex; gap: 0.6rem; }
+  .footer-social {
+    width: 38px; height: 38px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    color: #d1d5db;
+    transition: color .15s, border-color .15s, background .15s, transform .15s;
+  }
+  .footer-social svg { width: 17px; height: 17px; }
+  .footer-social:hover {
+    color: #fff;
+    border-color: rgba(224,31,31,0.6);
+    background: rgba(224,31,31,0.12);
+    transform: translateY(-2px);
+  }
+  .footer-heading {
+    color: #fff; font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    margin-bottom: 1.1rem;
+  }
+  .footer-links { display: flex; flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+  .footer-links a { font-size: 0.86rem; color: #9ca3af; font-weight: 500; transition: color .15s, transform .15s; }
+  .footer-links a:hover { color: #fff; transform: translateX(2px); }
+  .footer-bottom {
+    min-height: 58px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem;
+    color: #7d8590;
+  }
+  .footer-bottom small { font-size: 0.75rem; }
+  .footer-note { display: inline-flex; align-items: center; gap: 0.45rem; }
+  .footer-note::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #36c56f; box-shadow: 0 0 0 3px rgba(54,197,111,0.12); }
 
   @media (max-width: 900px) {
     .benefits-grid { grid-template-columns: 1fr 1fr; }
@@ -432,6 +490,7 @@
     .install-inner { grid-template-columns: 1fr; gap: 2.5rem; }
     .community-grid { grid-template-columns: 1fr; }
     .nav-links { display: none; }
+    .footer-main { grid-template-columns: 1.5fr 1fr 1fr; gap: 2rem; }
   }
   @media (max-width: 600px) {
     .benefits-grid { grid-template-columns: 1fr; }
@@ -442,6 +501,10 @@
     .cta-banner-btns { flex-direction: column; align-items: center; }
     .waitlist-form { flex-direction: column; }
     .waitlist-submit { width: 100%; justify-content: center; }
+    .footer-inner { padding: 3rem 1.5rem 1.25rem; }
+    .footer-main { grid-template-columns: 1fr 1fr; gap: 2.5rem 1.5rem; padding-bottom: 2.5rem; }
+    .footer-brand { grid-column: 1 / -1; }
+    .footer-bottom { align-items: flex-start; flex-direction: column; justify-content: center; padding-top: 1.25rem; }
   }
 </style>
 </head>
@@ -810,15 +873,46 @@
 </div>
 
 <footer>
-  <a class="footer-logo" href="#"><span style="display:inline-flex;align-items:baseline;gap:0">Jame<em>Claw</em></span></a>
-  <div class="footer-links">
-    <a href="https://github.com/HoratiuCode/Jameclaw" target="_blank" rel="noreferrer">GitHub</a>
-    <a href="https://x.com/SipeedIO" target="_blank" rel="noreferrer">X / Twitter</a>
-    <a href="./jameclaw-docs.html">Docs</a>
-  </div>
-  <div style="text-align:right">
-    <small>© 2026 JameClaw · MIT License</small><br>
-    <small style="font-size:0.68rem;color:#9ca3af">Built by Horatiu</small>
+  <div class="footer-inner">
+    <div class="footer-main">
+      <div class="footer-brand">
+        <a class="footer-logo" href="#" aria-label="JameClaw home">
+          <img src="./jameclaw-mascot.png" alt=""/>
+          <span style="display:inline-flex;align-items:baseline;gap:0">Jame<em>Claw</em></span>
+        </a>
+        <p class="footer-tagline">A lightweight AI agent that runs where you do. Open source, local-first, and built to get real work done.</p>
+        <div class="footer-socials">
+          <a class="footer-social" href="https://github.com/HoratiuCode/Jameclaw" target="_blank" rel="noreferrer" aria-label="JameClaw on GitHub">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844a9.59 9.59 0 012.504.338c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.021C22 6.484 17.522 2 12 2z"/></svg>
+          </a>
+          <a class="footer-social" href="https://x.com/SipeedIO" target="_blank" rel="noreferrer" aria-label="JameClaw on X">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.912-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+          </a>
+        </div>
+      </div>
+      <div>
+        <p class="footer-heading">Explore</p>
+        <div class="footer-links">
+          <a href="#benefits">Features</a>
+          <a href="#install">Install</a>
+          <a href="#pricing">Pricing</a>
+          <a href="./jameclaw-docs.html">Documentation</a>
+        </div>
+      </div>
+      <div>
+        <p class="footer-heading">Community</p>
+        <div class="footer-links">
+          <a href="#community">Get involved</a>
+          <a href="https://github.com/HoratiuCode/Jameclaw" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://x.com/SipeedIO" target="_blank" rel="noreferrer">X / Twitter</a>
+          <a href="https://github.com/HoratiuCode/Jameclaw/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <small>&copy; 2026 JameClaw. Built by Horatiu.</small>
+      <small class="footer-note">Open source and ready to run</small>
+    </div>
   </div>
 </footer>
 

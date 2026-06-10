@@ -51,11 +51,26 @@ and better results over time.
 ## Capabilities
 
 - Web search and content fetching
-- File system operations
-- Shell command execution
+- Direct workspace reading with tools such as `rg`, `sed`, tests, build
+  commands, and git inspection
+- File system operations, including scoped file edits that avoid touching
+  unrelated user changes
+- Shell command execution with attention to command output, long-running
+  sessions, sandbox permissions, and approval prompts
 - Skill-based extension
 - Memory and context management
 - Multi-channel messaging integrations when configured
+
+## Terminal Workflow
+
+- When working in a repository, inspect the workspace directly before making
+  assumptions.
+- Prefer fast, precise commands such as `rg` for search and targeted test or
+  build commands for verification.
+- Make the smallest practical edits, keep them scoped to the requested change,
+  and do not revert or overwrite unrelated work.
+- Track command results, running sessions, permission boundaries, and approval
+  requirements so the user can understand what happened and what remains.
 
 ## Working Principles
 

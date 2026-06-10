@@ -171,12 +171,6 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 %s`, skillsSummary))
 	}
 
-	// Memory context
-	memoryContext := cb.memory.GetMemoryContext()
-	if memoryContext != "" {
-		parts = append(parts, "# Memory\n\n"+memoryContext)
-	}
-
 	// Join with "---" separator
 	return strings.Join(parts, "\n\n---\n\n")
 }
@@ -240,13 +234,11 @@ func (cb *ContextBuilder) InvalidateCache() {
 }
 
 // sourcePaths returns non-skill workspace source files tracked for cache
-// invalidation (bootstrap files + memory). Skill roots are handled separately
+// invalidation. Memory is retrieved dynamically per turn. Skill roots are handled separately
 // because they require both directory-level and recursive file-level checks.
 func (cb *ContextBuilder) sourcePaths() []string {
 	agentDefinition := cb.LoadAgentDefinition()
-	paths := agentDefinition.trackedPaths(cb.workspace)
-	paths = append(paths, filepath.Join(cb.workspace, "memory", "MEMORY.md"))
-	return uniquePaths(paths)
+	return uniquePaths(agentDefinition.trackedPaths(cb.workspace))
 }
 
 // skillRoots returns all skill root directories that can affect
@@ -333,7 +325,7 @@ func (cb *ContextBuilder) sourceFilesChangedLocked() bool {
 		return true
 	}
 
-	// Check tracked source files (bootstrap + memory).
+	// Check tracked bootstrap source files.
 	if slices.ContainsFunc(cb.sourcePaths(), cb.fileChangedSince) {
 		return true
 	}
@@ -574,6 +566,11 @@ func (cb *ContextBuilder) BuildMessages(
 		contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: skillsText})
 	}
 
+	if memoryText := cb.buildRelevantMemoryContext(currentMessage); memoryText != "" {
+		stringParts = append(stringParts, memoryText)
+		contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: memoryText})
+	}
+
 	if summary != "" {
 		summaryText := fmt.Sprintf(
 			"CONTEXT_SUMMARY: The following is an approximate summary of prior conversation "+
@@ -635,6 +632,19 @@ func (cb *ContextBuilder) BuildMessages(
 	}
 
 	return messages
+}
+
+func (cb *ContextBuilder) buildRelevantMemoryContext(query string) string {
+	results := cb.memory.Search(query, 5, 4000)
+	if len(results) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("# Relevant Memory\n\nUse these retrieved snippets only when relevant. They may be incomplete or outdated.\n")
+	for _, result := range results {
+		fmt.Fprintf(&sb, "\nSource: %s\n%s\n", result.Path, result.Snippet)
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 func sanitizeHistoryForProvider(history []providers.Message) []providers.Message {

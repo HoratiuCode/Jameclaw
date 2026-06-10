@@ -74,8 +74,12 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 		return nil
 	}
 
-	fmt.Printf("%s Interactive mode (Ctrl+C to exit)\n\n", agentEmoji)
-	interactiveMode(agentLoop, sessionKey, agentEmoji)
+	setTerminalAgentTitle(agentEmoji, sessionKey)
+
+	if err := runTerminalChat(agentLoop, sessionKey, agentEmoji); err != nil {
+		fmt.Printf("Terminal UI unavailable: %v\nFalling back to readline mode.\n\n", err)
+		interactiveMode(agentLoop, sessionKey, agentEmoji)
+	}
 
 	return nil
 }
@@ -95,6 +99,22 @@ func resolveAgentEmoji(cfg *config.Config) string {
 		return internal.Logo
 	}
 	return emoji
+}
+
+func setTerminalAgentTitle(agentEmoji, sessionKey string) {
+	title := fmt.Sprintf("%s JameClaw Agent", strings.TrimSpace(agentEmoji))
+	if strings.TrimSpace(sessionKey) != "" {
+		title += " - " + strings.TrimSpace(sessionKey)
+	}
+	title = strings.Map(func(r rune) rune {
+		switch r {
+		case '\x1b', '\a':
+			return -1
+		default:
+			return r
+		}
+	}, title)
+	fmt.Printf("\x1b]0;%s\a", title)
 }
 
 func interactiveMode(agentLoop *agent.AgentLoop, sessionKey, agentEmoji string) {

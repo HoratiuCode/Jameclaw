@@ -2,6 +2,7 @@ import { IconChevronRight } from "@tabler/icons-react"
 import {
   IconAtom,
   IconBrain,
+  IconChartBar,
   IconChevronsDown,
   IconChevronsUp,
   IconKey,
@@ -153,6 +154,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ...baseNavGroups[2],
         items: [
           {
+            title: "Agents",
+            url: "/agents",
+            icon: IconBrain,
+            translateTitle: false,
+          },
+          {
             title: "Learned",
             url: "/agent/learned",
             icon: IconBrain,
@@ -175,6 +182,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       {
         ...baseNavGroups[3],
         items: [
+          {
+            title: "Usage",
+            url: "/usage",
+            icon: IconChartBar,
+            translateTitle: false,
+          },
           {
             title: "navigation.config",
             url: "/config",

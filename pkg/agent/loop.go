@@ -1967,6 +1967,28 @@ turnLoop:
 				}
 				return fbResult.Response, nil
 			}
+			if streamingProvider, ok := ts.agent.Provider.(providers.StreamingProvider); ok {
+				previousLen := 0
+				return streamingProvider.ChatStream(
+					providerCtx,
+					messagesForCall,
+					toolDefsForCall,
+					llmModel,
+					llmOpts,
+					func(accumulated string) {
+						deltaLen := len(accumulated) - previousLen
+						if deltaLen < 0 {
+							deltaLen = len(accumulated)
+						}
+						previousLen = len(accumulated)
+						al.emitEvent(
+							EventKindLLMDelta,
+							ts.eventMeta("runTurn", "turn.llm.delta"),
+							LLMDeltaPayload{Content: accumulated, ContentDeltaLen: deltaLen},
+						)
+					},
+				)
+			}
 			return ts.agent.Provider.Chat(providerCtx, messagesForCall, toolDefsForCall, llmModel, llmOpts)
 		}
 
@@ -2151,11 +2173,21 @@ turnLoop:
 		al.emitEvent(
 			EventKindLLMResponse,
 			ts.eventMeta("runTurn", "turn.llm.response"),
-			LLMResponsePayload{
-				ContentLen:   len(response.Content),
-				ToolCalls:    len(response.ToolCalls),
-				HasReasoning: response.Reasoning != "" || response.ReasoningContent != "",
-			},
+			func() LLMResponsePayload {
+				payload := LLMResponsePayload{
+					Content:          response.Content,
+					ReasoningContent: reasoningContent,
+					ContentLen:       len(response.Content),
+					ToolCalls:        len(response.ToolCalls),
+					HasReasoning:     reasoningContent != "",
+				}
+				if response.Usage != nil {
+					payload.PromptTokens = response.Usage.PromptTokens
+					payload.CompletionTokens = response.Usage.CompletionTokens
+					payload.TotalTokens = response.Usage.TotalTokens
+				}
+				return payload
+			}(),
 		)
 
 		logger.DebugCF("agent", "LLM response",
@@ -2770,6 +2802,10 @@ func (al *AgentLoop) forceCompression(agent *AgentInstance, sessionKey string) (
 		return compressionResult{}, false
 	}
 
+	flushCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	al.flushMemoryBeforeCompaction(flushCtx, agent, history)
+	cancel()
+
 	// Split at a Turn boundary so no tool-call sequence is torn apart.
 	// parseTurnBoundaries gives us the start of each Turn; we drop the
 	// oldest half of Turns and keep the most recent ones.
@@ -2958,6 +2994,8 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string, t
 		return
 	}
 
+	al.flushMemoryBeforeCompaction(ctx, agent, validMessages)
+
 	const (
 		maxSummarizationMessages = 10
 		llmMaxRetries            = 3
@@ -3013,6 +3051,84 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string, t
 			},
 		)
 	}
+}
+
+const noDurableMemoryToken = "NO_DURABLE_MEMORY"
+
+func (al *AgentLoop) flushMemoryBeforeCompaction(
+	ctx context.Context,
+	agent *AgentInstance,
+	messages []providers.Message,
+) {
+	if agent == nil || agent.Provider == nil || agent.ContextBuilder == nil || len(messages) == 0 {
+		return
+	}
+
+	prompt := buildMemoryFlushPrompt(messages)
+	if prompt == "" {
+		return
+	}
+
+	al.activeRequests.Add(1)
+	resp, err := func() (*providers.LLMResponse, error) {
+		defer al.activeRequests.Done()
+		return agent.Provider.Chat(
+			ctx,
+			[]providers.Message{{Role: "user", Content: prompt}},
+			nil,
+			agent.Model,
+			map[string]any{
+				"max_tokens":       min(agent.MaxTokens, 1200),
+				"temperature":      0.1,
+				"prompt_cache_key": agent.ID + ":memory-flush",
+			},
+		)
+	}()
+	if err != nil || resp == nil {
+		logger.WarnCF("agent", "Pre-compaction memory flush failed", map[string]any{"error": errString(err)})
+		return
+	}
+
+	memory := strings.TrimSpace(resp.Content)
+	if memory == "" || strings.EqualFold(memory, noDurableMemoryToken) {
+		return
+	}
+	entry := fmt.Sprintf("## Pre-compaction memory\n\n%s\n", memory)
+	if err := agent.ContextBuilder.memory.AppendToday(entry); err != nil {
+		logger.WarnCF("agent", "Failed to persist pre-compaction memory", map[string]any{"error": err.Error()})
+		return
+	}
+	logger.DebugCF("agent", "Pre-compaction memory persisted", map[string]any{"chars": len(memory)})
+}
+
+func buildMemoryFlushPrompt(messages []providers.Message) string {
+	var conversation strings.Builder
+	for _, message := range messages {
+		if message.Role != "user" && message.Role != "assistant" {
+			continue
+		}
+		content := strings.TrimSpace(message.Content)
+		if content == "" {
+			continue
+		}
+		fmt.Fprintf(&conversation, "%s: %s\n", message.Role, utils.Truncate(content, 4000))
+	}
+	if conversation.Len() == 0 {
+		return ""
+	}
+	return fmt.Sprintf(`The conversation is about to be compacted. Extract only durable information that will help personalize future responses: stable user preferences, recurring workflows, important decisions, relationships, persistent environment facts, and explicit requests to remember something.
+
+Do not include temporary task progress, completed one-off work, speculation, or facts already presented as uncertain. Return concise Markdown bullets only. If there is nothing durable, return exactly %s.
+
+CONVERSATION:
+%s`, noDurableMemoryToken, conversation.String())
+}
+
+func errString(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+	return err.Error()
 }
 
 // findNearestUserMessage finds the nearest user message to the given index.

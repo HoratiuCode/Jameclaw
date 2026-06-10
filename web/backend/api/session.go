@@ -278,21 +278,50 @@ func (h *Handler) sessionsDir() (string, error) {
 //
 //	GET /api/sessions
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	items := h.listAllSessionItems()
+
+	// Pagination parameters
+	offsetStr := r.URL.Query().Get("offset")
+	limitStr := r.URL.Query().Get("limit")
+
+	offset := 0
+	limit := 20 // Default limit
+
+	if val, err := strconv.Atoi(offsetStr); err == nil && val >= 0 {
+		offset = val
+	}
+	if val, err := strconv.Atoi(limitStr); err == nil && val > 0 {
+		limit = val
+	}
+
+	totalItems := len(items)
+
+	end := offset + limit
+	if offset >= totalItems {
+		items = []sessionListItem{} // Out of bounds, return empty
+	} else {
+		if end > totalItems {
+			end = totalItems
+		}
+		items = items[offset:end]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func (h *Handler) listAllSessions() []sessionFile {
 	dir, err := h.sessionsDir()
 	if err != nil {
-		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
-		return
+		return []sessionFile{}
 	}
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		// Directory doesn't exist yet = no sessions
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]sessionListItem{})
-		return
+		return []sessionFile{}
 	}
 
-	items := []sessionListItem{}
+	sessions := []sessionFile{}
 	seen := make(map[string]struct{})
 
 	for _, entry := range entries {
@@ -362,42 +391,27 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		seen[sessionID] = struct{}{}
-		items = append(items, buildSessionListItem(sessionID, sess))
+		sessions = append(sessions, sess)
 	}
 
-	// Sort by updated descending (most recent first)
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].Updated > items[j].Updated
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Updated.After(sessions[j].Updated)
 	})
 
-	// Pagination parameters
-	offsetStr := r.URL.Query().Get("offset")
-	limitStr := r.URL.Query().Get("limit")
+	return sessions
+}
 
-	offset := 0
-	limit := 20 // Default limit
-
-	if val, err := strconv.Atoi(offsetStr); err == nil && val >= 0 {
-		offset = val
-	}
-	if val, err := strconv.Atoi(limitStr); err == nil && val > 0 {
-		limit = val
-	}
-
-	totalItems := len(items)
-
-	end := offset + limit
-	if offset >= totalItems {
-		items = []sessionListItem{} // Out of bounds, return empty
-	} else {
-		if end > totalItems {
-			end = totalItems
+func (h *Handler) listAllSessionItems() []sessionListItem {
+	sessions := h.listAllSessions()
+	items := make([]sessionListItem, 0, len(sessions))
+	for _, sess := range sessions {
+		sessionID, ok := extractJameSessionID(sess.Key)
+		if !ok {
+			continue
 		}
-		items = items[offset:end]
+		items = append(items, buildSessionListItem(sessionID, sess))
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items)
+	return items
 }
 
 // handleGetSession returns the full message history for a specific session.
