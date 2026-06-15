@@ -48,6 +48,12 @@
       "api_key": "sk-your-deepseek-key"
     },
     {
+      "model_name": "nous-claude-sonnet-4.6",
+      "model": "nous/anthropic/claude-sonnet-4.6",
+      "api_key": "your-nous-api-key",
+      "api_base": "https://inference-api.nousresearch.com/v1"
+    },
+    {
       "model_name": "longcat",
       "model": "longcat/LongCat-Flash-Thinking",
       "api_key": "your-longcat-api-key"

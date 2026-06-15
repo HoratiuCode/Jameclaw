@@ -1,5 +1,5 @@
 import { IconBrain, IconLoader2, IconRefresh, IconStar } from "@tabler/icons-react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input"
 function formatNumber(value: number) {
   return new Intl.NumberFormat().format(value)
 }
+
+const EMPTY_STRING_LIST: string[] = []
 
 export function AgentsPage() {
   const [selectedID, setSelectedID] = useState<string | null>(null)
@@ -32,7 +34,7 @@ export function AgentsPage() {
     },
   })
 
-  const agents = data?.agents ?? []
+  const agents = useMemo(() => data?.agents ?? [], [data?.agents])
   const selected = useMemo(
     () => agents.find((agent) => agent.id === selectedID) ?? agents[0] ?? null,
     [agents, selectedID],
@@ -63,6 +65,7 @@ export function AgentsPage() {
             <div className="space-y-4">
               <AgentOverview data={data} selected={selected} />
               <AgentPanels
+                key={selected?.id ?? "none"}
                 selected={selected}
                 isSaving={mutation.isPending}
                 onSave={(agent, body) => mutation.mutate({ id: agent.id, body })}
@@ -148,13 +151,11 @@ function AgentPanels({
   isSaving: boolean
   onSave: (agent: AgentSummary, body: Parameters<typeof updateAgent>[1]) => void
 }) {
-  const [model, setModel] = useState("")
-  const [fallbacksText, setFallbacksText] = useState("")
-
-  useEffect(() => {
-    setModel(selected?.model ?? "")
-    setFallbacksText(selected?.model_fallbacks.join("\n") ?? "")
-  }, [selected])
+  const selectedFallbacks = selected?.model_fallbacks ?? EMPTY_STRING_LIST
+  const selectedSkills = selected?.skills ?? EMPTY_STRING_LIST
+  const selectedSubagents = selected?.subagents ?? EMPTY_STRING_LIST
+  const [model, setModel] = useState(selected?.model ?? "")
+  const [fallbacksText, setFallbacksText] = useState(selectedFallbacks.join("\n"))
 
   if (!selected) {
     return (
@@ -176,7 +177,7 @@ function AgentPanels({
           <Field label="Primary model" value={selected.model || "Not configured"} />
           <Field
             label="Fallbacks"
-            value={selected.model_fallbacks.length > 0 ? selected.model_fallbacks.join(", ") : "None"}
+            value={selectedFallbacks.length > 0 ? selectedFallbacks.join(", ") : "None"}
           />
         </CardContent>
       </Card>
@@ -243,7 +244,7 @@ function AgentPanels({
           <CardTitle>Skills</CardTitle>
         </CardHeader>
         <CardContent>
-          <PillList values={selected.skills} empty="No agent-specific skills configured." />
+          <PillList values={selectedSkills} empty="No agent-specific skills configured." />
         </CardContent>
       </Card>
 
@@ -252,7 +253,7 @@ function AgentPanels({
           <CardTitle>Subagents</CardTitle>
         </CardHeader>
         <CardContent>
-          <PillList values={selected.subagents} empty="No subagents allowed." />
+          <PillList values={selectedSubagents} empty="No subagents allowed." />
         </CardContent>
       </Card>
     </div>
@@ -277,8 +278,8 @@ function Metric({ label, value }: { label: string; value: number }) {
   )
 }
 
-function PillList({ values, empty }: { values: string[]; empty: string }) {
-  if (values.length === 0) {
+function PillList({ values, empty }: { values: string[] | null | undefined; empty: string }) {
+  if (!values || values.length === 0) {
     return <div className="text-muted-foreground text-sm">{empty}</div>
   }
   return (

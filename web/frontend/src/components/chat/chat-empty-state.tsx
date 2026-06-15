@@ -199,7 +199,7 @@ export function ChatEmptyState({
               <StepCard
                 step="Next"
                 title="Add your first model"
-                description="Connect OpenAI, Anthropic, OpenRouter, Ollama, or any compatible endpoint so JameClaw has something to run."
+                description="Connect Nous, OpenRouter, OpenAI, Anthropic, Kimi/Moonshot, MiniMax, Ollama, or any compatible endpoint so JameClaw has something to run."
                 actionLabel="Open Models"
                 actionIcon={<IconSparkles className="h-4 w-4 text-red-600" />}
               />

@@ -138,6 +138,7 @@ func TestCreateProviderFromConfig_DefaultAPIBase(t *testing.T) {
 		{"groq", "groq"},
 		{"novita", "novita"},
 		{"openrouter", "openrouter"},
+		{"nous", "nous"},
 		{"cerebras", "cerebras"},
 		{"vivgrid", "vivgrid"},
 		{"qwen", "qwen"},
@@ -172,6 +173,12 @@ func TestCreateProviderFromConfig_DefaultAPIBase(t *testing.T) {
 func TestGetDefaultAPIBase_LiteLLM(t *testing.T) {
 	if got := getDefaultAPIBase("litellm"); got != "http://localhost:4000/v1" {
 		t.Fatalf("getDefaultAPIBase(%q) = %q, want %q", "litellm", got, "http://localhost:4000/v1")
+	}
+}
+
+func TestGetDefaultAPIBase_Nous(t *testing.T) {
+	if got := getDefaultAPIBase("nous"); got != "https://inference-api.nousresearch.com/v1" {
+		t.Fatalf("getDefaultAPIBase(%q) = %q, want %q", "nous", got, "https://inference-api.nousresearch.com/v1")
 	}
 }
 

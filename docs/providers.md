@@ -13,6 +13,7 @@
 | `zhipu`      | LLM (Zhipu direct)                      | [bigmodel.cn](https://bigmodel.cn)                           |
 | `volcengine` | LLM(Volcengine direct)                  | [volcengine.com](https://www.volcengine.com/activity/codingplan?utm_campaign=JameClaw&utm_content=JameClaw&utm_medium=devrel&utm_source=OWO&utm_term=JameClaw)                 |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai)                       |
+| `nous`       | LLM (Nous Portal)                       | [portal.nousresearch.com](https://portal.nousresearch.com)   |
 | `anthropic`  | LLM (Claude direct)                     | [console.anthropic.com](https://console.anthropic.com)       |
 | `openai`     | LLM (GPT direct)                        | [platform.openai.com](https://platform.openai.com)           |
 | `deepseek`   | LLM (DeepSeek direct)                   | [platform.deepseek.com](https://platform.deepseek.com)       |
@@ -54,6 +55,7 @@ This design also enables **multi-agent support** with flexible provider selectio
 | **NVIDIA**          | `nvidia/`         | `https://integrate.api.nvidia.com/v1`               | OpenAI    | [Get Key](https://build.nvidia.com)                              |
 | **Ollama**          | `ollama/`         | `http://localhost:11434/v1`                         | OpenAI    | Local (no key needed)                                            |
 | **OpenRouter**      | `openrouter/`     | `https://openrouter.ai/api/v1`                      | OpenAI    | [Get Key](https://openrouter.ai/keys)                            |
+| **Nous Portal**     | `nous/`           | `https://inference-api.nousresearch.com/v1`         | OpenAI    | [Get Key](https://portal.nousresearch.com)                       |
 | **LiteLLM Proxy**   | `litellm/`        | `http://localhost:4000/v1`                          | OpenAI    | Your LiteLLM proxy key                                            |
 | **VLLM**            | `vllm/`           | `http://localhost:8000/v1`                          | OpenAI    | Local                                                            |
 | **Cerebras**        | `cerebras/`       | `https://api.cerebras.ai/v1`                        | OpenAI    | [Get Key](https://cerebras.ai)                                   |
@@ -167,6 +169,16 @@ If `voice.model_name` is not configured, JameClaw will continue to fall back to 
   "model_name": "deepseek-chat",
   "model": "deepseek/deepseek-chat",
   "api_key": "sk-..."
+}
+```
+
+**Nous Portal**
+
+```json
+{
+  "model_name": "nous-claude-sonnet-4.6",
+  "model": "nous/anthropic/claude-sonnet-4.6",
+  "api_key": "your-nous-api-key"
 }
 ```
 

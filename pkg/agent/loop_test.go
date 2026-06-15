@@ -1396,14 +1396,7 @@ func TestAgentLoop_ToolLimitUsesDedicatedFallback(t *testing.T) {
 	if defaultAgent == nil {
 		t.Fatal("No default agent found")
 	}
-	route := al.registry.ResolveRoute(routing.RouteInput{
-		Channel: "test",
-		Peer: &routing.RoutePeer{
-			Kind: "direct",
-			ID:   "cron",
-		},
-	})
-	history := defaultAgent.Sessions.GetHistory(route.SessionKey)
+	history := defaultAgent.Sessions.GetHistory("tool-limit")
 	if len(history) != 4 {
 		t.Fatalf("history len = %d, want 4", len(history))
 	}

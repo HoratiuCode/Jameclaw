@@ -261,6 +261,13 @@ func DefaultConfig() *Config {
 				APIBase:   "https://openrouter.ai/api/v1",
 			},
 
+			// Nous Portal - https://portal.nousresearch.com
+			{
+				ModelName: "nous-claude-sonnet-4.6",
+				Model:     "nous/anthropic/claude-sonnet-4.6",
+				APIBase:   "https://inference-api.nousresearch.com/v1",
+			},
+
 			// NVIDIA - https://build.nvidia.com/
 			{
 				ModelName: "nemotron-4-340b",

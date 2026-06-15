@@ -68,8 +68,9 @@ All of those entry points share the same local runtime state under `~/.jameclaw`
 ## ✨ What This Fork Focuses On
 
 - **Web console first**: local browser UI for chat, configuration, and day-to-day operations
+- **Real terminal/TUI workflow**: multiline input, slash autocomplete, interrupt/redirect, streaming tool output, and resumable sessions for direct shell work
 - **Launcher workflow**: launcher settings, auto-start support, gateway controls, and logs
-- **Provider management**: dedicated credentials and models pages with one local config source
+- **Provider routing**: Nous, OpenRouter, OpenAI, Anthropic, Kimi/Moonshot, MiniMax, local/custom OpenAI-compatible endpoints, and model fallbacks from one config source
 - **Channel management**: configure Telegram, Discord, Slack, Matrix, LINE, WeCom, Feishu, OneBot, MaixCam, and more from one place
 - **Agent operations**: inspect tools, skills, raw config, and runtime status without leaving the app
 - **Desktop and headless use**: browser launcher for local use and TUI launcher for SSH/server workflows
@@ -275,6 +276,8 @@ jameclaw agent -m "Summarize this workspace and tell me where to start."
 
 This mode is the best fit when you want a direct shell workflow instead of the browser UI or TUI.
 
+The terminal agent includes the same workflow conveniences as the launcher chat: multiline input, slash-command autocomplete, interrupt/redirect while a turn is running, streaming tool output, and explicit session selection with `--session` when you want to resume or isolate work.
+
 ### 📱 Android
 
 Give your decade-old phone a second life! Turn it into a smart AI Assistant with JameClaw.
@@ -358,8 +361,9 @@ In this fork, the practical setup paths are:
 - add API-key-based models from the Web Console credentials and models pages
 - pick a local model such as Ollama for offline or self-hosted use
 - switch the default model from the Web Console, TUI, or `jameclaw model`
+- add per-agent fallback models so a failed or rate-limited primary can roll over to another configured route
 
-Common provider families include OpenAI, Anthropic, OpenRouter, local Ollama, and other OpenAI-compatible backends. For the full provider matrix and advanced configuration, see [Providers & Models](docs/providers.md).
+Common provider families include Nous, OpenRouter, OpenAI, Anthropic, Kimi/Moonshot, MiniMax, local Ollama, and other OpenAI-compatible backends. For the full provider matrix and advanced configuration, see [Providers & Models](docs/providers.md).
 
 <details>
 <summary><b>Local deployment (Ollama, vLLM, etc.)</b></summary>

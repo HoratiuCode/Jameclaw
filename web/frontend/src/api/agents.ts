@@ -4,9 +4,9 @@ export interface AgentSummary {
   default: boolean
   workspace: string
   model: string
-  model_fallbacks: string[]
-  skills: string[]
-  subagents: string[]
+  model_fallbacks: string[] | null
+  skills: string[] | null
+  subagents: string[] | null
   session_count: number
   message_count: number
   tool_calls: number
@@ -24,7 +24,21 @@ export async function getAgents(): Promise<AgentsResponse> {
   if (!res.ok) {
     throw new Error(`Failed to fetch agents: ${res.status}`)
   }
-  return res.json() as Promise<AgentsResponse>
+  const data = (await res.json()) as AgentsResponse
+  return {
+    ...data,
+    agents: (data.agents ?? []).map((agent) => ({
+      ...agent,
+      model_fallbacks: agent.model_fallbacks ?? [],
+      skills: agent.skills ?? [],
+      subagents: agent.subagents ?? [],
+      session_count: agent.session_count ?? 0,
+      message_count: agent.message_count ?? 0,
+      tool_calls: agent.tool_calls ?? 0,
+    })),
+    enabled_channels: data.enabled_channels ?? 0,
+    configured_models: data.configured_models ?? 0,
+  }
 }
 
 export async function updateAgent(

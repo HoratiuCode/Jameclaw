@@ -1636,7 +1636,24 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 	al.registerActiveTurn(ts)
 	defer al.clearActiveTurn(ts)
 
+	var finalContent string
+	var streamer bus.Streamer
+	var hasStreamer bool
+	var streamingContent string
+	if al.bus != nil && !constants.IsInternalChannel(ts.channel) {
+		streamer, hasStreamer = al.bus.GetStreamer(turnCtx, ts.channel, ts.chatID)
+	}
+
 	turnStatus := TurnEndStatusCompleted
+	defer func() {
+		if hasStreamer && streamer != nil {
+			if turnStatus == TurnEndStatusCompleted && finalContent != "" {
+				_ = streamer.Finalize(ctx, finalContent)
+			} else {
+				streamer.Cancel(ctx)
+			}
+		}
+	}()
 	defer func() {
 		al.emitEvent(
 			EventKindTurnEnd,
@@ -1731,7 +1748,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 
 	activeCandidates, activeModel := al.selectCandidates(ts.agent, ts.userMessage, messages)
 	pendingMessages := append([]providers.Message(nil), ts.opts.InitialSteeringMessages...)
-	var finalContent string
+	finalContent = ""
 
 turnLoop:
 	for ts.currentIteration() < ts.agent.MaxIterations || len(pendingMessages) > 0 || func() bool {
@@ -1935,7 +1952,9 @@ turnLoop:
 				"tools_json":    formatToolsForLog(providerToolDefs),
 			})
 
+		var streamedThisIteration bool
 		callLLM := func(messagesForCall []providers.Message, toolDefsForCall []providers.ToolDefinition) (*providers.LLMResponse, error) {
+			streamedThisIteration = false
 			providerCtx, providerCancel := context.WithCancel(turnCtx)
 			ts.setProviderCancel(providerCancel)
 			defer func() {
@@ -1967,7 +1986,7 @@ turnLoop:
 				}
 				return fbResult.Response, nil
 			}
-			if streamingProvider, ok := ts.agent.Provider.(providers.StreamingProvider); ok {
+			if streamingProvider, ok := ts.agent.Provider.(providers.StreamingProvider); ok && streamer != nil {
 				previousLen := 0
 				return streamingProvider.ChatStream(
 					providerCtx,
@@ -1976,16 +1995,22 @@ turnLoop:
 					llmModel,
 					llmOpts,
 					func(accumulated string) {
+						streamedThisIteration = true
 						deltaLen := len(accumulated) - previousLen
 						if deltaLen < 0 {
 							deltaLen = len(accumulated)
 						}
+						newText := accumulated[previousLen:]
 						previousLen = len(accumulated)
 						al.emitEvent(
 							EventKindLLMDelta,
 							ts.eventMeta("runTurn", "turn.llm.delta"),
 							LLMDeltaPayload{Content: accumulated, ContentDeltaLen: deltaLen},
 						)
+						if hasStreamer && streamer != nil {
+							streamingContent += newText
+							_ = streamer.Update(providerCtx, streamingContent)
+						}
 					},
 				)
 			}
@@ -1998,6 +2023,12 @@ turnLoop:
 		for retry := 0; retry <= maxRetries; retry++ {
 			response, err = callLLM(callMessages, providerToolDefs)
 			if err == nil {
+				if !streamedThisIteration && response != nil && response.Content != "" {
+					streamingContent += response.Content
+					if hasStreamer && streamer != nil {
+						_ = streamer.Update(turnCtx, streamingContent)
+					}
+				}
 				break
 			}
 			if ts.hardAbortRequested() && errors.Is(err, context.Canceled) {
@@ -2377,6 +2408,26 @@ turnLoop:
 					Arguments: cloneEventArguments(toolArgs),
 				},
 			)
+
+			if hasStreamer && streamer != nil {
+				emoji := "🔧"
+				switch toolName {
+				case "terminal", "exec":
+					emoji = "💻"
+				case "web", "search", "google_search":
+					emoji = "🔍"
+				case "write_file", "write_to_file", "replace_file_content", "multi_replace_file_content":
+					emoji = "📝"
+				case "view_file", "read_file":
+					emoji = "📖"
+				case "list_dir":
+					emoji = "📁"
+				}
+				preview := getToolPreview(toolName, toolArgs)
+				indicator := fmt.Sprintf("\n`%s %s`\n", emoji, preview)
+				streamingContent += indicator
+				_ = streamer.Update(turnCtx, streamingContent)
+			}
 
 			// Send tool feedback to chat channel if enabled (from HEAD)
 			if al.cfg.Agents.Defaults.IsToolFeedbackEnabled() && ts.channel != "" {
@@ -3633,4 +3684,32 @@ func extractProvider(registry *AgentRegistry) (providers.LLMProvider, bool) {
 		return nil, false
 	}
 	return defaultAgent.Provider, true
+}
+
+func getToolPreview(toolName string, args map[string]any) string {
+	keys := []string{
+		"command", "CommandLine", "query", "Query", "task", "path", "url",
+		"TargetFile", "pattern", "code", "prompt",
+	}
+	var preview string
+	for _, key := range keys {
+		if val, ok := args[key]; ok {
+			if strVal, ok := val.(string); ok && strVal != "" {
+				preview = strVal
+				break
+			}
+		}
+	}
+	if preview == "" {
+		preview = toolName
+	}
+	// Truncate preview if it's too long
+	runes := []rune(preview)
+	if len(runes) > 100 {
+		preview = string(runes[:100]) + "..."
+	}
+	// Replace any newlines with spaces to keep it inline
+	preview = strings.ReplaceAll(preview, "\n", " ")
+	preview = strings.ReplaceAll(preview, "\r", " ")
+	return preview
 }

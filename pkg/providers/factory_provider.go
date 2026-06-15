@@ -160,7 +160,7 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		"ollama", "moonshot", "shengsuanyun", "deepseek", "cerebras",
 		"vivgrid", "volcengine", "vllm", "qwen", "qwen-intl", "qwen-international", "dashscope-intl",
 		"qwen-us", "dashscope-us", "mistral", "avian", "longcat", "modelscope", "novita",
-		"coding-plan", "alibaba-coding", "qwen-coding":
+		"nous", "coding-plan", "alibaba-coding", "qwen-coding":
 		// All other OpenAI-compatible HTTP providers
 		if cfg.APIKey() == "" && cfg.APIBase == "" {
 			return nil, "", fmt.Errorf("api_key or api_base is required for HTTP-based protocol %q", protocol)
@@ -303,6 +303,8 @@ func getDefaultAPIBase(protocol string) string {
 		return "https://api.openai.com/v1"
 	case "openrouter":
 		return "https://openrouter.ai/api/v1"
+	case "nous":
+		return "https://inference-api.nousresearch.com/v1"
 	case "litellm":
 		return "http://localhost:4000/v1"
 	case "novita":

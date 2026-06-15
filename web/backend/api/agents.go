@@ -51,10 +51,33 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	listDefaultID := ""
+	var mainOverride *config.AgentConfig
 	for _, agent := range cfg.Agents.List {
 		if agent.Default {
 			listDefaultID = agent.ID
-			break
+		}
+		if agent.ID == "main" {
+			agentCopy := agent
+			mainOverride = &agentCopy
+		}
+	}
+
+	mainModel := cfg.Agents.Defaults.GetModelName()
+	mainFallbacks := stringListOrEmpty(cfg.Agents.Defaults.ModelFallbacks)
+	mainSkills := []string{}
+	mainSubagents := []string{}
+	if mainOverride != nil {
+		if mainOverride.Model != nil {
+			if mainOverride.Model.Primary != "" {
+				mainModel = mainOverride.Model.Primary
+			}
+			if mainOverride.Model.Fallbacks != nil {
+				mainFallbacks = stringListOrEmpty(mainOverride.Model.Fallbacks)
+			}
+		}
+		mainSkills = stringListOrEmpty(mainOverride.Skills)
+		if mainOverride.Subagents != nil {
+			mainSubagents = stringListOrEmpty(mainOverride.Subagents.AllowAgents)
 		}
 	}
 
@@ -62,10 +85,12 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		{
 			ID:             "main",
 			Name:           "Main",
-			Default:        listDefaultID == "",
+			Default:        listDefaultID == "" || listDefaultID == "main",
 			Workspace:      cfg.Agents.Defaults.Workspace,
-			Model:          cfg.Agents.Defaults.GetModelName(),
-			ModelFallbacks: append([]string(nil), cfg.Agents.Defaults.ModelFallbacks...),
+			Model:          mainModel,
+			ModelFallbacks: mainFallbacks,
+			Skills:         mainSkills,
+			Subagents:      mainSubagents,
 			SessionCount:   sessionCount,
 			MessageCount:   messageCount,
 			ToolCalls:      toolCalls,
@@ -73,14 +98,17 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, agent := range cfg.Agents.List {
+		if agent.ID == "main" {
+			continue
+		}
 		model := cfg.Agents.Defaults.GetModelName()
-		fallbacks := append([]string(nil), cfg.Agents.Defaults.ModelFallbacks...)
+		fallbacks := stringListOrEmpty(cfg.Agents.Defaults.ModelFallbacks)
 		if agent.Model != nil {
 			if agent.Model.Primary != "" {
 				model = agent.Model.Primary
 			}
 			if agent.Model.Fallbacks != nil {
-				fallbacks = append([]string(nil), agent.Model.Fallbacks...)
+				fallbacks = stringListOrEmpty(agent.Model.Fallbacks)
 			}
 		}
 		workspace := agent.Workspace
@@ -102,7 +130,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			Workspace:      workspace,
 			Model:          model,
 			ModelFallbacks: fallbacks,
-			Skills:         append([]string(nil), agent.Skills...),
+			Skills:         stringListOrEmpty(agent.Skills),
 			Subagents:      subagents,
 		})
 	}
@@ -114,6 +142,13 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		"enabled_channels":  countEnabledChannels(cfg.Channels),
 		"configured_models": len(cfg.ModelList),
 	})
+}
+
+func stringListOrEmpty(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return append([]string(nil), values...)
 }
 
 func (h *Handler) handlePatchAgent(w http.ResponseWriter, r *http.Request) {

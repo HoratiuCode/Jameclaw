@@ -7,6 +7,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   moonshot: "Moonshot",
   groq: "Groq",
   openrouter: "OpenRouter",
+  nous: "Nous",
   nvidia: "NVIDIA",
   cerebras: "Cerebras",
   volcengine: "Volcengine",
@@ -18,6 +19,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   avian: "Avian",
   vllm: "VLLM (local)",
   zhipu: "Zhipu AI",
+  minimax: "MiniMax",
 }
 
 export function getProviderKey(model: string): string {

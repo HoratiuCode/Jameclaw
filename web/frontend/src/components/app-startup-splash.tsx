@@ -22,16 +22,15 @@ function consumeShellLaunchCookie(): boolean {
 }
 
 export function AppStartupSplash() {
-  const [visible, setVisible] = useState(false)
+  const [visible, setVisible] = useState(consumeShellLaunchCookie)
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null)
 
   useEffect(() => {
-    if (!consumeShellLaunchCookie()) {
+    if (!visible) {
       return
     }
 
     let active = true
-    setVisible(true)
 
     void getHostInfo()
       .then((data) => {
@@ -55,7 +54,7 @@ export function AppStartupSplash() {
       active = false
       window.clearTimeout(timeout)
     }
-  }, [])
+  }, [visible])
 
   if (!visible || !hostInfo) {
     return null

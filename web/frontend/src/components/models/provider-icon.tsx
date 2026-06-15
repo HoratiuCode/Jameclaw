@@ -8,6 +8,7 @@ const PROVIDER_ICON_SLUGS: Record<string, string> = {
   qwen: "alibabacloud",
   groq: "groq",
   openrouter: "openrouter",
+  nous: "nous",
   nvidia: "nvidia",
   cerebras: "cerebras",
   volcengine: "bytedance",
@@ -15,6 +16,7 @@ const PROVIDER_ICON_SLUGS: Record<string, string> = {
   ollama: "ollama",
   mistral: "mistralai",
   zhipu: "zhipu",
+  minimax: "minimax",
 }
 
 const PROVIDER_DOMAINS: Record<string, string> = {
@@ -26,6 +28,7 @@ const PROVIDER_DOMAINS: Record<string, string> = {
   moonshot: "moonshot.ai",
   groq: "groq.com",
   openrouter: "openrouter.ai",
+  nous: "nousresearch.com",
   nvidia: "nvidia.com",
   cerebras: "cerebras.ai",
   volcengine: "volcengine.com",
@@ -37,6 +40,7 @@ const PROVIDER_DOMAINS: Record<string, string> = {
   avian: "avian.io",
   vllm: "vllm.ai",
   zhipu: "zhipuai.cn",
+  minimax: "minimaxi.com",
 }
 
 interface ProviderIconProps {

@@ -54,12 +54,13 @@ func (pc *jameConn) close() {
 // It serves as the reference implementation for all optional capability interfaces.
 type JameChannel struct {
 	*channels.BaseChannel
-	config      config.JameConfig
-	upgrader    websocket.Upgrader
-	connections sync.Map // connID → *jameConn
-	connCount   atomic.Int32
-	ctx         context.Context
-	cancel      context.CancelFunc
+	config             config.JameConfig
+	upgrader           websocket.Upgrader
+	connections        sync.Map // connID → *jameConn
+	connCount          atomic.Int32
+	ctx                context.Context
+	cancel             context.CancelFunc
+	activePlaceholders sync.Map // chatID → messageID (string)
 }
 
 // NewJameChannel creates a new Jame Protocol channel.
@@ -182,7 +183,10 @@ func (c *JameChannel) SendPlaceholder(ctx context.Context, chatID string) (strin
 	if !c.config.Placeholder.Enabled {
 		return "", nil
 	}
+	return c.sendPlaceholderForced(ctx, chatID)
+}
 
+func (c *JameChannel) sendPlaceholderForced(ctx context.Context, chatID string) (string, error) {
 	text := c.config.Placeholder.Text
 	if text == "" {
 		text = "Thinking... 💭"
@@ -198,7 +202,49 @@ func (c *JameChannel) SendPlaceholder(ctx context.Context, chatID string) (strin
 		return "", err
 	}
 
+	c.activePlaceholders.Store(chatID, msgID)
 	return msgID, nil
+}
+
+// BeginStream implements channels.StreamingCapable.
+func (c *JameChannel) BeginStream(ctx context.Context, chatID string) (bus.Streamer, error) {
+	msgIDVal, ok := c.activePlaceholders.Load(chatID)
+	var msgID string
+	if ok {
+		msgID = msgIDVal.(string)
+	} else {
+		var err error
+		msgID, err = c.sendPlaceholderForced(ctx, chatID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &jameStreamer{
+		channel:   c,
+		chatID:    chatID,
+		messageID: msgID,
+	}, nil
+}
+
+type jameStreamer struct {
+	channel   *JameChannel
+	chatID    string
+	messageID string
+}
+
+func (s *jameStreamer) Update(ctx context.Context, content string) error {
+	return s.channel.EditMessage(ctx, s.chatID, s.messageID, content)
+}
+
+func (s *jameStreamer) Finalize(ctx context.Context, content string) error {
+	s.channel.activePlaceholders.Delete(s.chatID)
+	return s.channel.EditMessage(ctx, s.chatID, s.messageID, content)
+}
+
+func (s *jameStreamer) Cancel(ctx context.Context) {
+	s.channel.activePlaceholders.Delete(s.chatID)
+	_ = s.channel.EditMessage(ctx, s.chatID, s.messageID, "*Request canceled.*")
 }
 
 // broadcastToSession sends a message to all connections with a matching session.

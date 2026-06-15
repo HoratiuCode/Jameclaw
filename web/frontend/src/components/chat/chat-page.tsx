@@ -178,12 +178,13 @@ export function ChatPage() {
             />
           )}
 
-          {messages.map((msg) => (
+          {messages.map((msg, index) => (
             <div key={msg.id} className="flex w-full">
               {msg.role === "assistant" ? (
                 <AssistantMessage
                   content={msg.content}
                   timestamp={msg.timestamp}
+                  isTyping={isTyping && index === messages.length - 1}
                 />
               ) : (
                 <UserMessage content={msg.content} />

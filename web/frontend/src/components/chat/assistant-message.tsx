@@ -1,4 +1,4 @@
-import { IconCheck, IconCopy } from "@tabler/icons-react"
+import { IconCheck, IconCopy, IconCircleCheck, IconLoader2 } from "@tabler/icons-react"
 import { useState } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
@@ -11,11 +11,13 @@ import { formatMessageTime } from "@/hooks/use-jame-chat"
 interface AssistantMessageProps {
   content: string
   timestamp?: string | number
+  isTyping?: boolean
 }
 
 export function AssistantMessage({
   content,
   timestamp = "",
+  isTyping = false,
 }: AssistantMessageProps) {
   const [isCopied, setIsCopied] = useState(false)
   const formattedTimestamp =
@@ -47,6 +49,43 @@ export function AssistantMessage({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw, rehypeSanitize]}
+            components={{
+              code(props) {
+                const { children, className, ...rest } = props
+                const text = String(children).trim()
+                const match = text.match(/^([\uD800-\uDBFF][\uDCC0-\uDFFF]|[\u2600-\u27BF]|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDD00-\uDFFF]|[\u2600-\u2B55]|💻|🔍|📝|📖|📁|🔧)\s+(.+)$/)
+                const isBlock = className && className.startsWith('language-')
+
+                if (match && !isBlock) {
+                  const emoji = match[1]
+                  const label = match[2]
+                  const cleanContent = content.trim()
+                  const cleanText = text.trim()
+                  const isRunning = isTyping && (
+                    cleanContent.endsWith('`' + cleanText + '`') ||
+                    cleanContent.endsWith(cleanText)
+                  )
+
+                  return (
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 my-0.5 rounded-md border text-[13px] font-medium transition-all shadow-xs select-none align-middle ${
+                      isRunning 
+                        ? "bg-amber-50/40 dark:bg-amber-950/20 border-amber-200/60 dark:border-amber-800/40 text-amber-800 dark:text-amber-300 animate-pulse" 
+                        : "bg-zinc-50/80 dark:bg-zinc-900/60 border-zinc-200/80 dark:border-zinc-800/80 text-zinc-700 dark:text-zinc-300"
+                    }`}>
+                      <span className="text-sm">{emoji}</span>
+                      <span className="font-mono text-xs max-w-xs truncate">{label}</span>
+                      {isRunning ? (
+                        <IconLoader2 className="h-3.5 w-3.5 animate-spin text-amber-500 dark:text-amber-400" />
+                      ) : (
+                        <IconCircleCheck className="h-3.5 w-3.5 text-emerald-500 dark:text-emerald-400" />
+                      )}
+                    </span>
+                  )
+                }
+
+                return <code className={className} {...rest}>{children}</code>
+              }
+            }}
           >
             {content}
           </ReactMarkdown>
