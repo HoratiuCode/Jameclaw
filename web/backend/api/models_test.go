@@ -148,6 +148,52 @@ func TestHandleListModels_ConfiguredStatusUsesRuntimeProbesForLocalModels(t *tes
 	}
 }
 
+func TestHandleAddModelFromCatalogCreatesDefaultModel(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg := config.DefaultConfig()
+	cfg.ModelList = nil
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := bytes.NewBufferString(`{
+		"provider_id":"openrouter",
+		"preset_id":"openrouter-auto",
+		"api_key":"sk-test",
+		"set_default":true
+	}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/models/from-catalog", body)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if len(saved.ModelList) != 1 {
+		t.Fatalf("len(ModelList) = %d, want 1", len(saved.ModelList))
+	}
+	if got := saved.ModelList[0].Model; got != "openrouter/auto" {
+		t.Fatalf("Model = %q, want openrouter/auto", got)
+	}
+	if got := saved.ModelList[0].APIKey(); got != "sk-test" {
+		t.Fatalf("APIKey = %q, want sk-test", got)
+	}
+	if got := saved.Agents.Defaults.GetModelName(); got != "openrouter-auto" {
+		t.Fatalf("default model = %q, want openrouter-auto", got)
+	}
+}
+
 func TestHandleListModels_ConfiguredStatusForOAuthModelWithCredential(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

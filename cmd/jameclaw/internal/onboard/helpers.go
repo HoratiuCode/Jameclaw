@@ -19,6 +19,7 @@ import (
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/credential"
+	"github.com/sipeed/jameclaw/pkg/extensions"
 )
 
 const (
@@ -41,6 +42,8 @@ type onboardModelOption struct {
 	key            string
 	label          string
 	description    string
+	providerID     string
+	presetID       string
 	modelName      string
 	requiresAPIKey bool
 	keyLabel       string
@@ -68,39 +71,7 @@ const (
 	agentNameLinePrefix        = "Your name is JameClaw"
 )
 
-var onboardModelOptions = []onboardModelOption{
-	{
-		key:            "1",
-		label:          "OpenAI GPT-5.4",
-		description:    "Use GPT-5.4 with your OpenAI API key.",
-		modelName:      "gpt-5.4",
-		requiresAPIKey: true,
-		keyLabel:       "OpenAI API key",
-	},
-	{
-		key:            "2",
-		label:          "Anthropic Claude Sonnet 4.6",
-		description:    "Use Claude Sonnet 4.6 with your Anthropic API key.",
-		modelName:      "claude-sonnet-4.6",
-		requiresAPIKey: true,
-		keyLabel:       "Anthropic API key",
-	},
-	{
-		key:            "3",
-		label:          "OpenRouter Auto",
-		description:    "Use OpenRouter and let it pick the best route.",
-		modelName:      "openrouter-auto",
-		requiresAPIKey: true,
-		keyLabel:       "OpenRouter API key",
-	},
-	{
-		key:            "4",
-		label:          "Local Ollama llama3",
-		description:    "Use a local Ollama model at http://localhost:11434/v1.",
-		modelName:      "llama3",
-		requiresAPIKey: false,
-	},
-}
+var onboardModelProviderOrder = []string{"openai", "anthropic", "openrouter", "ollama"}
 
 func Run(encrypt bool) bool {
 	return onboard(encrypt)
@@ -433,11 +404,12 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 		modelDescription = fmt.Sprintf("Current default model: %s", selection.modelName)
 	}
 	renderOnboardStep("◇", onboardANSIInactive, "Model Setup", modelDescription)
-	for _, option := range onboardModelOptions {
+	modelOptions := buildOnboardModelOptions()
+	for _, option := range modelOptions {
 		onboardWriteLine("  %s│%s %s.%s %s", onboardANSIRail, onboardANSIReset, option.key, onboardANSIReset, option.label)
 		onboardWriteLine("  %s│%s %s%s%s", onboardANSIRail, onboardANSIReset, onboardANSIDim, option.description, onboardANSIReset)
 	}
-	onboardWriteLine("  %s│%s 5. Skip for now", onboardANSIRail, onboardANSIReset)
+	onboardWriteLine("  %s│%s %d. Skip for now", onboardANSIRail, onboardANSIReset, len(modelOptions)+1)
 	onboardWriteLine("  %s│%s %sKeep the current config and finish later.%s", onboardANSIRail, onboardANSIReset, onboardANSIDim, onboardANSIReset)
 
 	skillOptions := loadOnboardSkillOptions()
@@ -459,10 +431,12 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 }
 
 func promptModelChoice(reader *bufio.Reader, cfg *config.Config) (*onboardModelOption, error) {
-	defaultChoice := "5"
+	options := buildOnboardModelOptions()
+	skipChoice := fmt.Sprintf("%d", len(options)+1)
+	defaultChoice := skipChoice
 	current := lookupModelConfig(cfg, cfg.Agents.Defaults.ModelName)
 	if current != nil {
-		for _, option := range onboardModelOptions {
+		for _, option := range options {
 			if option.modelName == current.ModelName {
 				defaultChoice = option.key
 				break
@@ -470,18 +444,18 @@ func promptModelChoice(reader *bufio.Reader, cfg *config.Config) (*onboardModelO
 		}
 	}
 
-	line, err := promptLine(reader, fmt.Sprintf("Select model [1-5] (default %s)", defaultChoice))
+	line, err := promptLine(reader, fmt.Sprintf("Select model [1-%d] (default %s)", len(options)+1, defaultChoice))
 	if err != nil {
 		return nil, err
 	}
 	if line == "" {
 		line = defaultChoice
 	}
-	if line == "5" {
+	if line == skipChoice {
 		return nil, nil
 	}
 
-	for _, option := range onboardModelOptions {
+	for _, option := range options {
 		if line == option.key || strings.EqualFold(line, option.modelName) {
 			return &option, nil
 		}
@@ -493,7 +467,12 @@ func promptModelChoice(reader *bufio.Reader, cfg *config.Config) (*onboardModelO
 func applyModelChoice(reader *bufio.Reader, cfg *config.Config, option onboardModelOption) error {
 	modelCfg := lookupModelConfig(cfg, option.modelName)
 	if modelCfg == nil {
-		return fmt.Errorf("model %q not found in config", option.modelName)
+		_, preset, ok := extensions.FindPreset(option.providerID, option.presetID)
+		if !ok {
+			return fmt.Errorf("catalog preset %q/%q not found", option.providerID, option.presetID)
+		}
+		modelCfg = preset.ToModelConfig("")
+		cfg.ModelList = append(cfg.ModelList, modelCfg)
 	}
 
 	if option.requiresAPIKey {
@@ -515,6 +494,37 @@ func applyModelChoice(reader *bufio.Reader, cfg *config.Config, option onboardMo
 
 	cfg.Agents.Defaults.ModelName = option.modelName
 	return nil
+}
+
+func buildOnboardModelOptions() []onboardModelOption {
+	options := make([]onboardModelOption, 0, len(onboardModelProviderOrder))
+	for _, providerID := range onboardModelProviderOrder {
+		provider, ok := extensions.FindProvider(providerID)
+		if !ok || len(provider.RecommendedModels) == 0 {
+			continue
+		}
+		preset := provider.RecommendedModels[0]
+		options = append(options, onboardModelOption{
+			key:            fmt.Sprintf("%d", len(options)+1),
+			label:          provider.Name + " " + preset.Name,
+			description:    firstNonEmpty(preset.Description, provider.SetupHint, provider.LocalRuntimeHint),
+			providerID:     provider.ID,
+			presetID:       preset.ID,
+			modelName:      preset.ModelName,
+			requiresAPIKey: preset.RequiresAPIKey,
+			keyLabel:       firstNonEmpty(preset.KeyLabel, provider.KeyLabel, "API key"),
+		})
+	}
+	return options
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func promptTelegramSetup(reader *bufio.Reader, cfg *config.Config) error {

@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/extensions"
 )
 
 type toolCatalogEntry struct {
@@ -148,6 +149,20 @@ var toolCatalog = []toolCatalogEntry{
 		Category:    "discovery",
 		ConfigKey:   "mcp.discovery.use_bm25",
 	},
+}
+
+func toolCatalogItems() []extensions.CatalogItem {
+	items := make([]extensions.CatalogItem, 0, len(toolCatalog))
+	for _, entry := range toolCatalog {
+		items = append(items, extensions.CatalogItem{
+			ID:          entry.Name,
+			Name:        entry.Name,
+			Category:    entry.Category,
+			Description: entry.Description,
+			ConfigKey:   entry.ConfigKey,
+		})
+	}
+	return items
 }
 
 func (h *Handler) registerToolRoutes(mux *http.ServeMux) {

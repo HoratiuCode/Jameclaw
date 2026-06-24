@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestHandleListChannelCatalog_TelegramOnly(t *testing.T) {
+func TestHandleListChannelCatalog_IncludesBuiltInChannels(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
 
@@ -30,13 +30,35 @@ func TestHandleListChannelCatalog_TelegramOnly(t *testing.T) {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
 
-	if len(resp.Channels) != 1 {
-		t.Fatalf("len(channels) = %d, want 1", len(resp.Channels))
+	if len(resp.Channels) < 10 {
+		t.Fatalf("len(channels) = %d, want expanded built-in channel catalog", len(resp.Channels))
 	}
-	if resp.Channels[0].Name != "telegram" {
-		t.Fatalf("channel name = %q, want telegram", resp.Channels[0].Name)
+
+	channelsByName := make(map[string]channelCatalogItem, len(resp.Channels))
+	for _, channel := range resp.Channels {
+		channelsByName[channel.Name] = channel
 	}
-	if resp.Channels[0].ConfigKey != "telegram" {
-		t.Fatalf("config_key = %q, want telegram", resp.Channels[0].ConfigKey)
+
+	expected := map[string]string{
+		"telegram":        "telegram",
+		"whatsapp":        "whatsapp",
+		"whatsapp_native": "whatsapp",
+		"discord":         "discord",
+		"slack":           "slack",
+		"matrix":          "matrix",
+		"line":            "line",
+		"feishu":          "feishu",
+		"dingtalk":        "dingtalk",
+		"jame":            "jame",
+		"jame_client":     "jame_client",
+	}
+	for name, configKey := range expected {
+		channel, ok := channelsByName[name]
+		if !ok {
+			t.Fatalf("channel %q missing from catalog", name)
+		}
+		if channel.ConfigKey != configKey {
+			t.Fatalf("channel %q config_key = %q, want %q", name, channel.ConfigKey, configKey)
+		}
 	}
 }

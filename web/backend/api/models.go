@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/extensions"
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/pkg/providers"
 )
@@ -16,10 +17,26 @@ import (
 // registerModelRoutes binds model list management endpoints to the ServeMux.
 func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/models", h.handleListModels)
+	mux.HandleFunc("GET /api/models/catalog", h.handleModelCatalog)
 	mux.HandleFunc("POST /api/models", h.handleAddModel)
+	mux.HandleFunc("POST /api/models/from-catalog", h.handleAddModelFromCatalog)
 	mux.HandleFunc("POST /api/models/default", h.handleSetDefaultModel)
 	mux.HandleFunc("PUT /api/models/{index}", h.handleUpdateModel)
 	mux.HandleFunc("DELETE /api/models/{index}", h.handleDeleteModel)
+}
+
+func (h *Handler) handleModelCatalog(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"providers":     extensions.ProviderCatalog(cfg),
+		"default_model": cfg.Agents.Defaults.GetModelName(),
+	})
 }
 
 // modelResponse is the JSON structure returned for each model in the list.
@@ -173,6 +190,86 @@ func inheritedProviderAPIKey(existing []*config.ModelConfig, target *config.Mode
 	}
 
 	return ""
+}
+
+func (h *Handler) handleAddModelFromCatalog(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		ProviderID string `json:"provider_id"`
+		PresetID   string `json:"preset_id"`
+		ModelName  string `json:"model_name"`
+		APIKey     string `json:"api_key"`
+		SetDefault bool   `json:"set_default"`
+	}
+	if err = json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	_, preset, ok := extensions.FindPreset(req.ProviderID, req.PresetID)
+	if !ok {
+		http.Error(w, "unknown provider or model preset", http.StatusBadRequest)
+		return
+	}
+
+	modelCfg := preset.ToModelConfig(req.ModelName)
+	if req.APIKey != "" {
+		modelCfg.SetAPIKey(req.APIKey)
+	}
+	if err = modelCfg.Validate(); err != nil {
+		http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if modelCfg.APIKey() == "" {
+		if inheritedKey := inheritedProviderAPIKey(cfg.ModelList, modelCfg); inheritedKey != "" {
+			modelCfg.SetAPIKey(inheritedKey)
+		}
+	}
+
+	index := -1
+	for i, existing := range cfg.ModelList {
+		if existing != nil && existing.ModelName == modelCfg.ModelName {
+			index = i
+			break
+		}
+	}
+	if index >= 0 {
+		if modelCfg.APIKey() == "" {
+			modelCfg.SetAPIKey(cfg.ModelList[index].APIKey())
+		}
+		cfg.ModelList[index] = modelCfg
+	} else {
+		cfg.ModelList = append(cfg.ModelList, modelCfg)
+		index = len(cfg.ModelList) - 1
+	}
+
+	if req.SetDefault {
+		cfg.Agents.Defaults.ModelName = modelCfg.ModelName
+	}
+
+	if err := config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":        "ok",
+		"index":         index,
+		"default_model": cfg.Agents.Defaults.GetModelName(),
+	})
 }
 
 // handleUpdateModel replaces a model configuration entry at the given index.

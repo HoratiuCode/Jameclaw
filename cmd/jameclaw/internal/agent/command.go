@@ -23,7 +23,7 @@ func NewAgentCommand() *cobra.Command {
 
 	cmd.Flags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Send a single message (non-interactive mode)")
-	cmd.Flags().StringVarP(&sessionKey, "session", "s", "cli:default", "Session key")
+	cmd.Flags().StringVarP(&sessionKey, "session", "s", "", "Session key")
 	cmd.Flags().StringVarP(&model, "model", "", "", "Model to use")
 
 	return cmd

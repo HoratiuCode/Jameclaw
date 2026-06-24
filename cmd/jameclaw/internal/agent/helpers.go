@@ -21,9 +21,7 @@ import (
 )
 
 func agentCmd(message, sessionKey, model string, debug bool) error {
-	if sessionKey == "" {
-		sessionKey = "cli:default"
-	}
+	sessionKey = resolveTerminalSessionKey(sessionKey)
 
 	cfg, err := internal.LoadConfig()
 	if err != nil {
@@ -82,6 +80,16 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 	}
 
 	return nil
+}
+
+func resolveTerminalSessionKey(explicit string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return strings.TrimSpace(explicit)
+	}
+	if remembered := readLastTerminalSession(); remembered != "" {
+		return remembered
+	}
+	return "cli:default"
 }
 
 func resolveAgentEmoji(cfg *config.Config) string {

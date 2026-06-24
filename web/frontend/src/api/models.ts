@@ -27,6 +27,44 @@ export interface ModelMutationPayload extends Partial<ModelInfo> {
   clear_api_key?: boolean
 }
 
+export interface ProviderAuthMethod {
+  id: string
+  label: string
+  description?: string
+}
+
+export interface ModelPreset {
+  id: string
+  name: string
+  model_name: string
+  model: string
+  api_base?: string
+  requires_api_key: boolean
+  key_label?: string
+  request_timeout?: number
+  thinking_level?: string
+  description?: string
+}
+
+export interface ProviderCatalogEntry {
+  id: string
+  name: string
+  category: string
+  description: string
+  docs_url?: string
+  protocols: string[]
+  default_api_base?: string
+  requires_api_key: boolean
+  key_label?: string
+  auth_methods?: ProviderAuthMethod[]
+  recommended_models: ModelPreset[]
+  setup_hint?: string
+  local_runtime_hint?: string
+  configured: boolean
+  default: boolean
+  configured_models?: string[]
+}
+
 interface ModelsListResponse {
   models: ModelInfo[]
   total: number
@@ -37,6 +75,19 @@ interface ModelActionResponse {
   status: string
   index?: number
   default_model?: string
+}
+
+interface ModelCatalogResponse {
+  providers: ProviderCatalogEntry[]
+  default_model: string
+}
+
+export interface AddModelFromCatalogPayload {
+  provider_id: string
+  preset_id: string
+  model_name?: string
+  api_key?: string
+  set_default?: boolean
 }
 
 const BASE_URL = ""
@@ -53,6 +104,10 @@ export async function getModels(): Promise<ModelsListResponse> {
   return request<ModelsListResponse>("/api/models")
 }
 
+export async function getModelCatalog(): Promise<ModelCatalogResponse> {
+  return request<ModelCatalogResponse>("/api/models/catalog")
+}
+
 export async function addModel(
   model: ModelMutationPayload,
 ): Promise<ModelActionResponse> {
@@ -60,6 +115,16 @@ export async function addModel(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(model),
+  })
+}
+
+export async function addModelFromCatalog(
+  payload: AddModelFromCatalogPayload,
+): Promise<ModelActionResponse> {
+  return request<ModelActionResponse>("/api/models/from-catalog", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   })
 }
 
@@ -93,4 +158,4 @@ export async function setDefaultModel(
   return response
 }
 
-export type { ModelsListResponse, ModelActionResponse }
+export type { ModelsListResponse, ModelActionResponse, ModelCatalogResponse }

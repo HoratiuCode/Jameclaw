@@ -30,4 +30,7 @@ func TestNewAgentCommand(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("message"))
 	assert.NotNil(t, cmd.Flags().Lookup("session"))
 	assert.NotNil(t, cmd.Flags().Lookup("model"))
+
+	sessionFlag := cmd.Flags().Lookup("session")
+	assert.Equal(t, "", sessionFlag.DefValue)
 }

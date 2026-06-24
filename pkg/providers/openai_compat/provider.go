@@ -110,7 +110,11 @@ func (p *Provider) buildRequestBody(
 	nativeSearch, _ := options["native_search"].(bool)
 	nativeSearch = nativeSearch && isNativeSearchHost(p.apiBase)
 	if len(tools) > 0 || nativeSearch {
-		requestBody["tools"] = buildToolsList(tools, nativeSearch)
+		toolsList := buildToolsList(tools, nativeSearch)
+		if nativeSearch {
+			toolsList = append(toolsList, map[string]any{"type": "web_search_preview"})
+		}
+		requestBody["tools"] = toolsList
 		requestBody["tool_choice"] = "auto"
 	}
 
@@ -418,7 +422,7 @@ func buildToolsList(tools []ToolDefinition, nativeSearch bool) []any {
 }
 
 func (p *Provider) SupportsNativeSearch() bool {
-	return false
+	return isNativeSearchHost(p.apiBase)
 }
 
 func isNativeSearchHost(apiBase string) bool {

@@ -22,6 +22,7 @@ import (
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/agent"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/auth"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/cron"
+	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/dashboard"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/gateway"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/migrate"
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal/model"
@@ -97,6 +98,7 @@ func NewJameclawCommand() *cobra.Command {
 		agent.NewAgentCommand(),
 		auth.NewAuthCommand(),
 		gateway.NewGatewayCommand(),
+		dashboard.NewDashboardCommand(),
 		status.NewStatusCommand(),
 		cron.NewCronCommand(),
 		migrate.NewMigrateCommand(),

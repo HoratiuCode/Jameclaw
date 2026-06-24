@@ -2,37 +2,22 @@ import { IconLoader2, IconPlus, IconStar } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import { type ModelInfo, getModels, setDefaultModel } from "@/api/models"
+import {
+  type ModelInfo,
+  type ProviderCatalogEntry,
+  getModelCatalog,
+  getModels,
+  setDefaultModel,
+} from "@/api/models"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 
 import { AddModelSheet } from "./add-model-sheet"
+import { AddProviderModelSheet } from "./add-provider-model-sheet"
 import { DeleteModelDialog } from "./delete-model-dialog"
 import { EditModelSheet } from "./edit-model-sheet"
 import { getProviderKey, getProviderLabel } from "./provider-label"
 import { ProviderSection } from "./provider-section"
-
-const PROVIDER_PRIORITY: Record<string, number> = {
-  volcengine: 0,
-  openai: 1,
-  gemini: 2,
-  anthropic: 3,
-  zhipu: 4,
-  deepseek: 5,
-  openrouter: 6,
-  qwen: 7,
-  moonshot: 8,
-  groq: 9,
-  "github-copilot": 10,
-  antigravity: 11,
-  nvidia: 12,
-  cerebras: 13,
-  shengsuanyun: 14,
-  ollama: 15,
-  vllm: 16,
-  mistral: 17,
-  avian: 18,
-}
 
 interface ProviderGroup {
   key: string
@@ -45,20 +30,24 @@ interface ProviderGroup {
 export function ModelsPage() {
   const { t } = useTranslation()
   const [models, setModels] = useState<ModelInfo[]>([])
+  const [providers, setProviders] = useState<ProviderCatalogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState("")
 
   const [editingModel, setEditingModel] = useState<ModelInfo | null>(null)
   const [deletingModel, setDeletingModel] = useState<ModelInfo | null>(null)
   const [addOpen, setAddOpen] = useState(false)
-  const [openrouterAddOpen, setOpenrouterAddOpen] = useState(false)
+  const [providerAddOpen, setProviderAddOpen] = useState(false)
   const [settingDefaultIndex, setSettingDefaultIndex] = useState<number | null>(
     null,
   )
 
   const fetchModels = useCallback(async () => {
     try {
-      const data = await getModels()
+      const [data, catalog] = await Promise.all([
+        getModels(),
+        getModelCatalog(),
+      ])
       const sorted = [...data.models].sort((a, b) => {
         if (a.is_default && !b.is_default) return -1
         if (!a.is_default && b.is_default) return 1
@@ -67,6 +56,7 @@ export function ModelsPage() {
         return a.model_name.localeCompare(b.model_name)
       })
       setModels(sorted)
+      setProviders(catalog.providers)
       setFetchError("")
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : t("models.loadError"))
@@ -94,11 +84,18 @@ export function ModelsPage() {
   }
 
   const grouped: Record<string, { label: string; models: ModelInfo[] }> = {}
+  const providerByProtocol = new Map<string, ProviderCatalogEntry>()
+  providers.forEach((provider) => {
+    provider.protocols.forEach((protocol) =>
+      providerByProtocol.set(protocol, provider),
+    )
+  })
   for (const model of models) {
     const providerKey = getProviderKey(model.model)
+    const catalogProvider = providerByProtocol.get(providerKey)
     if (!grouped[providerKey]) {
       grouped[providerKey] = {
-        label: getProviderLabel(model.model),
+        label: catalogProvider?.name ?? getProviderLabel(model.model),
         models: [],
       }
     }
@@ -126,10 +123,16 @@ export function ModelsPage() {
         return b.configuredCount - a.configuredCount
       }
 
-      const aPriority = PROVIDER_PRIORITY[a.key] ?? Number.MAX_SAFE_INTEGER
-      const bPriority = PROVIDER_PRIORITY[b.key] ?? Number.MAX_SAFE_INTEGER
-      if (aPriority !== bPriority) {
-        return aPriority - bPriority
+      const aPriority = providers.findIndex((provider) =>
+        provider.protocols.includes(a.key),
+      )
+      const bPriority = providers.findIndex((provider) =>
+        provider.protocols.includes(b.key),
+      )
+      const aRank = aPriority >= 0 ? aPriority : Number.MAX_SAFE_INTEGER
+      const bRank = bPriority >= 0 ? bPriority : Number.MAX_SAFE_INTEGER
+      if (aRank !== bRank) {
+        return aRank - bRank
       }
 
       return a.label.localeCompare(b.label)
@@ -141,12 +144,9 @@ export function ModelsPage() {
     <div className="flex h-full flex-col">
       <PageHeader title={t("navigation.models")}>
         <div className="flex items-center gap-3">
-          <Button
-            size="sm"
-            onClick={() => setOpenrouterAddOpen(true)}
-          >
+          <Button size="sm" onClick={() => setProviderAddOpen(true)}>
             <IconPlus className="size-4" />
-            Add OpenRouter Model
+            Add Provider Model
           </Button>
           <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
             <IconPlus className="size-4" />
@@ -213,12 +213,12 @@ export function ModelsPage() {
         existingModelNames={models.map((model) => model.model_name)}
       />
 
-      <AddModelSheet
-        open={openrouterAddOpen}
-        onClose={() => setOpenrouterAddOpen(false)}
+      <AddProviderModelSheet
+        open={providerAddOpen}
+        onClose={() => setProviderAddOpen(false)}
         onSaved={fetchModels}
+        providers={providers}
         existingModelNames={models.map((model) => model.model_name)}
-        preset="openrouter"
       />
 
       <DeleteModelDialog

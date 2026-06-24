@@ -2,11 +2,13 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/extensions"
 )
 
 // LocalModel is a special model name that indicates that the model is local and with or without api_key.
@@ -51,6 +53,102 @@ Note: 'local-model' is a special value for using a local VLLM server
 		},
 	}
 
+	cmd.AddCommand(newProvidersCommand(), newAddCommand())
+	return cmd
+}
+
+func newProvidersCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "providers",
+		Short: "List provider catalog entries",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.LoadConfig(internal.GetConfigPath())
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			for _, provider := range extensions.ProviderCatalog(cfg) {
+				status := "available"
+				if provider.Configured {
+					status = "configured"
+				}
+				if provider.Default {
+					status = "default"
+				}
+				fmt.Printf("%-18s %-12s %s\n", provider.ID, status, provider.Name)
+				if len(provider.RecommendedModels) > 0 {
+					presets := make([]string, 0, len(provider.RecommendedModels))
+					for _, preset := range provider.RecommendedModels {
+						presets = append(presets, preset.ID)
+					}
+					fmt.Printf("  presets: %s\n", strings.Join(presets, ", "))
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func newAddCommand() *cobra.Command {
+	var apiKey string
+	var modelName string
+	var setDefault bool
+
+	cmd := &cobra.Command{
+		Use:   "add <provider> <preset>",
+		Short: "Add a model from the provider catalog",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath := internal.GetConfigPath()
+			cfg, err := config.LoadConfig(configPath)
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			_, preset, ok := extensions.FindPreset(args[0], args[1])
+			if !ok {
+				return fmt.Errorf("unknown provider or preset: %s %s", args[0], args[1])
+			}
+			modelCfg := preset.ToModelConfig(modelName)
+			if apiKey != "" {
+				modelCfg.SetAPIKey(apiKey)
+			}
+			if err := modelCfg.Validate(); err != nil {
+				return err
+			}
+
+			replaced := false
+			for i, existing := range cfg.ModelList {
+				if existing != nil && existing.ModelName == modelCfg.ModelName {
+					if modelCfg.APIKey() == "" {
+						modelCfg.SetAPIKey(existing.APIKey())
+					}
+					cfg.ModelList[i] = modelCfg
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				cfg.ModelList = append(cfg.ModelList, modelCfg)
+			}
+			if setDefault {
+				cfg.Agents.Defaults.ModelName = modelCfg.ModelName
+			}
+			if err := config.SaveConfig(configPath, cfg); err != nil {
+				return fmt.Errorf("failed to save config: %w", err)
+			}
+			action := "Added"
+			if replaced {
+				action = "Updated"
+			}
+			fmt.Printf("%s model %s (%s)\n", action, modelCfg.ModelName, modelCfg.Model)
+			if setDefault {
+				fmt.Printf("Default model set to %s\n", modelCfg.ModelName)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key for the selected provider")
+	cmd.Flags().StringVar(&modelName, "name", "", "Model alias to store in model_list")
+	cmd.Flags().BoolVar(&setDefault, "default", false, "Set the added model as the default")
 	return cmd
 }
 

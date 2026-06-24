@@ -40,6 +40,7 @@ func TestNewJameclawCommand(t *testing.T) {
 		"agent",
 		"auth",
 		"cron",
+		"dashboard",
 		"gateway",
 		"migrate",
 		"model",
@@ -96,6 +97,7 @@ func TestRunInteractiveDefaultCommandSelection(t *testing.T) {
 		return nil
 	}
 
+	require.NoError(t, os.Setenv("JAMECLAW_STARTUP_CHOICE", "web"))
 	err := runInteractiveDefaultCommand()
 	require.NoError(t, err)
 	assert.Equal(t, "web", got)
@@ -148,7 +150,7 @@ func TestConfiguredStartupChoice(t *testing.T) {
 	})
 
 	_ = os.Unsetenv("JAMECLAW_STARTUP_CHOICE")
-	assert.Equal(t, "web", configuredStartupChoice())
+	assert.Equal(t, "menu", configuredStartupChoice())
 
 	require.NoError(t, os.Setenv("JAMECLAW_STARTUP_CHOICE", "menu"))
 	assert.Equal(t, "menu", configuredStartupChoice())

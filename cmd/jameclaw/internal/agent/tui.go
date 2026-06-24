@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,10 +22,14 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
 	agentcore "github.com/sipeed/jameclaw/pkg/agent"
 	"github.com/sipeed/jameclaw/pkg/commands"
+	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/extensions"
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
 
 type terminalEntry struct {
@@ -71,6 +78,7 @@ type terminalChat struct {
 	backgroundRuns map[string]string
 	stopSpinner    chan struct{}
 	spinnerFrame   string
+	lastCtrlCAt    time.Time
 }
 
 func runTerminalChat(loop *agentcore.AgentLoop, sessionKey, agentEmoji string) error {
@@ -92,6 +100,7 @@ func runTerminalChat(loop *agentcore.AgentLoop, sessionKey, agentEmoji string) e
 		historyIndex:   -1,
 	}
 	t.build()
+	writeLastTerminalSession(sessionKey)
 	t.loadHistory()
 	t.renderHeaderFooter()
 	t.renderChat()
@@ -271,12 +280,200 @@ func (t *terminalChat) currentBusyMode() string {
 	return t.busyMode
 }
 
+type terminalPickerItem struct {
+	Main      string
+	Shortcut  rune
+	Secondary string
+	Action    func()
+}
+
+func (t *terminalChat) showListOverlay(title, hint string, items []terminalPickerItem) {
+	list := tview.NewList().
+		SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorGreen).Bold(true)).
+		SetHighlightFullLine(true)
+	list.SetBorder(true).SetTitle(" " + title + " ")
+	for _, item := range items {
+		action := item.Action
+		list.AddItem(item.Main, item.Secondary, item.Shortcut, func() {
+			if action != nil {
+				action()
+			}
+			t.restoreLayout()
+		})
+	}
+	list.SetDoneFunc(t.restoreLayout)
+
+	frame := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(tview.NewBox(), 0, 1, false).
+		AddItem(tview.NewFlex().
+			AddItem(tview.NewBox(), 0, 1, false).
+			AddItem(list, 0, 4, true).
+			AddItem(tview.NewBox(), 0, 1, false), 0, 4, true).
+		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[gray]"+hint+"[-]"), 1, 0, false)
+	t.app.SetRoot(frame, true).SetFocus(list)
+}
+
+func (t *terminalChat) restoreLayout() {
+	t.app.SetRoot(t.layout(), true).SetFocus(t.input)
+	t.refreshAll()
+}
+
+func (t *terminalChat) openModelPicker() {
+	cfg, err := internal.LoadConfig()
+	if err != nil {
+		t.addSystem("Unable to load models: " + err.Error())
+		return
+	}
+	if len(cfg.ModelList) == 0 {
+		t.addSystem("No models configured. Add one with `jameclaw model add <provider> <preset>`.")
+		return
+	}
+
+	items := make([]terminalPickerItem, 0, len(cfg.ModelList))
+	defaultModel := cfg.Agents.Defaults.GetModelName()
+	for _, model := range cfg.ModelList {
+		if model == nil || strings.TrimSpace(model.ModelName) == "" {
+			continue
+		}
+		name := model.ModelName
+		label := name
+		if name == defaultModel {
+			label += "  (config default)"
+		}
+		secondary := model.Model
+		if model.APIKey() == "" {
+			secondary += "  no API key configured"
+		}
+		items = append(items, terminalPickerItem{
+			Main:      label,
+			Secondary: secondary,
+			Action: func() {
+				t.runAgentCommand("/switch model to " + name)
+			},
+		})
+	}
+	if len(items) == 0 {
+		t.addSystem("No selectable models found in model_list.")
+		return
+	}
+	t.showListOverlay("MODELS", "Enter selects model, Esc returns to chat", items)
+}
+
+func (t *terminalChat) runAgentCommand(text string) {
+	t.addSystem("Running " + text)
+	go func() {
+		response, err := t.loop.ProcessDirect(context.Background(), text, t.sessionKey)
+		if err != nil {
+			t.addSystem("Command failed: " + err.Error())
+			return
+		}
+		if response != "" {
+			t.addSystem(response)
+		}
+		if strings.HasPrefix(text, "/switch model to ") {
+			t.mu.Lock()
+			t.currentModel = strings.TrimSpace(strings.TrimPrefix(text, "/switch model to "))
+			t.mu.Unlock()
+			t.refreshAll()
+		}
+	}()
+}
+
+func (t *terminalChat) openSettingsOverlay() {
+	t.mu.Lock()
+	showThinking := t.showThinking
+	searchAllowed := t.localSearchOK
+	busyMode := t.busyMode
+	t.mu.Unlock()
+
+	items := []terminalPickerItem{
+		{
+			Main:      "Busy mode: " + busyMode,
+			Secondary: "Toggle interrupt/queue behavior for messages sent during a run",
+			Action: func() {
+				t.mu.Lock()
+				if t.busyMode == "interrupt" {
+					t.busyMode = "queue"
+				} else {
+					t.busyMode = "interrupt"
+				}
+				mode := t.busyMode
+				t.mu.Unlock()
+				t.addSystem("Busy mode set to " + mode + ".")
+			},
+		},
+		{
+			Main:      "Thinking: " + onOff(showThinking),
+			Secondary: "Toggle reasoning display when available",
+			Action: func() {
+				t.mu.Lock()
+				t.showThinking = !t.showThinking
+				enabled := t.showThinking
+				t.mu.Unlock()
+				t.addSystem("Thinking display " + onOff(enabled) + ".")
+			},
+		},
+		{
+			Main:      "Computer search: " + onOff(searchAllowed),
+			Secondary: "Toggle local /computer-search permission for this session",
+			Action: func() {
+				t.mu.Lock()
+				t.localSearchOK = !t.localSearchOK
+				enabled := t.localSearchOK
+				t.mu.Unlock()
+				t.addSystem("Computer search " + onOff(enabled) + ".")
+			},
+		},
+		{
+			Main:      "Reload history",
+			Secondary: "Reload current session from disk",
+			Action: func() {
+				t.mu.Lock()
+				t.entries = nil
+				t.mu.Unlock()
+				t.loadHistory()
+				t.addSystem("History reloaded.")
+			},
+		},
+		{
+			Main:      "Clear view",
+			Secondary: "Clear visible terminal chat entries",
+			Action: func() {
+				t.mu.Lock()
+				t.entries = nil
+				t.mu.Unlock()
+				t.refreshChat()
+			},
+		},
+	}
+	t.showListOverlay("SETTINGS", "Enter toggles or runs action, Esc returns to chat", items)
+}
+
 func (t *terminalChat) handleLocalCommand(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	lower := strings.ToLower(trimmed)
 	switch {
 	case lower == "/help":
-		t.addSystem("Local TUI commands: /help, /webui, /background <prompt>, /busy interrupt|queue, /allow-computer-search on|off, /computer-search <query> [path], /clear, /status, /quit. Shortcuts: Enter/Ctrl-S send, Ctrl-J newline, Tab complete, Ctrl-X hard abort, Ctrl-G graceful stop, Ctrl-T reasoning, Ctrl-R reload history, Ctrl-L clear view, Ctrl-D exit.")
+		t.addSystem("Local TUI commands: /help, /models, /sessions, /settings, /gateway-status, /auth [provider], /webui, /background <prompt>, /busy interrupt|queue, /allow-computer-search on|off, /computer-search <query> [path], /clear, /status, /quit. Shortcuts: Enter/Ctrl-S send, Ctrl-J newline, Tab complete, Ctrl-C clear/warn/exit, Ctrl-X hard abort, Ctrl-G graceful stop, Ctrl-T reasoning, Ctrl-R reload history, Ctrl-L clear view, Ctrl-D exit.")
+		return true
+	case lower == "/models":
+		t.openModelPicker()
+		return true
+	case lower == "/sessions":
+		t.openSessionPicker()
+		return true
+	case lower == "/settings":
+		t.openSettingsOverlay()
+		return true
+	case lower == "/gateway-status":
+		t.showGatewayStatus()
+		return true
+	case lower == "/auth":
+		t.openAuthProviderPicker()
+		return true
+	case strings.HasPrefix(lower, "/auth "):
+		provider := strings.TrimSpace(trimmed[len("/auth "):])
+		t.runAuth(provider)
 		return true
 	case lower == "/webui":
 		t.openWebUI()
@@ -348,7 +545,7 @@ func (t *terminalChat) isLocalSearchAllowed() bool {
 }
 
 func (t *terminalChat) openWebUI() {
-	baseURL := "http://localhost:18800"
+	baseURL := terminalWebBaseURL()
 	if webUIReachable(baseURL) {
 		openURL := launcherAuthenticatedURL(baseURL)
 		if err := openTerminalURL(openURL); err != nil {
@@ -382,6 +579,92 @@ func (t *terminalChat) openWebUI() {
 		}
 		t.addSystem("WebUI started and opened in browser: " + baseURL)
 	}()
+}
+
+func (t *terminalChat) openSessionPicker() {
+	sessions, err := listTerminalSessions()
+	if err != nil {
+		t.addSystem("Unable to list sessions: " + err.Error())
+		return
+	}
+	if len(sessions) == 0 {
+		t.addSystem("No saved sessions found.")
+		return
+	}
+	items := make([]terminalPickerItem, 0, len(sessions))
+	for _, session := range sessions {
+		sess := session
+		label := sess.Key
+		if sess.Title != "" {
+			label = sess.Title
+		}
+		items = append(items, terminalPickerItem{
+			Main:      label,
+			Secondary: sess.Key + "  " + formatAge(sess.Updated),
+			Action: func() {
+				t.switchSession(sess.Key)
+			},
+		})
+	}
+	t.showListOverlay("SESSIONS", "Enter resumes session, Esc returns to chat", items)
+}
+
+func (t *terminalChat) switchSession(sessionKey string) {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return
+	}
+	t.mu.Lock()
+	t.sessionKey = sessionKey
+	t.sessionStarted = time.Now()
+	t.entries = nil
+	t.pendingInputs = nil
+	t.mu.Unlock()
+	writeLastTerminalSession(sessionKey)
+	setTerminalAgentTitle(t.agentEmoji, sessionKey)
+	t.loadHistory()
+	t.addSystem("Switched to session " + sessionKey + ".")
+	t.refreshAll()
+}
+
+func (t *terminalChat) showGatewayStatus() {
+	go func() {
+		status := fetchGatewayStatusSummary()
+		t.addSystem(status)
+	}()
+}
+
+func (t *terminalChat) openAuthProviderPicker() {
+	cfg, _ := internal.LoadConfig()
+	providers := extensions.ProviderCatalog(cfg)
+	items := make([]terminalPickerItem, 0, len(providers))
+	for _, provider := range providers {
+		p := provider
+		items = append(items, terminalPickerItem{
+			Main:      p.Name,
+			Secondary: p.ID,
+			Action: func() {
+				t.runAuth(p.ID)
+			},
+		})
+	}
+	t.showListOverlay("AUTH PROVIDERS", "Enter runs auth login for provider, Esc returns to chat", items)
+}
+
+func (t *terminalChat) runAuth(provider string) {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		t.openAuthProviderPicker()
+		return
+	}
+	t.app.Suspend(func() {
+		cmd := exec.Command("jameclaw", "auth", "login", "--provider", provider)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+	})
+	t.addSystem("Auth flow finished for " + provider + ".")
 }
 
 func (t *terminalChat) runComputerSearch(args string) {
@@ -597,13 +880,13 @@ func (t *terminalChat) renderHeaderFooter() {
 		model = t.currentModel
 	}
 	t.mu.Lock()
-	busyMode, pending, background := t.busyMode, len(t.pendingInputs), len(t.backgroundRuns)
+	busyMode, pending, background, activity := t.busyMode, len(t.pendingInputs), len(t.backgroundRuns), t.activity
 	started := t.sessionStarted
 	t.mu.Unlock()
 	t.header.SetText(fmt.Sprintf("[::b]%s JameClaw Terminal Chat[-:-:-]  [gray]agent %s | session %s | connected[-]", tview.Escape(t.agentEmoji), tview.Escape(agentID), tview.Escape(t.sessionKey)))
 	usage := formatUsage(t.totalTokens, contextWindow)
-	t.footer.SetText(fmt.Sprintf("[gray]model %s | %s | cost n/a | duration %s | busy %s | pending %d | bg %d | thinking %s | F1 help[-]",
-		tview.Escape(model), usage, formatDuration(time.Since(started)), busyMode, pending, background, onOff(t.showThinking)))
+	t.footer.SetText(fmt.Sprintf("[gray]model %s | session %s | activity %s | %s | duration %s | busy %s | pending %d | bg %d | thinking %s | F1 help[-]",
+		tview.Escape(model), tview.Escape(t.sessionKey), tview.Escape(activity), usage, formatDuration(time.Since(started)), busyMode, pending, background, onOff(t.showThinking)))
 }
 
 func (t *terminalChat) renderStatus() {
@@ -796,6 +1079,11 @@ func terminalCompletions(loop *agentcore.AgentLoop) []string {
 		"/quit",
 		"/exit",
 		"/help",
+		"/models",
+		"/sessions",
+		"/settings",
+		"/gateway-status",
+		"/auth ",
 		"/webui",
 		"/background ",
 		"/busy interrupt",
@@ -839,6 +1127,24 @@ func (t *terminalChat) handleKey(event *tcell.EventKey) *tcell.EventKey {
 		}
 	case tcell.KeyCtrlD:
 		t.app.Stop()
+		return nil
+	case tcell.KeyCtrlC:
+		if action := resolveCtrlCAction(t.input.GetText(), t.lastCtrlCAt, time.Now()); action == "clear" {
+			t.input.SetText("", true)
+			t.mu.Lock()
+			t.suggestionText = "input cleared"
+			t.lastCtrlCAt = time.Now()
+			t.mu.Unlock()
+			t.refreshStatus()
+		} else if action == "warn" {
+			t.mu.Lock()
+			t.suggestionText = "press Ctrl-C again to exit"
+			t.lastCtrlCAt = time.Now()
+			t.mu.Unlock()
+			t.refreshStatus()
+		} else {
+			t.app.Stop()
+		}
 		return nil
 	case tcell.KeyCtrlX:
 		if err := t.loop.HardAbort(t.sessionKey); err != nil {
@@ -892,10 +1198,20 @@ func (t *terminalChat) handleKey(event *tcell.EventKey) *tcell.EventKey {
 		t.chat.ScrollTo(row+10, col)
 		return nil
 	case tcell.KeyF1:
-		t.addSystem("Shortcuts: Enter/Ctrl-S send; Ctrl-J newline; submit while busy interrupts or queues based on /busy; Tab autocomplete; Ctrl-X hard abort; Ctrl-G graceful stop; Ctrl-T reasoning; Ctrl-R reload history; Ctrl-L clear view; PageUp/PageDown scroll; Ctrl-D exit. Local commands: /background <prompt>, /busy interrupt|queue, /status, /clear.")
+		t.addSystem("Shortcuts: Enter/Ctrl-S send; Ctrl-J newline; submit while busy interrupts or queues based on /busy; Tab autocomplete; Ctrl-C clear/warn/exit; Ctrl-X hard abort; Ctrl-G graceful stop; Ctrl-T reasoning; Ctrl-R reload history; Ctrl-L clear view; PageUp/PageDown scroll; Ctrl-D exit. Local commands: /models, /sessions, /settings, /gateway-status, /auth [provider], /background <prompt>, /busy interrupt|queue, /status, /clear.")
 		return nil
 	}
 	return event
+}
+
+func resolveCtrlCAction(input string, lastCtrlCAt, now time.Time) string {
+	if strings.TrimSpace(input) != "" {
+		return "clear"
+	}
+	if !lastCtrlCAt.IsZero() && now.Sub(lastCtrlCAt) <= time.Second {
+		return "exit"
+	}
+	return "warn"
 }
 
 func (t *terminalChat) navigateInputHistory(direction int) {
@@ -1267,6 +1583,220 @@ func launcherAccessTokenPath() string {
 		return filepath.Join(home, ".jameclaw", "launcher_access_token")
 	}
 	return "launcher_access_token"
+}
+
+func terminalLastSessionPath() string {
+	return filepath.Join(internal.GetJameclawHome(), "terminal-last-session")
+}
+
+func readLastTerminalSession() string {
+	data, err := os.ReadFile(terminalLastSessionPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func writeLastTerminalSession(sessionKey string) {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return
+	}
+	path := terminalLastSessionPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte(sessionKey+"\n"), 0o600)
+}
+
+type terminalSessionSummary struct {
+	Key     string
+	Title   string
+	Updated time.Time
+}
+
+func listTerminalSessions() ([]terminalSessionSummary, error) {
+	cfg, err := internal.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	workspace := cfg.WorkspacePath()
+	if workspace == "" {
+		workspace = filepath.Join(internal.GetJameclawHome(), "workspace")
+	}
+	dir := filepath.Join(expandUserPath(workspace), "sessions")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	seen := make(map[string]struct{})
+	var sessions []terminalSessionSummary
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		switch {
+		case strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".meta.json"):
+			session, ok := readTerminalJSONSession(filepath.Join(dir, name))
+			if ok {
+				if _, exists := seen[session.Key]; !exists {
+					seen[session.Key] = struct{}{}
+					sessions = append(sessions, session)
+				}
+			}
+		case strings.HasSuffix(name, ".meta.json"):
+			session, ok := readTerminalMetaSession(filepath.Join(dir, name))
+			if ok {
+				if _, exists := seen[session.Key]; !exists {
+					seen[session.Key] = struct{}{}
+					sessions = append(sessions, session)
+				}
+			}
+		}
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Updated.After(sessions[j].Updated)
+	})
+	if len(sessions) > 50 {
+		sessions = sessions[:50]
+	}
+	return sessions, nil
+}
+
+func readTerminalJSONSession(path string) (terminalSessionSummary, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return terminalSessionSummary{}, false
+	}
+	var raw struct {
+		Key      string              `json:"key"`
+		Summary  string              `json:"summary"`
+		Messages []providers.Message `json:"messages"`
+		Updated  time.Time           `json:"updated"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || strings.TrimSpace(raw.Key) == "" {
+		return terminalSessionSummary{}, false
+	}
+	title := strings.TrimSpace(raw.Summary)
+	if title == "" {
+		for _, msg := range raw.Messages {
+			if msg.Role == "user" && strings.TrimSpace(msg.Content) != "" {
+				title = truncateText(msg.Content, 80)
+				break
+			}
+		}
+	}
+	return terminalSessionSummary{Key: raw.Key, Title: title, Updated: raw.Updated}, true
+}
+
+func readTerminalMetaSession(path string) (terminalSessionSummary, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return terminalSessionSummary{}, false
+	}
+	var raw struct {
+		Key       string    `json:"key"`
+		Summary   string    `json:"summary"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || strings.TrimSpace(raw.Key) == "" {
+		return terminalSessionSummary{}, false
+	}
+	return terminalSessionSummary{Key: raw.Key, Title: truncateText(raw.Summary, 80), Updated: raw.UpdatedAt}, true
+}
+
+func formatAge(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	d := time.Since(t)
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+func terminalWebBaseURL() string {
+	launcherCfg, err := launcherconfig.Load(
+		launcherconfig.PathForAppConfig(internal.GetConfigPath()),
+		launcherconfig.Default(),
+	)
+	if err != nil || launcherCfg.Port <= 0 {
+		return "http://localhost:18800"
+	}
+	return "http://localhost:" + strconv.Itoa(launcherCfg.Port)
+}
+
+func fetchGatewayStatusSummary() string {
+	webURL := strings.TrimRight(terminalWebBaseURL(), "/") + "/api/gateway/status"
+	if data, ok := fetchJSONMap(webURL, 2*time.Second); ok {
+		return formatGatewayStatusMap("Web Console API", data)
+	}
+
+	cfg, err := config.LoadConfig(internal.GetConfigPath())
+	if err != nil {
+		return "Gateway status unavailable: " + err.Error()
+	}
+	port := cfg.Gateway.Port
+	if port == 0 {
+		port = 18790
+	}
+	healthURL := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) + "/health"
+	if data, ok := fetchJSONMap(healthURL, 2*time.Second); ok {
+		return formatGatewayStatusMap("Gateway health", data)
+	}
+	return "Gateway status unavailable: Web Console and gateway health endpoint are not reachable."
+}
+
+func fetchJSONMap(rawURL string, timeout time.Duration) (map[string]any, bool) {
+	client := http.Client{Timeout: timeout}
+	resp, err := client.Get(rawURL)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return nil, false
+	}
+	var data map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+func formatGatewayStatusMap(source string, data map[string]any) string {
+	keys := []string{
+		"gateway_status",
+		"status",
+		"pid",
+		"config_default_model",
+		"boot_default_model",
+		"gateway_restart_required",
+		"gateway_start_allowed",
+		"gateway_start_reason",
+	}
+	var parts []string
+	for _, key := range keys {
+		if value, ok := data[key]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%v", key, value))
+		}
+	}
+	if len(parts) == 0 {
+		return source + ": reachable"
+	}
+	return source + ": " + strings.Join(parts, ", ")
 }
 
 func (t *terminalChat) statusSummary() string {
