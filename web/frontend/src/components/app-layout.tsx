@@ -6,12 +6,14 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { AppStartupSplash } from "@/components/app-startup-splash"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { UpdateBanner } from "@/components/update-banner"
 
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <TooltipProvider>
       <SidebarProvider className="flex h-dvh flex-col overflow-hidden">
         <AppStartupSplash />
+        <UpdateBanner />
         <AppHeader />
 
         <div className="flex flex-1 overflow-hidden">
