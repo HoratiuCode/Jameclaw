@@ -145,8 +145,8 @@ func TestAgentLoop_EmitsMinimalTurnEvents(t *testing.T) {
 	}
 
 	events := collectEventStream(sub.C)
-	if len(events) != 8 {
-		t.Fatalf("expected 8 events, got %d", len(events))
+	if len(events) != 12 {
+		t.Fatalf("expected 12 events, got %d", len(events))
 	}
 
 	kinds := make([]EventKind, 0, len(events))
@@ -156,9 +156,13 @@ func TestAgentLoop_EmitsMinimalTurnEvents(t *testing.T) {
 
 	expectedKinds := []EventKind{
 		EventKindTurnStart,
+		EventKindReasoningStep,
+		EventKindReasoningStep,
+		EventKindReasoningStep,
 		EventKindLLMRequest,
 		EventKindLLMResponse,
 		EventKindToolExecStart,
+		EventKindReasoningStep,
 		EventKindToolExecEnd,
 		EventKindLLMRequest,
 		EventKindLLMResponse,
@@ -186,17 +190,17 @@ func TestAgentLoop_EmitsMinimalTurnEvents(t *testing.T) {
 		t.Fatalf("expected user message 'run tool', got %q", startPayload.UserMessage)
 	}
 
-	toolStartPayload, ok := events[3].Payload.(ToolExecStartPayload)
+	toolStartPayload, ok := events[6].Payload.(ToolExecStartPayload)
 	if !ok {
-		t.Fatalf("expected ToolExecStartPayload, got %T", events[3].Payload)
+		t.Fatalf("expected ToolExecStartPayload, got %T", events[6].Payload)
 	}
 	if toolStartPayload.Tool != "mock_custom" {
 		t.Fatalf("expected tool name mock_custom, got %q", toolStartPayload.Tool)
 	}
 
-	toolEndPayload, ok := events[4].Payload.(ToolExecEndPayload)
+	toolEndPayload, ok := events[8].Payload.(ToolExecEndPayload)
 	if !ok {
-		t.Fatalf("expected ToolExecEndPayload, got %T", events[4].Payload)
+		t.Fatalf("expected ToolExecEndPayload, got %T", events[8].Payload)
 	}
 	if toolEndPayload.Tool != "mock_custom" {
 		t.Fatalf("expected tool end payload for mock_custom, got %q", toolEndPayload.Tool)

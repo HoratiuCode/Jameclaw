@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -87,6 +89,7 @@ type processOptions struct {
 	SendResponse            bool                // Whether to send response via bus
 	NoHistory               bool                // If true, don't load session history (for heartbeat)
 	SkipInitialSteeringPoll bool                // If true, skip the steering poll at loop start (used by Continue)
+	EnableVerification      bool                // Whether to run automatic post-turn verification hooks
 }
 
 type continuationTarget struct {
@@ -879,6 +882,21 @@ func (al *AgentLoop) logEvent(evt Event) {
 	case ToolExecSkippedPayload:
 		fields["tool"] = payload.Tool
 		fields["reason"] = payload.Reason
+	case ReasoningStepPayload:
+		fields["step"] = payload.Step
+		fields["summary"] = payload.Summary
+	case VerificationStartPayload:
+		fields["command"] = payload.Command
+		fields["working_dir"] = payload.WorkingDir
+		fields["reason"] = payload.Reason
+	case VerificationEndPayload:
+		fields["command"] = payload.Command
+		fields["working_dir"] = payload.WorkingDir
+		fields["duration_ms"] = payload.Duration.Milliseconds()
+		fields["exit_code"] = payload.ExitCode
+		fields["output_len"] = payload.OutputLen
+		fields["is_error"] = payload.IsError
+		fields["error"] = payload.Error
 	case SteeringInjectedPayload:
 		fields["count"] = payload.Count
 		fields["total_content_len"] = payload.TotalContentLen
@@ -1252,13 +1270,14 @@ func (al *AgentLoop) ProcessDirectOnAgent(
 	}
 
 	return al.runAgentLoop(ctx, agent, processOptions{
-		SessionKey:      sessionKey,
-		Channel:         channel,
-		ChatID:          chatID,
-		UserMessage:     content,
-		DefaultResponse: defaultResponse,
-		EnableSummary:   true,
-		SendResponse:    false,
+		SessionKey:         sessionKey,
+		Channel:            channel,
+		ChatID:             chatID,
+		UserMessage:        content,
+		DefaultResponse:    defaultResponse,
+		EnableSummary:      true,
+		SendResponse:       false,
+		EnableVerification: channel == "cli",
 	})
 }
 
@@ -1677,6 +1696,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 			MediaCount:  len(ts.media),
 		},
 	)
+	al.emitReasoningStep(ts, "understand_request", "Read the user request and prepare a turn plan.", nil)
 
 	var history []providers.Message
 	var summary string
@@ -1685,6 +1705,10 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 		summary = ts.agent.Sessions.GetSummary(ts.sessionKey)
 	}
 	ts.captureRestorePoint(history, summary)
+	al.emitReasoningStep(ts, "gather_context", "Loaded session history, summary, skills, tools, and media references.", map[string]any{
+		"history_messages": len(history),
+		"media_count":      len(ts.media),
+	})
 
 	messages := ts.agent.ContextBuilder.BuildMessages(
 		history,
@@ -1745,6 +1769,10 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 		}
 		ts.recordPersistedMessage(rootMsg)
 	}
+	al.emitReasoningStep(ts, "decide_action", "Prepared model input and tool definitions for the next action.", map[string]any{
+		"messages": len(messages),
+		"tools":    len(ts.agent.Tools.ToProviderDefs()),
+	})
 
 	activeCandidates, activeModel := al.selectCandidates(ts.agent, ts.userMessage, messages)
 	pendingMessages := append([]providers.Message(nil), ts.opts.InitialSteeringMessages...)
@@ -2408,6 +2436,9 @@ turnLoop:
 					Arguments: cloneEventArguments(toolArgs),
 				},
 			)
+			al.emitReasoningStep(ts, "execute", "Running selected tool.", map[string]any{
+				"tool": toolName,
+			})
 
 			if hasStreamer && streamer != nil {
 				emoji := "🔧"
@@ -2548,6 +2579,9 @@ turnLoop:
 
 			if toolResult == nil {
 				toolResult = tools.ErrorResult("hook returned nil tool result")
+			}
+			if !toolResult.IsError {
+				ts.recordVerificationInput(toolName, toolArgs)
 			}
 
 			if !toolResult.Silent && toolResult.ForUser != "" && ts.opts.SendResponse {
@@ -2713,6 +2747,10 @@ turnLoop:
 	}
 
 	ts.setPhase(TurnPhaseFinalizing)
+	if ts.opts.EnableVerification {
+		al.emitReasoningStep(ts, "verify", "Selecting and running post-turn verification commands.", nil)
+		al.runVerificationHooks(turnCtx, ts)
+	}
 	ts.setFinalContent(finalContent)
 	if !ts.opts.NoHistory {
 		finalMsg := providers.Message{Role: "assistant", Content: finalContent}
@@ -2772,6 +2810,183 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func (al *AgentLoop) emitReasoningStep(ts *turnState, step, summary string, details map[string]any) {
+	if al == nil || ts == nil {
+		return
+	}
+	al.emitEvent(
+		EventKindReasoningStep,
+		ts.eventMeta("runTurn", "turn.reasoning."+step),
+		ReasoningStepPayload{
+			Step:    step,
+			Summary: summary,
+			Details: details,
+		},
+	)
+}
+
+type verificationCommand struct {
+	command    []string
+	workingDir string
+	reason     string
+}
+
+func (al *AgentLoop) runVerificationHooks(ctx context.Context, ts *turnState) {
+	commands := al.selectVerificationCommands(ts)
+	if len(commands) == 0 {
+		al.emitReasoningStep(ts, "verify", "No automatic verification command matched the observed changes.", nil)
+		return
+	}
+	for _, candidate := range commands {
+		al.runVerificationCommand(ctx, ts, candidate)
+	}
+}
+
+func (al *AgentLoop) selectVerificationCommands(ts *turnState) []verificationCommand {
+	if ts == nil || ts.agent == nil {
+		return nil
+	}
+	touched, usedCommands := ts.verificationInputs()
+	if len(touched) == 0 && len(usedCommands) == 0 {
+		return nil
+	}
+
+	workspace := strings.TrimSpace(ts.agent.Workspace)
+	if workspace == "" {
+		workspace, _ = os.Getwd()
+	}
+
+	var hasGo bool
+	var hasFrontend bool
+	var hasMake bool
+	for _, path := range touched {
+		cleaned := normalizeVerificationPath(workspace, path)
+		switch {
+		case strings.HasSuffix(cleaned, ".go") || cleaned == "go.mod" || cleaned == "go.sum" ||
+			strings.HasSuffix(cleaned, "/go.mod") || strings.HasSuffix(cleaned, "/go.sum"):
+			hasGo = true
+		case strings.HasPrefix(cleaned, "web/frontend/") &&
+			(strings.HasSuffix(cleaned, ".ts") || strings.HasSuffix(cleaned, ".tsx") ||
+				strings.HasSuffix(cleaned, ".js") || strings.HasSuffix(cleaned, ".jsx") ||
+				strings.HasSuffix(cleaned, ".css") || strings.HasSuffix(cleaned, "package.json")):
+			hasFrontend = true
+		case cleaned == "Makefile" || strings.HasSuffix(cleaned, "/Makefile") ||
+			strings.HasSuffix(cleaned, ".mk"):
+			hasMake = true
+		}
+	}
+
+	for _, command := range usedCommands {
+		lower := strings.ToLower(command)
+		if strings.Contains(lower, "go build") || strings.Contains(lower, "go test") {
+			hasGo = true
+		}
+		if strings.Contains(lower, "pnpm") || strings.Contains(lower, "npm") || strings.Contains(lower, "vite") {
+			hasFrontend = true
+		}
+		if strings.Contains(lower, "make ") || strings.TrimSpace(lower) == "make" {
+			hasMake = true
+		}
+	}
+
+	var selected []verificationCommand
+	if hasGo && verificationFileExists(filepath.Join(workspace, "go.mod")) {
+		selected = append(selected, verificationCommand{
+			command:    []string{"go", "test", "./..."},
+			workingDir: workspace,
+			reason:     "Go source or module files changed",
+		})
+	}
+	frontendDir := filepath.Join(workspace, "web", "frontend")
+	if hasFrontend && verificationFileExists(filepath.Join(frontendDir, "package.json")) {
+		selected = append(selected,
+			verificationCommand{
+				command:    []string{"pnpm", "lint"},
+				workingDir: frontendDir,
+				reason:     "Frontend source or package files changed",
+			},
+			verificationCommand{
+				command:    []string{"pnpm", "build"},
+				workingDir: frontendDir,
+				reason:     "Frontend source or package files changed",
+			},
+		)
+	}
+	if hasMake && verificationFileExists(filepath.Join(workspace, "Makefile")) {
+		selected = append(selected, verificationCommand{
+			command:    []string{"make", "build"},
+			workingDir: workspace,
+			reason:     "Build metadata changed",
+		})
+	}
+	return selected
+}
+
+func (al *AgentLoop) runVerificationCommand(ctx context.Context, ts *turnState, candidate verificationCommand) {
+	commandText := strings.Join(candidate.command, " ")
+	al.emitEvent(
+		EventKindVerificationStart,
+		ts.eventMeta("runTurn", "turn.verify.start"),
+		VerificationStartPayload{
+			Command:    commandText,
+			WorkingDir: candidate.workingDir,
+			Reason:     candidate.reason,
+		},
+	)
+
+	verifyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	started := time.Now()
+	cmd := exec.CommandContext(verifyCtx, candidate.command[0], candidate.command[1:]...)
+	cmd.Dir = candidate.workingDir
+	output, err := cmd.CombinedOutput()
+	duration := time.Since(started)
+
+	exitCode := 0
+	errText := ""
+	isError := false
+	if err != nil {
+		isError = true
+		errText = err.Error()
+		exitCode = -1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+		if errors.Is(verifyCtx.Err(), context.DeadlineExceeded) {
+			errText = "verification timed out"
+		}
+	}
+
+	al.emitEvent(
+		EventKindVerificationEnd,
+		ts.eventMeta("runTurn", "turn.verify.end"),
+		VerificationEndPayload{
+			Command:    commandText,
+			WorkingDir: candidate.workingDir,
+			Duration:   duration,
+			ExitCode:   exitCode,
+			OutputLen:  len(output),
+			IsError:    isError,
+			Error:      errText,
+		},
+	)
+}
+
+func verificationFileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func normalizeVerificationPath(workspace, path string) string {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if filepath.IsAbs(cleaned) && workspace != "" {
+		if rel, err := filepath.Rel(workspace, cleaned); err == nil && filepath.IsLocal(rel) {
+			cleaned = rel
+		}
+	}
+	return filepath.ToSlash(cleaned)
 }
 
 // selectCandidates returns the model candidates and resolved model name to use

@@ -45,6 +45,12 @@ const (
 	EventKindSubTurnResultDelivered
 	// EventKindSubTurnOrphan is emitted when a sub-turn result cannot be delivered.
 	EventKindSubTurnOrphan
+	// EventKindReasoningStep is emitted for high-level planner/status milestones.
+	EventKindReasoningStep
+	// EventKindVerificationStart is emitted before an automatic verification command runs.
+	EventKindVerificationStart
+	// EventKindVerificationEnd is emitted after an automatic verification command finishes.
+	EventKindVerificationEnd
 	// EventKindError is emitted when a turn encounters an execution error.
 	EventKindError
 
@@ -70,6 +76,9 @@ var eventKindNames = [...]string{
 	"subturn_end",
 	"subturn_result_delivered",
 	"subturn_orphan",
+	"reasoning_step",
+	"verification_start",
+	"verification_end",
 	"error",
 }
 
@@ -211,6 +220,31 @@ type ToolExecEndPayload struct {
 type ToolExecSkippedPayload struct {
 	Tool   string
 	Reason string
+}
+
+// ReasoningStepPayload describes a non-sensitive planner/status milestone.
+type ReasoningStepPayload struct {
+	Step    string
+	Summary string
+	Details map[string]any
+}
+
+// VerificationStartPayload describes an automatic verification command.
+type VerificationStartPayload struct {
+	Command    string
+	WorkingDir string
+	Reason     string
+}
+
+// VerificationEndPayload describes the result of an automatic verification command.
+type VerificationEndPayload struct {
+	Command    string
+	WorkingDir string
+	Duration   time.Duration
+	ExitCode   int
+	OutputLen  int
+	IsError    bool
+	Error      string
 }
 
 // SteeringInjectedPayload describes steering messages appended before the next LLM call.

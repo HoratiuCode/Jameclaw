@@ -103,6 +103,9 @@ type turnState struct {
 	lastFinishReason string               // Last LLM finish_reason
 	lastUsage        *providers.UsageInfo // Last LLM usage info
 
+	touchedFiles []string
+	usedCommands []string
+
 	// Back-reference to the owning AgentLoop (set for SubTurns only, used for hard abort cascade)
 	al *AgentLoop
 }
@@ -235,6 +238,36 @@ func (ts *turnState) setTurnCancel(cancel context.CancelFunc) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	ts.turnCancel = cancel
+}
+
+func (ts *turnState) recordVerificationInput(toolName string, args map[string]any) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	switch toolName {
+	case "write_file", "edit_file", "append_file":
+		if path, ok := args["path"].(string); ok && path != "" {
+			ts.touchedFiles = appendUniqueString(ts.touchedFiles, path)
+		}
+	case "exec":
+		if command, ok := args["command"].(string); ok && command != "" {
+			ts.usedCommands = appendUniqueString(ts.usedCommands, command)
+		}
+	}
+}
+
+func (ts *turnState) verificationInputs() ([]string, []string) {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return append([]string(nil), ts.touchedFiles...), append([]string(nil), ts.usedCommands...)
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func (ts *turnState) setProviderCancel(cancel context.CancelFunc) {

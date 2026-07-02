@@ -70,6 +70,7 @@ type terminalChat struct {
 	currentModel   string
 	pendingInputs  []string
 	localSearchOK  bool
+	reasoningMode  reasoningMode
 	inputHistory   []string
 	historyIndex   int
 	completionList []string
@@ -81,7 +82,7 @@ type terminalChat struct {
 	lastCtrlCAt    time.Time
 }
 
-func runTerminalChat(loop *agentcore.AgentLoop, sessionKey, agentEmoji string) error {
+func runTerminalChat(loop *agentcore.AgentLoop, sessionKey, agentEmoji string, reasoningDisplay reasoningMode) error {
 	if loop == nil {
 		return fmt.Errorf("agent loop is nil")
 	}
@@ -98,6 +99,7 @@ func runTerminalChat(loop *agentcore.AgentLoop, sessionKey, agentEmoji string) e
 		backgroundRuns: make(map[string]string),
 		stopSpinner:    make(chan struct{}),
 		historyIndex:   -1,
+		reasoningMode:  reasoningDisplay,
 	}
 	t.build()
 	writeLastTerminalSession(sessionKey)
@@ -772,6 +774,36 @@ func (t *terminalChat) handleEvent(event agentcore.Event) {
 		t.finishToolLocked(payload.Tool, payload.IsError, payload.Duration)
 	case agentcore.ToolExecSkippedPayload:
 		t.entries = append(t.entries, terminalEntry{kind: "system", text: "Tool skipped: " + payload.Tool + " - " + payload.Reason})
+	case agentcore.ReasoningStepPayload:
+		if t.reasoningMode != reasoningOff {
+			t.activity = payload.Step
+			text := "[reasoning] " + payload.Step + ": " + payload.Summary
+			if t.reasoningMode == reasoningDebug {
+				text = debugReasoningLine(event.Kind.String(), event.Meta, payload)
+			}
+			t.entries = append(t.entries, terminalEntry{kind: "system", text: text})
+		}
+	case agentcore.VerificationStartPayload:
+		if t.reasoningMode != reasoningOff {
+			t.activity = "verifying"
+			text := "[verify] " + payload.Command + " (" + payload.Reason + ")"
+			if t.reasoningMode == reasoningDebug {
+				text = debugReasoningLine(event.Kind.String(), event.Meta, payload)
+			}
+			t.entries = append(t.entries, terminalEntry{kind: "system", text: text})
+		}
+	case agentcore.VerificationEndPayload:
+		if t.reasoningMode != reasoningOff {
+			status := "passed"
+			if payload.IsError {
+				status = "failed"
+			}
+			text := fmt.Sprintf("[verify] %s %s in %s", payload.Command, status, payload.Duration.Round(time.Millisecond))
+			if t.reasoningMode == reasoningDebug {
+				text = debugReasoningLine(event.Kind.String(), event.Meta, payload)
+			}
+			t.entries = append(t.entries, terminalEntry{kind: "system", text: text})
+		}
 	case agentcore.LLMRetryPayload:
 		t.activity = "retrying"
 	case agentcore.TurnEndPayload:
