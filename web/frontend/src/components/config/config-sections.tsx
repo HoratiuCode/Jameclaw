@@ -1,3 +1,4 @@
+import * as React from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -592,6 +593,93 @@ export function DevicesSection({
         disabled={autoStartDisabled}
         onCheckedChange={onAutoStartChange}
       />
+    </ConfigSectionCard>
+  )
+}
+
+interface SystemSectionProps {
+  appVersion?: string
+  appStatus?: string
+  statusLoading?: boolean
+}
+
+export function SystemSection({
+  appVersion,
+  appStatus,
+  statusLoading,
+}: SystemSectionProps) {
+  const { t } = useTranslation()
+  const [now, setNow] = React.useState(() => new Date())
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const dateFormatter = React.useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }),
+    [],
+  )
+  const timeFormatter = React.useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    [],
+  )
+
+  return (
+    <ConfigSectionCard title={t("pages.config.sections.system")}>
+      <Field
+        label={t("pages.config.system_today")}
+        hint={t("pages.config.system_today_hint")}
+        layout="setting-row"
+      >
+        <div className="text-foreground text-sm font-medium">
+          {dateFormatter.format(now)}
+        </div>
+      </Field>
+
+      <Field
+        label={t("pages.config.system_local_time")}
+        hint={t("pages.config.system_local_time_hint")}
+        layout="setting-row"
+      >
+        <div className="text-foreground text-sm font-medium">
+          {timeFormatter.format(now)}
+        </div>
+      </Field>
+
+      <Field
+        label={t("pages.config.system_status")}
+        hint={t("pages.config.system_status_hint")}
+        layout="setting-row"
+      >
+        <div className="text-foreground text-sm font-medium">
+          {statusLoading
+            ? t("labels.loading")
+            : appStatus || t("pages.config.system_status_unknown")}
+        </div>
+      </Field>
+
+      <Field
+        label={t("pages.config.system_version")}
+        hint={t("pages.config.system_version_hint")}
+        layout="setting-row"
+      >
+        <div className="text-foreground font-mono text-sm">
+          {statusLoading
+            ? t("labels.loading")
+            : appVersion || t("pages.config.system_version_unknown")}
+        </div>
+      </Field>
     </ConfigSectionCard>
   )
 }

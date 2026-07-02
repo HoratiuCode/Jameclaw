@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { patchAppConfig } from "@/api/channels"
+import { getAppStatus } from "@/api/status"
 import {
   getAutoStartStatus,
   getLauncherConfig,
@@ -19,6 +20,7 @@ import {
   ExecSection,
   LauncherSection,
   RuntimeSection,
+  SystemSection,
   WebExtensionSection,
 } from "@/components/config/config-sections"
 import {
@@ -70,6 +72,12 @@ export function ConfigPage() {
   } = useQuery({
     queryKey: ["system", "autostart"],
     queryFn: getAutoStartStatus,
+  })
+
+  const { data: appStatus, isLoading: isAppStatusLoading } = useQuery({
+    queryKey: ["app-status"],
+    queryFn: getAppStatus,
+    staleTime: 60_000,
   })
 
   useEffect(() => {
@@ -354,6 +362,12 @@ export function ConfigPage() {
                   saving
                 }
                 onAutoStartChange={setAutoStartEnabled}
+              />
+
+              <SystemSection
+                appVersion={appStatus?.version}
+                appStatus={appStatus?.status}
+                statusLoading={isAppStatusLoading}
               />
 
               <div className="flex justify-end gap-2">

@@ -466,6 +466,16 @@
       "allowed_cidrs": "Allowed Network CIDRs",
       "allowed_cidrs_hint": "Only clients from these CIDR ranges can access the service. One per line or comma-separated. Leave empty to allow all.",
       "allowed_cidrs_placeholder": "192.168.1.0/24\n10.0.0.0/8",
+      "system_today": "Today",
+      "system_today_hint": "Current local calendar day for this browser.",
+      "system_local_time": "Local Time",
+      "system_local_time_hint": "Current local time, updated once per minute.",
+      "system_status": "Service Status",
+      "system_status_hint": "Current JameClaw Web service status.",
+      "system_status_unknown": "Unknown",
+      "system_version": "App Version",
+      "system_version_hint": "Version reported by the running JameClaw Web backend.",
+      "system_version_unknown": "Unknown",
       "sections": {
         "agent": "Agent",
         "web_extension": "Web Extension",
@@ -473,7 +483,8 @@
         "exec": "Run Commands",
         "cron": "Cron Tasks",
         "launcher": "Service",
-        "devices": "Devices"
+        "devices": "Devices",
+        "system": "System"
       },
       "open_raw": "Raw Config",
       "back_to_visual": "Visual Config",
