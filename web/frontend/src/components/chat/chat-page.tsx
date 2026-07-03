@@ -58,15 +58,26 @@ export function ChatPage() {
     ? "Choose a default model before sending a message."
     : !canStart && startReason
       ? startReason
-    : gatewayStopHint
-      ? gatewayStopHint
-    : !isGatewayRunning
-      ? "The gateway is not running."
-      : connectionState === "connecting"
-        ? "Connecting the Web Console to JameClaw..."
-        : connectionState === "error"
-          ? (errorMessage ?? "The Web Console could not connect to JameClaw.")
-          : null
+      : gatewayStopHint
+        ? gatewayStopHint
+        : !isGatewayRunning
+          ? "The gateway is not running."
+          : connectionState === "offline"
+            ? (errorMessage ??
+              "Your phone is offline. JameClaw will reconnect when the network returns.")
+            : connectionState === "reconnecting"
+              ? (errorMessage ?? "Reconnecting to JameClaw...")
+              : connectionState === "connecting"
+                ? "Connecting the Web Console to JameClaw..."
+                : connectionState === "error"
+                  ? (errorMessage ??
+                    "The Web Console could not connect to JameClaw.")
+                  : null
+  const connectionNotice =
+    isGatewayRunning &&
+    (connectionState === "offline" || connectionState === "reconnecting")
+      ? disabledReason
+      : null
 
   const {
     sessions,
@@ -162,6 +173,12 @@ export function ChatPage() {
           onDeleteSession={handleDeleteSession}
         />
       </PageHeader>
+
+      {connectionNotice && (
+        <div className="border-border/70 bg-muted/70 text-muted-foreground mx-4 mt-2 rounded-lg border px-3 py-2 text-sm md:mx-8 lg:mx-24 xl:mx-48">
+          {connectionNotice}
+        </div>
+      )}
 
       <div
         ref={scrollRef}

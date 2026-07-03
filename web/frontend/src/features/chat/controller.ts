@@ -40,11 +40,20 @@ let pendingMessages: Array<{
   sessionId: string
 }> = []
 
+const OFFLINE_MESSAGE =
+  "Your phone appears to be offline. JameClaw will reconnect when the network returns."
+const RECONNECTING_MESSAGE =
+  "Reconnecting to JameClaw. If your phone just woke up, this may take a moment."
+
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
+}
+
+function isBrowserOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false
 }
 
 function shouldReconnectFor(generation: number, sessionId: string): boolean {
@@ -60,6 +69,21 @@ function scheduleReconnect(generation: number, sessionId: string) {
   if (!shouldReconnectFor(generation, sessionId) || reconnectTimer !== null) {
     return
   }
+
+  if (isBrowserOffline()) {
+    updateChatStore({
+      connectionState: "offline",
+      errorMessage: OFFLINE_MESSAGE,
+      isTyping: false,
+    })
+    return
+  }
+
+  updateChatStore({
+    connectionState: "reconnecting",
+    errorMessage: RECONNECTING_MESSAGE,
+    isTyping: false,
+  })
 
   const delay = Math.min(1000 * 2 ** reconnectAttempts, 5000)
   reconnectAttempts += 1
@@ -81,6 +105,21 @@ function needsActiveSessionHydration(): boolean {
     storedSessionId === state.activeSessionId &&
     !state.hasHydratedActiveSession,
   )
+}
+
+async function resumeActiveSessionMessages(sessionId: string) {
+  try {
+    const historyMessages = await loadSessionMessages(sessionId)
+    if (sessionId !== activeSessionIdRef) {
+      return
+    }
+
+    updateChatStore((prev) => ({
+      messages: mergeHistoryMessages(historyMessages, prev.messages),
+    }))
+  } catch (error) {
+    console.warn("Failed to refresh Jame session history:", error)
+  }
 }
 
 function setActiveSessionId(sessionId: string) {
@@ -122,6 +161,16 @@ export async function connectChat() {
     return
   }
 
+  if (isBrowserOffline()) {
+    shouldMaintainConnection = true
+    updateChatStore({
+      connectionState: "offline",
+      errorMessage: OFFLINE_MESSAGE,
+      isTyping: false,
+    })
+    return
+  }
+
   if (
     isConnecting ||
     (wsRef &&
@@ -135,7 +184,14 @@ export async function connectChat() {
   connectionGeneration = generation
   isConnecting = true
   clearReconnectTimer()
-  updateChatStore({ connectionState: "connecting", errorMessage: null })
+  updateChatStore((prev) => ({
+    connectionState: ["connected", "reconnecting", "offline"].includes(
+      prev.connectionState,
+    )
+      ? "reconnecting"
+      : "connecting",
+    errorMessage: null,
+  }))
 
   try {
     const { token, ws_url } = await getJameToken()
@@ -184,9 +240,14 @@ export async function connectChat() {
       updateChatStore({ connectionState: "connected", errorMessage: null })
       isConnecting = false
       reconnectAttempts = 0
+      void resumeActiveSessionMessages(sessionId)
 
-      const queued = pendingMessages.filter((message) => message.sessionId === sessionId)
-      pendingMessages = pendingMessages.filter((message) => message.sessionId !== sessionId)
+      const queued = pendingMessages.filter(
+        (message) => message.sessionId === sessionId,
+      )
+      pendingMessages = pendingMessages.filter(
+        (message) => message.sessionId !== sessionId,
+      )
       for (const message of queued) {
         try {
           socket.send(
@@ -243,12 +304,15 @@ export async function connectChat() {
       }
       wsRef = null
       isConnecting = false
-      updateChatStore({
-        connectionState: "disconnected",
-        errorMessage: "Connection to the Jame chat session was closed.",
-        isTyping: false,
-      })
-      scheduleReconnect(generation, sessionId)
+      if (shouldReconnectFor(generation, sessionId)) {
+        scheduleReconnect(generation, sessionId)
+      } else {
+        updateChatStore({
+          connectionState: "disconnected",
+          errorMessage: "Connection to the Jame chat session was closed.",
+          isTyping: false,
+        })
+      }
     }
 
     socket.onerror = () => {
@@ -265,10 +329,6 @@ export async function connectChat() {
         return
       }
       isConnecting = false
-      updateChatStore({
-        connectionState: "error",
-        errorMessage: "Web Console could not connect to the Jame chat session.",
-      })
       scheduleReconnect(generation, sessionId)
     }
 
@@ -280,7 +340,7 @@ export async function connectChat() {
     }
     console.error("Failed to connect to jame:", error)
     updateChatStore({
-      connectionState: "error",
+      connectionState: shouldMaintainConnection ? "reconnecting" : "error",
       errorMessage:
         error instanceof Error
           ? error.message
@@ -389,7 +449,11 @@ export function sendChatMessage(content: string) {
       ],
       errorMessage: null,
       isTyping: true,
-      connectionState: prev.connectionState === "connected" ? prev.connectionState : "connecting",
+      connectionState: isBrowserOffline()
+        ? "offline"
+        : prev.connectionState === "connected"
+          ? prev.connectionState
+          : "reconnecting",
     }))
 
     void connectChat()
@@ -509,7 +573,80 @@ export function initializeChatStore() {
     }
   }
 
+  const reconnectNow = () => {
+    if (
+      !shouldMaintainConnection ||
+      store.get(gatewayAtom).status !== "running" ||
+      needsActiveSessionHydration()
+    ) {
+      return
+    }
+
+    if (isBrowserOffline()) {
+      updateChatStore({
+        connectionState: "offline",
+        errorMessage: OFFLINE_MESSAGE,
+        isTyping: false,
+      })
+      return
+    }
+
+    const socketOpen =
+      wsRef &&
+      (wsRef.readyState === WebSocket.OPEN ||
+        wsRef.readyState === WebSocket.CONNECTING)
+    if (socketOpen || isConnecting) {
+      return
+    }
+
+    clearReconnectTimer()
+    updateChatStore({
+      connectionState: "reconnecting",
+      errorMessage: RECONNECTING_MESSAGE,
+      isTyping: false,
+    })
+    void connectChat()
+  }
+
+  const handleOnline = () => {
+    reconnectAttempts = 0
+    reconnectNow()
+  }
+
+  const handleOffline = () => {
+    if (!shouldMaintainConnection) {
+      return
+    }
+    clearReconnectTimer()
+    updateChatStore({
+      connectionState: "offline",
+      errorMessage: OFFLINE_MESSAGE,
+      isTyping: false,
+    })
+  }
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      reconnectNow()
+      void resumeActiveSessionMessages(activeSessionIdRef)
+    }
+  }
+
+  window.addEventListener("online", handleOnline)
+  window.addEventListener("offline", handleOffline)
+  document.addEventListener("visibilitychange", handleVisibilityChange)
+
   unsubscribeGateway = store.sub(gatewayAtom, syncConnectionWithGateway)
+  const unsubscribeEvents = () => {
+    window.removeEventListener("online", handleOnline)
+    window.removeEventListener("offline", handleOffline)
+    document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }
+  const unsubscribeGatewayOnly = unsubscribeGateway
+  unsubscribeGateway = () => {
+    unsubscribeGatewayOnly?.()
+    unsubscribeEvents()
+  }
 
   if (!readStoredSessionId()) {
     updateChatStore({ hasHydratedActiveSession: true })

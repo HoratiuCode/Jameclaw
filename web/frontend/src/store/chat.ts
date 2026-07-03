@@ -16,6 +16,8 @@ export type ConnectionState =
   | "disconnected"
   | "connecting"
   | "connected"
+  | "reconnecting"
+  | "offline"
   | "error"
 
 export interface ChatStoreState {

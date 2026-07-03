@@ -13,6 +13,7 @@ import {
   setAutoStartEnabled as updateAutoStartEnabled,
   setLauncherConfig as updateLauncherConfig,
 } from "@/api/system"
+import type { UpdateStatusResponse } from "@/api/update"
 import {
   AgentDefaultsSection,
   CronSection,
@@ -35,6 +36,7 @@ import {
 } from "@/components/config/form-model"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
+import { useUpdateStatus } from "@/hooks/use-update-status"
 
 export function ConfigPage() {
   const { t } = useTranslation()
@@ -79,6 +81,14 @@ export function ConfigPage() {
     queryFn: getAppStatus,
     staleTime: 60_000,
   })
+
+  const {
+    data: updateStatus,
+    isLoading: isUpdateStatusLoading,
+    refetch: refreshUpdateStatus,
+    openUpdate,
+    opening: openingUpdate,
+  } = useUpdateStatus()
 
   useEffect(() => {
     if (!data) return
@@ -368,6 +378,11 @@ export function ConfigPage() {
                 appVersion={appStatus?.version}
                 appStatus={appStatus?.status}
                 statusLoading={isAppStatusLoading}
+                updateStatus={updateStatus as UpdateStatusResponse | undefined}
+                updateStatusLoading={isUpdateStatusLoading}
+                updateOpening={openingUpdate}
+                onRefreshUpdateStatus={() => void refreshUpdateStatus()}
+                onOpenUpdate={() => openUpdate()}
               />
 
               <div className="flex justify-end gap-2">

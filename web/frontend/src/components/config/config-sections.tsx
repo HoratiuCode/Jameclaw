@@ -1,13 +1,22 @@
+import {
+  IconCircleCheck,
+  IconExternalLink,
+  IconLoader2,
+  IconRefresh,
+  IconVersions,
+} from "@tabler/icons-react"
 import * as React from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
+import type { UpdateStatusResponse } from "@/api/update"
 import {
   type CoreConfigForm,
   DM_SCOPE_OPTIONS,
   type LauncherForm,
 } from "@/components/config/form-model"
 import { Field, SwitchCardField } from "@/components/shared-form"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -601,12 +610,22 @@ interface SystemSectionProps {
   appVersion?: string
   appStatus?: string
   statusLoading?: boolean
+  updateStatus?: UpdateStatusResponse
+  updateStatusLoading?: boolean
+  updateOpening?: boolean
+  onRefreshUpdateStatus?: () => void
+  onOpenUpdate?: () => void
 }
 
 export function SystemSection({
   appVersion,
   appStatus,
   statusLoading,
+  updateStatus,
+  updateStatusLoading,
+  updateOpening,
+  onRefreshUpdateStatus,
+  onOpenUpdate,
 }: SystemSectionProps) {
   const { t } = useTranslation()
   const [now, setNow] = React.useState(() => new Date())
@@ -634,6 +653,27 @@ export function SystemSection({
       }),
     [],
   )
+  const publishedAt =
+    updateStatus?.published_at &&
+    !Number.isNaN(Date.parse(updateStatus.published_at))
+      ? dateFormatter.format(new Date(updateStatus.published_at))
+      : null
+  const latestVersionLabel =
+    updateStatus?.latest_name || updateStatus?.latest_version || null
+  const updateStateLabel = updateStatusLoading
+    ? t("labels.loading")
+    : updateStatus?.check_error
+      ? t("pages.config.system_update_check_failed")
+      : updateStatus?.update_available
+        ? t("pages.config.system_update_available")
+        : updateStatus
+          ? t("pages.config.system_update_current")
+          : t("pages.config.system_update_unknown")
+  const updateStateClass = updateStatus?.check_error
+    ? "text-destructive"
+    : updateStatus?.update_available
+      ? "text-amber-600 dark:text-amber-300"
+      : "text-emerald-600 dark:text-emerald-400"
 
   return (
     <ConfigSectionCard title={t("pages.config.sections.system")}>
@@ -678,6 +718,95 @@ export function SystemSection({
           {statusLoading
             ? t("labels.loading")
             : appVersion || t("pages.config.system_version_unknown")}
+        </div>
+      </Field>
+
+      <Field
+        label={t("pages.config.system_update_status")}
+        hint={t("pages.config.system_update_status_hint")}
+        layout="setting-row"
+        controlClassName="md:max-w-lg"
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={[
+                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-medium",
+                updateStateClass,
+              ].join(" ")}
+            >
+              {updateStatusLoading ? (
+                <IconLoader2 className="size-4 animate-spin" />
+              ) : updateStatus?.update_available ? (
+                <IconVersions className="size-4" />
+              ) : (
+                <IconCircleCheck className="size-4" />
+              )}
+              {updateStateLabel}
+            </span>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRefreshUpdateStatus}
+              disabled={updateStatusLoading}
+            >
+              <IconRefresh
+                className={[
+                  "size-4",
+                  updateStatusLoading ? "animate-spin" : "",
+                ].join(" ")}
+              />
+              {t("pages.config.system_update_check")}
+            </Button>
+
+            {updateStatus?.update_available && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={onOpenUpdate}
+                disabled={updateOpening}
+              >
+                {updateOpening ? (
+                  <IconLoader2 className="size-4 animate-spin" />
+                ) : (
+                  <IconExternalLink className="size-4" />
+                )}
+                {updateStatus.update_action_text ||
+                  t("pages.config.system_update_open")}
+              </Button>
+            )}
+          </div>
+
+          <div className="text-muted-foreground grid gap-1 text-xs sm:grid-cols-2">
+            <div>
+              <span>{t("pages.config.system_update_current_version")}: </span>
+              <span className="font-mono">
+                {updateStatus?.current_version ||
+                  appVersion ||
+                  t("pages.config.system_version_unknown")}
+              </span>
+            </div>
+            <div>
+              <span>{t("pages.config.system_update_latest_version")}: </span>
+              <span className="font-mono">
+                {latestVersionLabel || t("pages.config.system_version_unknown")}
+              </span>
+            </div>
+            {publishedAt && (
+              <div className="sm:col-span-2">
+                <span>{t("pages.config.system_update_published")}: </span>
+                <span>{publishedAt}</span>
+              </div>
+            )}
+            {updateStatus?.check_error && (
+              <div className="text-destructive sm:col-span-2">
+                {updateStatus.check_error}
+              </div>
+            )}
+          </div>
         </div>
       </Field>
     </ConfigSectionCard>

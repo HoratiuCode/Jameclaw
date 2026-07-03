@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { toast, Toaster } from "sonner"
+import { Toaster, toast } from "sonner"
 
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import { ChatComposer } from "@/components/chat/chat-composer"
@@ -47,13 +47,8 @@ export function ExtensionPage() {
   const [input, setInput] = useState("")
   const [pageContext, setPageContext] = useState<ExtensionContext>({})
 
-  const {
-    messages,
-    connectionState,
-    errorMessage,
-    isTyping,
-    sendMessage,
-  } = useJameChat()
+  const { messages, connectionState, errorMessage, isTyping, sendMessage } =
+    useJameChat()
 
   const { state: gwState, canStart, startReason, pid, owned } = useGateway()
   const isGatewayRunning = gwState === "running"
@@ -69,13 +64,24 @@ export function ExtensionPage() {
       ? startReason
       : gwState === "running" && !owned
         ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}.`
-      : !isGatewayRunning
-        ? "The gateway is not running."
-        : connectionState === "connecting"
-          ? "Connecting to JameClaw..."
-          : connectionState === "error"
-            ? (errorMessage ?? "Could not connect to the Jame chat session.")
-            : null
+        : !isGatewayRunning
+          ? "The gateway is not running."
+          : connectionState === "offline"
+            ? (errorMessage ??
+              "Your phone is offline. JameClaw will reconnect when the network returns.")
+            : connectionState === "reconnecting"
+              ? (errorMessage ?? "Reconnecting to JameClaw...")
+              : connectionState === "connecting"
+                ? "Connecting to JameClaw..."
+                : connectionState === "error"
+                  ? (errorMessage ??
+                    "Could not connect to the Jame chat session.")
+                  : null
+  const connectionNotice =
+    isGatewayRunning &&
+    (connectionState === "offline" || connectionState === "reconnecting")
+      ? disabledReason
+      : null
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
@@ -113,9 +119,7 @@ export function ExtensionPage() {
     }
 
     const contextBlock = buildContextBlock(pageContext)
-    const message = contextBlock
-      ? `${trimmed}\n\n${contextBlock}`
-      : trimmed
+    const message = contextBlock ? `${trimmed}\n\n${contextBlock}` : trimmed
 
     if (sendMessage(message)) {
       setInput("")
@@ -130,6 +134,12 @@ export function ExtensionPage() {
     <div className="flex h-dvh flex-col overflow-hidden bg-white text-slate-950">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 pb-4">
+          {connectionNotice && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              {connectionNotice}
+            </div>
+          )}
+
           {messages.length === 0 && (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
               Start typing. The current page context is attached automatically.
