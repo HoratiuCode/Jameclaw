@@ -75,6 +75,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// GitHub release update checks
 	h.registerUpdateRoutes(mux)
+
+	// First-run onboarding readiness
+	h.registerOnboardingRoutes(mux)
 }
 
 // Shutdown gracefully shuts down the handler, stopping the gateway if it was started by this handler.

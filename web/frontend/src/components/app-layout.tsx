@@ -4,6 +4,7 @@ import { Toaster } from "sonner"
 import { AppHeader } from "@/components/app-header"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AppStartupSplash } from "@/components/app-startup-splash"
+import { OnboardingWizard } from "@/components/onboarding-wizard"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { UpdateBanner } from "@/components/update-banner"
@@ -13,6 +14,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <TooltipProvider>
       <SidebarProvider className="flex h-dvh flex-col overflow-hidden">
         <AppStartupSplash />
+        <OnboardingWizard />
         <UpdateBanner />
         <AppHeader />
 
