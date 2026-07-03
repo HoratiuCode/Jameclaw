@@ -185,6 +185,7 @@ If port `18800` is already in use, stop the existing launcher or start on anothe
 > ```bash
 > jameclaw-launcher -public
 > ```
+> For phone access on the same Wi-Fi, see [Phone / Mobile Use](#-phone--mobile-use).
 
 <p align="center">
 <img src="assets/launcher-webui.png" alt="WebUI Launcher" width="600">
@@ -278,11 +279,69 @@ This mode is the best fit when you want a direct shell workflow instead of the b
 
 The terminal agent includes the same workflow conveniences as the launcher chat: multiline input, slash-command autocomplete, interrupt/redirect while a turn is running, streaming tool output, and explicit session selection with `--session` when you want to resume or isolate work.
 
-### 📱 Android
+### 📱 Phone / Mobile Use
 
-Give your decade-old phone a second life! Turn it into a smart AI Assistant with JameClaw.
+JameClaw can be used from a phone today in two different ways:
 
-**Option 1: Termux (available now)**
+- **Phone as a remote Web Console**: run JameClaw on a computer/server and open the mobile web UI from your phone on the same network.
+- **Android phone as the JameClaw host**: run the binary directly inside Termux on the phone.
+
+There is not yet a released native iPhone/Android app. A standalone Android APK with built-in WebUI is planned.
+
+#### Option 1: Phone as Web Console (available now)
+
+Use this when JameClaw is running on your Mac, PC, server, Raspberry Pi, or another device and you want to control it from your phone.
+
+1. Start the launcher with LAN access enabled:
+
+```bash
+jameclaw-launcher -public
+```
+
+You can also enable this from the Web Console: **Config -> Service -> Enable LAN Access**.
+
+2. Find the computer's local IP address.
+
+On macOS:
+
+```bash
+ipconfig getifaddr en0
+```
+
+On Linux:
+
+```bash
+hostname -I
+```
+
+On Windows:
+
+```powershell
+ipconfig
+```
+
+3. Open the Web Console from your phone browser:
+
+```text
+http://<computer-ip>:18800
+```
+
+Example:
+
+```text
+http://192.168.1.24:18800
+```
+
+4. Add it to your phone home screen if you want an app-like shortcut.
+
+The phone UI uses the same Web Console as desktop, but with a mobile layout: the sidebar becomes a drawer, chat uses the Jame WebSocket channel, and the launcher proxies chat traffic through the same web port. If your phone sleeps or changes network, the Web Console will show offline/reconnecting state and resume the session when the browser comes back.
+
+> [!IMPORTANT]
+> LAN access exposes the launcher to other devices on your network. Use **Config -> Service -> Allowed Network CIDRs** if you want to restrict which local IP ranges can connect. Do not expose the Web Console directly to the public internet.
+
+#### Option 2: Android host via Termux (available now)
+
+Use this when you want the Android phone itself to run JameClaw.
 
 1. Install [Termux](https://github.com/termux/termux-app) (download from [GitHub Releases](https://github.com/termux/termux-app/releases), or search in F-Droid / Google Play)
 2. Run the following commands:
@@ -295,9 +354,9 @@ pkg install proot
 termux-chroot ./jameclaw install   # chroot provides a standard Linux filesystem layout
 ```
 
-Then follow the Terminal Launcher section below to complete configuration.
+Then follow the Terminal Launcher section below to complete configuration. On low-memory devices, the terminal agent or TUI launcher is usually a better fit than the browser launcher.
 
-**Option 2: APK Install (coming soon)**
+#### Option 3: Native APK (coming soon)
 
 A standalone Android APK with built-in WebUI is planned.
 

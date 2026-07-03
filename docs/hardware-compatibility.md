@@ -97,7 +97,7 @@ Consumer products, routers, and industrial devices that have been tested with Ja
 
 Any ARM64 Android phone (2015+) with 1GB+ RAM. Install [Termux](https://github.com/termux/termux-app), use `proot` to run JameClaw.
 
-> See [README: Run on old Android Phones](../README.md#-run-on-old-android-phones) for setup instructions.
+> See [README: Phone / Mobile Use](../README.md#-phone--mobile-use) for setup instructions.
 
 ### Desktop / Server / Cloud
 
