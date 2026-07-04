@@ -5,6 +5,7 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"runtime"
 
 	"fyne.io/systray"
 
@@ -26,6 +27,11 @@ func onReady() {
 
 	// Create menu items
 	mOpen := systray.AddMenuItem(T(MenuOpen), T(MenuOpenTooltip))
+	var terminalClicked <-chan struct{}
+	if runtime.GOOS == "darwin" {
+		mTerminalChat := systray.AddMenuItem(T(MenuTerminalChat), T(MenuTerminalTooltip))
+		terminalClicked = mTerminalChat.ClickedCh
+	}
 	mAbout := systray.AddMenuItem(T(MenuAbout), T(MenuAboutTooltip))
 
 	// Add version info under About menu
@@ -51,6 +57,11 @@ func onReady() {
 			case <-mOpen.ClickedCh:
 				if err := openBrowser(); err != nil {
 					logger.Errorf("Failed to open browser: %v", err)
+				}
+
+			case <-terminalClicked:
+				if err := openTerminalChat(); err != nil {
+					logger.Errorf("Failed to open terminal chat: %v", err)
 				}
 
 			case <-mVersion.ClickedCh:

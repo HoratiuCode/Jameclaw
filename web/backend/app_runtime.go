@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
+	"runtime"
+	"strings"
 	"time"
 
+	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/web/backend/utils"
 )
@@ -59,4 +63,39 @@ func openBrowser() error {
 		return fmt.Errorf("server address not set")
 	}
 	return utils.OpenBrowser(launcherOpenURL(serverAddr))
+}
+
+func openTerminalChat() error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("terminal chat launcher is only supported on macOS")
+	}
+
+	binary := utils.FindJameclawBinary()
+	command := shellQuote(binary)
+	if configFile != "" {
+		command = config.EnvConfig + "=" + shellQuote(configFile) + " " + command
+	}
+	command += " agent"
+
+	script := fmt.Sprintf(
+		`tell application "Terminal"
+	activate
+	do script %s
+end tell`,
+		appleScriptString(command),
+	)
+	return exec.Command("osascript", "-e", script).Start()
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func appleScriptString(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	return `"` + value + `"`
 }

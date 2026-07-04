@@ -45,6 +45,7 @@ var (
 
 	server     *http.Server
 	serverAddr string
+	configFile string
 	apiHandler *api.Handler
 
 	noBrowser *bool
@@ -121,6 +122,7 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Failed to resolve config path: %v", err)
 	}
+	configFile = absPath
 	err = utils.EnsureOnboarded(absPath)
 	if err != nil {
 		logger.Errorf("Warning: Failed to initialize JameClaw config automatically: %v", err)
@@ -196,19 +198,19 @@ func main() {
 	)
 
 	// Print startup banner (only in console mode)
-		if enableConsole {
-			fmt.Print(utils.Banner)
-			fmt.Println()
-			fmt.Println("  Open the following URL in your browser:")
-			fmt.Println()
-			fmt.Printf("    >> %s <<\n", launcherOpenURL(fmt.Sprintf("http://localhost:%s", effectivePort)))
-			if effectivePublic {
-				if ip := utils.GetLocalIP(); ip != "" {
-					fmt.Printf("    >> %s <<\n", launcherOpenURL(fmt.Sprintf("http://%s:%s", ip, effectivePort)))
-				}
+	if enableConsole {
+		fmt.Print(utils.Banner)
+		fmt.Println()
+		fmt.Println("  Open the following URL in your browser:")
+		fmt.Println()
+		fmt.Printf("    >> %s <<\n", launcherOpenURL(fmt.Sprintf("http://localhost:%s", effectivePort)))
+		if effectivePublic {
+			if ip := utils.GetLocalIP(); ip != "" {
+				fmt.Printf("    >> %s <<\n", launcherOpenURL(fmt.Sprintf("http://%s:%s", ip, effectivePort)))
 			}
-			fmt.Println()
 		}
+		fmt.Println()
+	}
 
 	// Log startup info to file
 	logger.InfoC("web", fmt.Sprintf("Server will listen on http://localhost:%s", effectivePort))
