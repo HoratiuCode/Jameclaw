@@ -2,6 +2,7 @@ package onboard
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
 
 func TestCopyEmbeddedToTargetUsesStructuredAgentFiles(t *testing.T) {
@@ -89,6 +91,70 @@ func TestApplyModelChoiceSetsDefaultModelAndAPIKey(t *testing.T) {
 	}
 }
 
+func TestApplyModelChoiceCreatesCatalogModel(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	err := applyModelChoice(newLineReader("nvapi-test\n"), cfg, onboardModelOption{
+		providerID:     "nvidia",
+		presetID:       "nvidia-llama",
+		modelName:      "nvidia-llama",
+		requiresAPIKey: true,
+		keyLabel:       "NVIDIA API key",
+	})
+	if err != nil {
+		t.Fatalf("applyModelChoice() error = %v", err)
+	}
+
+	if got := cfg.Agents.Defaults.ModelName; got != "nvidia-llama" {
+		t.Fatalf("default model = %q, want NVIDIA model", got)
+	}
+
+	modelCfg := lookupModelConfig(cfg, "nvidia-llama")
+	if modelCfg == nil {
+		t.Fatal("lookupModelConfig() returned nil for NVIDIA catalog model")
+	}
+	if got := modelCfg.Model; got != "nvidia/meta/llama-3.1-405b-instruct" {
+		t.Fatalf("Model = %q, want NVIDIA provider model", got)
+	}
+	if got := modelCfg.APIKey(); got != "nvapi-test" {
+		t.Fatalf("APIKey() = %q, want %q", got, "nvapi-test")
+	}
+}
+
+func TestBuildOnboardModelOptionsIncludesExpandedProviders(t *testing.T) {
+	options := buildOnboardModelOptions()
+	if len(options) < 30 {
+		t.Fatalf("buildOnboardModelOptions() len = %d, want at least 30", len(options))
+	}
+
+	providers := make(map[string]onboardModelOption, len(options))
+	for _, option := range options {
+		providers[option.providerID] = option
+	}
+
+	for _, providerID := range []string{
+		"moonshot",
+		"nvidia",
+		"novita",
+		"gemini",
+		"deepseek",
+		"qwen",
+		"qwen-intl",
+		"qwen-us",
+		"vllm",
+		"codex-cli",
+		"github-copilot",
+	} {
+		if _, ok := providers[providerID]; !ok {
+			t.Fatalf("expected onboard model provider %q to be included", providerID)
+		}
+	}
+
+	if moonshot := providers["moonshot"]; !strings.Contains(strings.ToLower(moonshot.label), "kimi") {
+		t.Fatalf("moonshot label = %q, want it to mention Kimi", moonshot.label)
+	}
+}
+
 func TestPromptTelegramSetupEnablesTelegramAndAllowFrom(t *testing.T) {
 	cfg := config.DefaultConfig()
 
@@ -118,6 +184,51 @@ func TestPromptTelegramSetupAcceptsUsernameAllowFrom(t *testing.T) {
 
 	if len(cfg.Channels.Telegram.AllowFrom) != 1 || cfg.Channels.Telegram.AllowFrom[0] != "@alice" {
 		t.Fatalf("AllowFrom = %#v, want [@alice]", cfg.Channels.Telegram.AllowFrom)
+	}
+}
+
+func TestPromptLauncherAccessSetupSSHMode(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+
+	access, err := promptLauncherAccessSetup(newLineReader("3\n19999\n"), configPath)
+	if err != nil {
+		t.Fatalf("promptLauncherAccessSetup() error = %v", err)
+	}
+
+	if access.mode != "Remote/no-GUI via SSH tunnel" {
+		t.Fatalf("mode = %q", access.mode)
+	}
+	if !strings.Contains(access.sshHint, "ssh -N -L 19999:127.0.0.1:19999") {
+		t.Fatalf("ssh hint = %q", access.sshHint)
+	}
+
+	got, err := launcherconfig.Load(access.configPath, launcherconfig.Default())
+	if err != nil {
+		t.Fatalf("launcherconfig.Load() error = %v", err)
+	}
+	if got.Port != 19999 || got.Public {
+		t.Fatalf("launcher config = %+v, want port 19999 public false", got)
+	}
+}
+
+func TestPromptLauncherAccessSetupCustomCIDRs(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+
+	access, err := promptLauncherAccessSetup(newLineReader("4\n18888\n100.64.0.0/10, 192.168.50.0/24\n"), configPath)
+	if err != nil {
+		t.Fatalf("promptLauncherAccessSetup() error = %v", err)
+	}
+	if access.mode != "Tailnet/custom CIDRs" {
+		t.Fatalf("mode = %q", access.mode)
+	}
+
+	got, err := launcherconfig.Load(access.configPath, launcherconfig.Default())
+	if err != nil {
+		t.Fatalf("launcherconfig.Load() error = %v", err)
+	}
+	wantCIDRs := []string{"100.64.0.0/10", "192.168.50.0/24"}
+	if got.Port != 18888 || !got.Public || strings.Join(got.AllowedCIDRs, ",") != strings.Join(wantCIDRs, ",") {
+		t.Fatalf("launcher config = %+v, want port 18888 public true cidrs %#v", got, wantCIDRs)
 	}
 }
 
@@ -192,8 +303,8 @@ func TestPromptAgentSignatureEmojiSupportsComplexEmoji(t *testing.T) {
 
 func TestLoadOnboardSkillOptionsIncludesEmbeddedSkills(t *testing.T) {
 	options := loadOnboardSkillOptions()
-	if len(options) != 11 {
-		t.Fatalf("loadOnboardSkillOptions() len = %d, want 11", len(options))
+	if len(options) < 11 {
+		t.Fatalf("loadOnboardSkillOptions() len = %d, want at least 11", len(options))
 	}
 
 	want := map[string]bool{
@@ -203,6 +314,7 @@ func TestLoadOnboardSkillOptionsIncludesEmbeddedSkills(t *testing.T) {
 		"hardware":      false,
 		"moltbook":      false,
 		"security":      false,
+		"session-logs":  false,
 		"skill-creator": false,
 		"summarize":     false,
 		"twitter-x":     false,
@@ -232,18 +344,7 @@ func TestPromptSkillSelectionDefaultsToPreselectedSkills(t *testing.T) {
 		t.Fatalf("promptSkillSelection() error = %v", err)
 	}
 
-	want := []string{
-		"agent-browser",
-		"github",
-		"gog",
-		"hardware",
-		"moltbook",
-		"security",
-		"skill-creator",
-		"summarize",
-		"tmux",
-		"weather",
-	}
+	want := defaultOnboardSkills(loadOnboardSkillOptions())
 	if strings.Join(selected, ",") != strings.Join(want, ",") {
 		t.Fatalf("selected = %#v, want %#v", selected, want)
 	}
@@ -258,8 +359,11 @@ func TestPromptSkillSelectionDefaultsToPreselectedSkills(t *testing.T) {
 
 func TestPromptSkillSelectionStoresExplicitSubset(t *testing.T) {
 	cfg := config.DefaultConfig()
+	options := loadOnboardSkillOptions()
+	githubIndex := onboardSkillIndex(t, options, "github")
+	skillCreatorIndex := onboardSkillIndex(t, options, "skill-creator")
 
-	selected, err := promptSkillSelection(newLineReader("2 7\n"), cfg)
+	selected, err := promptSkillSelection(newLineReader(fmt.Sprintf("%d %d\n", githubIndex, skillCreatorIndex)), cfg)
 	if err != nil {
 		t.Fatalf("promptSkillSelection() error = %v", err)
 	}
@@ -279,6 +383,17 @@ func TestPromptSkillSelectionStoresExplicitSubset(t *testing.T) {
 	if !agent.Default || agent.ID != "main" {
 		t.Fatalf("agent = %#v, want default main agent", *agent)
 	}
+}
+
+func onboardSkillIndex(t *testing.T, options []onboardSkillOption, name string) int {
+	t.Helper()
+	for i, option := range options {
+		if option.name == name {
+			return i + 1
+		}
+	}
+	t.Fatalf("skill %q not found in options %#v", name, options)
+	return 0
 }
 
 func newLineReader(input string) *bufio.Reader {

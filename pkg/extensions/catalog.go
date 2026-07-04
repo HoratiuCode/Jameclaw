@@ -163,7 +163,7 @@ func providerDescriptors() []ProviderDescriptor {
 		httpProvider("gemini", "Google Gemini", "https://ai.google.dev/", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.0-flash", "gemini/gemini-2.0-flash-exp"),
 		httpProvider("deepseek", "DeepSeek", "https://platform.deepseek.com/", "https://api.deepseek.com/v1", "deepseek-chat", "deepseek/deepseek-chat"),
 		httpProvider("qwen", "Qwen", "https://dashscope.console.aliyun.com/apiKey", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", "qwen/qwen-plus"),
-		httpProvider("moonshot", "Moonshot", "https://platform.moonshot.cn/console/api-keys", "https://api.moonshot.cn/v1", "moonshot-v1-8k", "moonshot/moonshot-v1-8k"),
+		httpProvider("moonshot", "Moonshot / Kimi", "https://platform.moonshot.cn/console/api-keys", "https://api.moonshot.cn/v1", "moonshot-v1-8k", "moonshot/moonshot-v1-8k"),
 		httpProvider("groq", "Groq", "https://console.groq.com/keys", "https://api.groq.com/openai/v1", "llama-3.3-70b", "groq/llama-3.3-70b-versatile"),
 		httpProvider("mistral", "Mistral AI", "https://console.mistral.ai/api-keys", "https://api.mistral.ai/v1", "mistral-large", "mistral/mistral-large-latest"),
 		httpProvider("minimax", "MiniMax", "https://platform.minimaxi.com/", "https://api.minimaxi.com/v1", "minimax-chat", "minimax/MiniMax-M1"),

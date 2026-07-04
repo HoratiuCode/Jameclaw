@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/credential"
 	"github.com/sipeed/jameclaw/pkg/extensions"
+	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
 
 const (
@@ -50,11 +52,15 @@ type onboardModelOption struct {
 }
 
 type onboardSelection struct {
-	modelName       string
-	modelConfigured bool
-	skills          []string
-	signatureEmoji  string
-	telegramEnabled bool
+	modelName          string
+	modelConfigured    bool
+	skills             []string
+	signatureEmoji     string
+	telegramEnabled    bool
+	launcherAccessMode string
+	launcherURL        string
+	launcherConfigPath string
+	sshTunnelHint      string
 }
 
 type onboardSkillOption struct {
@@ -71,7 +77,41 @@ const (
 	agentNameLinePrefix        = "Your name is JameClaw"
 )
 
-var onboardModelProviderOrder = []string{"openai", "anthropic", "openrouter", "ollama"}
+var onboardModelProviderOrder = []string{
+	"openai",
+	"anthropic",
+	"openrouter",
+	"gemini",
+	"moonshot",
+	"nvidia",
+	"novita",
+	"deepseek",
+	"qwen",
+	"qwen-intl",
+	"qwen-us",
+	"groq",
+	"mistral",
+	"minimax",
+	"zhipu",
+	"cerebras",
+	"bedrock",
+	"azure",
+	"volcengine",
+	"coding-plan",
+	"modelscope",
+	"nous",
+	"longcat",
+	"shengsuanyun",
+	"avian",
+	"vivgrid",
+	"litellm",
+	"vllm",
+	"ollama",
+	"claude-cli",
+	"codex-cli",
+	"github-copilot",
+	"antigravity",
+}
 
 func Run(encrypt bool) bool {
 	return onboard(encrypt)
@@ -246,6 +286,23 @@ func renderOnboardSummary(configExists, encrypt bool, configPath, workspace stri
 	}
 	renderOnboardStep(telegramMarker, telegramColor, "Telegram", telegramCopy)
 
+	launcherCopy := "Web console stays on localhost."
+	if selection.launcherAccessMode != "" {
+		launcherCopy = selection.launcherAccessMode
+	}
+	renderOnboardStep("◆", onboardANSIActive, "Web Console Access", launcherCopy)
+	if selection.launcherURL != "" {
+		onboardWriteLine("  %s│%s URL: %s", onboardANSIRail, onboardANSIReset, selection.launcherURL)
+	}
+	if selection.launcherConfigPath != "" {
+		onboardWriteLine("  %s│%s Launcher config: %s", onboardANSIRail, onboardANSIReset, selection.launcherConfigPath)
+	}
+	if selection.sshTunnelHint != "" {
+		for _, line := range strings.Split(selection.sshTunnelHint, "\n") {
+			onboardWriteLine("  %s│%s %s", onboardANSIRail, onboardANSIReset, line)
+		}
+	}
+
 	startCopy := "Run `jameclaw onboard` again after you choose a model."
 	startMarker := "◇"
 	startColor := onboardANSIInactive
@@ -379,6 +436,15 @@ func runOnboardWizard(cfg *config.Config, configExists, encrypt bool, configPath
 		return selection, err
 	}
 	selection.telegramEnabled = cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.Token() != ""
+
+	launcherAccess, err := promptLauncherAccessSetup(reader, configPath)
+	if err != nil {
+		return selection, err
+	}
+	selection.launcherAccessMode = launcherAccess.mode
+	selection.launcherURL = launcherAccess.url
+	selection.launcherConfigPath = launcherAccess.configPath
+	selection.sshTunnelHint = launcherAccess.sshHint
 	return selection, nil
 }
 
@@ -427,6 +493,9 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 
 	renderOnboardStep("◇", onboardANSIInactive, "Telegram", "Optionally connect your Telegram bot right now.")
 	onboardWriteLine("  %s│%s Paste your bot token and optional allowed user ID or username.", onboardANSIRail, onboardANSIReset)
+
+	renderOnboardStep("◇", onboardANSIInactive, "Web Console Access", "Choose localhost, LAN/private network, SSH tunnel, or custom CIDRs.")
+	onboardWriteLine("  %s│%s This writes %s next to config.json.", onboardANSIRail, onboardANSIReset, launcherconfig.FileName)
 	onboardWriteLine("  %s│%s", onboardANSIRail, onboardANSIReset)
 }
 
@@ -571,6 +640,173 @@ func promptTelegramSetup(reader *bufio.Reader, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+type onboardLauncherAccess struct {
+	mode       string
+	url        string
+	configPath string
+	sshHint    string
+}
+
+func promptLauncherAccessSetup(reader *bufio.Reader, appConfigPath string) (onboardLauncherAccess, error) {
+	launcherPath := launcherconfig.PathForAppConfig(appConfigPath)
+	cfg, err := launcherconfig.Load(launcherPath, launcherconfig.Default())
+	if err != nil {
+		return onboardLauncherAccess{}, err
+	}
+
+	onboardWriteLine("")
+	onboardWriteLine("Web Console Access")
+	onboardWriteLine("------------------")
+	onboardWriteLine("1. Local only: http://localhost:%d", cfg.Port)
+	onboardWriteLine("2. LAN/private network: allow RFC1918 private addresses")
+	onboardWriteLine("3. Remote/no-GUI server: keep localhost and use an SSH tunnel")
+	onboardWriteLine("4. Tailnet/custom CIDRs: bind LAN and allow only CIDRs you enter")
+
+	defaultChoice := launcherAccessDefaultChoice(cfg)
+	choice, err := promptLine(reader, fmt.Sprintf("Select access mode [1-4] (default %s)", defaultChoice))
+	if err != nil {
+		return onboardLauncherAccess{}, err
+	}
+	if choice == "" {
+		choice = defaultChoice
+	}
+
+	port, err := promptLauncherPort(reader, cfg.Port)
+	if err != nil {
+		return onboardLauncherAccess{}, err
+	}
+	cfg.Port = port
+
+	access := onboardLauncherAccess{configPath: launcherPath}
+	switch choice {
+	case "1":
+		cfg.Public = false
+		cfg.AllowedCIDRs = nil
+		access.mode = "Local only"
+		access.url = fmt.Sprintf("http://localhost:%d", cfg.Port)
+	case "2":
+		cfg.Public = true
+		cfg.AllowedCIDRs = defaultPrivateCIDRs()
+		access.mode = "LAN/private network"
+		access.url = fmt.Sprintf("http://%s:%d", firstLocalIPv4(), cfg.Port)
+	case "3":
+		cfg.Public = false
+		cfg.AllowedCIDRs = nil
+		access.mode = "Remote/no-GUI via SSH tunnel"
+		access.url = fmt.Sprintf("http://localhost:%d", cfg.Port)
+		access.sshHint = formatOnboardSSHTunnelHint(cfg.Port)
+	case "4":
+		cfg.Public = true
+		cidrs, promptErr := promptAllowedCIDRs(reader, cfg.AllowedCIDRs)
+		if promptErr != nil {
+			return onboardLauncherAccess{}, promptErr
+		}
+		cfg.AllowedCIDRs = cidrs
+		access.mode = "Tailnet/custom CIDRs"
+		access.url = fmt.Sprintf("http://%s:%d", firstLocalIPv4(), cfg.Port)
+	default:
+		return onboardLauncherAccess{}, fmt.Errorf("unknown access mode %q", choice)
+	}
+
+	if err := launcherconfig.Save(launcherPath, cfg); err != nil {
+		return onboardLauncherAccess{}, err
+	}
+	return access, nil
+}
+
+func launcherAccessDefaultChoice(cfg launcherconfig.Config) string {
+	if !cfg.Public {
+		return "1"
+	}
+	if strings.Join(launcherconfig.NormalizeCIDRs(cfg.AllowedCIDRs), ",") == strings.Join(defaultPrivateCIDRs(), ",") {
+		return "2"
+	}
+	return "4"
+}
+
+func promptLauncherPort(reader *bufio.Reader, current int) (int, error) {
+	if current <= 0 {
+		current = launcherconfig.DefaultPort
+	}
+	line, err := promptLine(reader, fmt.Sprintf("Web console port (default %d)", current))
+	if err != nil {
+		return 0, err
+	}
+	if line == "" {
+		return current, nil
+	}
+	var port int
+	if _, scanErr := fmt.Sscanf(line, "%d", &port); scanErr != nil {
+		return 0, fmt.Errorf("invalid port %q", line)
+	}
+	if err := launcherconfig.Validate(launcherconfig.Config{Port: port}); err != nil {
+		return 0, err
+	}
+	return port, nil
+}
+
+func promptAllowedCIDRs(reader *bufio.Reader, current []string) ([]string, error) {
+	defaultCIDRs := launcherconfig.NormalizeCIDRs(current)
+	if len(defaultCIDRs) == 0 {
+		defaultCIDRs = []string{"100.64.0.0/10"}
+	}
+	line, err := promptLine(reader, fmt.Sprintf("Allowed CIDRs, comma-separated (default %s)", strings.Join(defaultCIDRs, ",")))
+	if err != nil {
+		return nil, err
+	}
+	if line == "" {
+		return defaultCIDRs, nil
+	}
+	cidrs := splitCIDRList(line)
+	if err := launcherconfig.Validate(launcherconfig.Config{Port: launcherconfig.DefaultPort, AllowedCIDRs: cidrs}); err != nil {
+		return nil, err
+	}
+	return cidrs, nil
+}
+
+func splitCIDRList(value string) []string {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	})
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if trimmed := strings.TrimSpace(field); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return launcherconfig.NormalizeCIDRs(out)
+}
+
+func defaultPrivateCIDRs() []string {
+	return []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+}
+
+func firstLocalIPv4() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "<lan-ip>"
+	}
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP == nil || ipNet.IP.IsLoopback() {
+			continue
+		}
+		if ip := ipNet.IP.To4(); ip != nil {
+			return ip.String()
+		}
+	}
+	return "<lan-ip>"
+}
+
+func formatOnboardSSHTunnelHint(port int) string {
+	return fmt.Sprintf(
+		"SSH tunnel: ssh -N -L %d:127.0.0.1:%d user@server\nThen open: http://localhost:%d",
+		port,
+		port,
+		port,
+	)
 }
 
 func promptSkillSelection(reader *bufio.Reader, cfg *config.Config) ([]string, error) {
