@@ -121,6 +121,50 @@ func TestApplyModelChoiceCreatesCatalogModel(t *testing.T) {
 	}
 }
 
+func TestApplyModelChoiceAcceptsCodexCLIWithoutAPIKey(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	err := applyModelChoice(newLineReader(""), cfg, onboardModelOption{
+		providerID:     "codex-cli",
+		presetID:       "codex-cli",
+		modelName:      "codex-cli",
+		requiresAPIKey: false,
+		keyLabel:       "API key",
+	})
+	if err != nil {
+		t.Fatalf("applyModelChoice() error = %v", err)
+	}
+
+	if got := cfg.Agents.Defaults.ModelName; got != "codex-cli" {
+		t.Fatalf("default model = %q, want codex-cli", got)
+	}
+	modelCfg := lookupModelConfig(cfg, "codex-cli")
+	if modelCfg == nil {
+		t.Fatal("lookupModelConfig() returned nil for Codex CLI model")
+	}
+	if got := modelCfg.Model; got != "codex-cli/gpt-5.4" {
+		t.Fatalf("Model = %q, want Codex CLI provider model", got)
+	}
+	if !modelReadyForChat(modelCfg) {
+		t.Fatal("modelReadyForChat() = false, want true for Codex CLI without API key")
+	}
+}
+
+func TestModelReadyForChatAcceptsLocalCLIProvidersWithoutAPIKey(t *testing.T) {
+	for _, model := range []string{
+		"ollama/llama3",
+		"vllm/local-model",
+		"claude-cli/sonnet",
+		"codex-cli/gpt-5.4",
+		"github-copilot/default",
+		"antigravity/default",
+	} {
+		if !modelReadyForChat(&config.ModelConfig{ModelName: model, Model: model}) {
+			t.Fatalf("modelReadyForChat(%q) = false, want true", model)
+		}
+	}
+}
+
 func TestBuildOnboardModelOptionsIncludesExpandedProviders(t *testing.T) {
 	options := buildOnboardModelOptions()
 	if len(options) < 30 {

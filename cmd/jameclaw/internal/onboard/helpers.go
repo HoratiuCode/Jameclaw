@@ -471,12 +471,9 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 	}
 	renderOnboardStep("◇", onboardANSIInactive, "Model Setup", modelDescription)
 	modelOptions := buildOnboardModelOptions()
-	for _, option := range modelOptions {
-		onboardWriteLine("  %s│%s %s.%s %s", onboardANSIRail, onboardANSIReset, option.key, onboardANSIReset, option.label)
-		onboardWriteLine("  %s│%s %s%s%s", onboardANSIRail, onboardANSIReset, onboardANSIDim, option.description, onboardANSIReset)
-	}
-	onboardWriteLine("  %s│%s %d. Skip for now", onboardANSIRail, onboardANSIReset, len(modelOptions)+1)
-	onboardWriteLine("  %s│%s %sKeep the current config and finish later.%s", onboardANSIRail, onboardANSIReset, onboardANSIDim, onboardANSIReset)
+	onboardWriteLine("  %s│%s • Open the model picker to choose from %d providers.", onboardANSIRail, onboardANSIReset, len(modelOptions))
+	onboardWriteLine("  %s│%s • After selecting a provider, paste its API key when prompted.", onboardANSIRail, onboardANSIReset)
+	onboardWriteLine("  %s│%s • Local/CLI providers can be selected without an API key.", onboardANSIRail, onboardANSIReset)
 
 	skillOptions := loadOnboardSkillOptions()
 	skillSummary := "Choose which builtin skills the default agent should load."
@@ -501,6 +498,9 @@ func renderOnboardWizard(configExists, encrypt bool, configPath, workspace strin
 
 func promptModelChoice(reader *bufio.Reader, cfg *config.Config) (*onboardModelOption, error) {
 	options := buildOnboardModelOptions()
+	if len(options) == 0 {
+		return nil, nil
+	}
 	skipChoice := fmt.Sprintf("%d", len(options)+1)
 	defaultChoice := skipChoice
 	current := lookupModelConfig(cfg, cfg.Agents.Defaults.ModelName)
@@ -512,6 +512,25 @@ func promptModelChoice(reader *bufio.Reader, cfg *config.Config) (*onboardModelO
 			}
 		}
 	}
+
+	if file, ok := onboardInput.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		option, err := promptModelChoiceTUI(options, defaultChoice)
+		if err == nil {
+			return option, nil
+		}
+		onboardWriteLine("")
+		onboardWriteLine("Model picker unavailable (%v). Falling back to numbered selection.", err)
+	}
+
+	onboardWriteLine("")
+	onboardWriteLine("Models")
+	onboardWriteLine("------")
+	onboardWriteLine("Select the default model provider. API keys are requested after selection.")
+	for _, option := range options {
+		onboardWriteLine("%s. %s", option.key, option.label)
+		onboardWriteLine("   %s", option.description)
+	}
+	onboardWriteLine("%s. Skip for now", skipChoice)
 
 	line, err := promptLine(reader, fmt.Sprintf("Select model [1-%d] (default %s)", len(options)+1, defaultChoice))
 	if err != nil {
@@ -947,10 +966,19 @@ func modelReadyForChat(modelCfg *config.ModelConfig) bool {
 	if modelCfg == nil {
 		return false
 	}
-	if strings.HasPrefix(modelCfg.Model, "ollama/") {
+	switch modelProtocol(modelCfg.Model) {
+	case "ollama", "vllm", "claude-cli", "claudecli", "codex-cli", "codexcli", "github-copilot", "copilot", "antigravity":
 		return true
 	}
 	return modelCfg.APIKey() != ""
+}
+
+func modelProtocol(model string) string {
+	protocol, _, ok := strings.Cut(strings.ToLower(strings.TrimSpace(model)), "/")
+	if !ok {
+		return strings.ToLower(strings.TrimSpace(model))
+	}
+	return protocol
 }
 
 func lookupModelConfig(cfg *config.Config, modelName string) *config.ModelConfig {
@@ -1086,6 +1114,105 @@ func splitEmbeddedFrontmatter(content string) (frontmatter, body string) {
 		}
 	}
 	return "", content
+}
+
+func promptModelChoiceTUI(options []onboardModelOption, defaultChoice string) (*onboardModelOption, error) {
+	app := tview.NewApplication()
+	table := tview.NewTable().
+		SetSelectable(true, false).
+		SetBorders(false)
+	description := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true)
+	help := tview.NewTextView().
+		SetTextAlign(tview.AlignCenter).
+		SetDynamicColors(true).
+		SetText("[::b]Enter[::-] select  [::b]Esc[::-] skip")
+
+	defaultRow := 0
+	for idx, option := range options {
+		if option.key == defaultChoice {
+			defaultRow = idx
+			break
+		}
+	}
+
+	refreshDescription := func(row int) {
+		if row < 0 || row >= len(options) {
+			return
+		}
+		option := options[row]
+		keyCopy := "No API key required."
+		if option.requiresAPIKey {
+			keyCopy = fmt.Sprintf("%s required after selection.", option.keyLabel)
+		}
+		description.SetText(fmt.Sprintf(
+			"[::b]%s[::-]\n\n%s\n\nModel alias: %s\nProvider: %s/%s\n%s",
+			option.label,
+			option.description,
+			option.modelName,
+			option.providerID,
+			option.presetID,
+			keyCopy,
+		))
+	}
+
+	for row, option := range options {
+		marker := " "
+		markerColor := tcell.ColorSilver
+		if option.key == defaultChoice {
+			marker = "•"
+			markerColor = onboardTUISelectedSkillColor
+		}
+		table.SetCell(row, 0, tview.NewTableCell(marker).
+			SetAlign(tview.AlignCenter).
+			SetTextColor(markerColor))
+		table.SetCell(row, 1, tview.NewTableCell(option.key+".").
+			SetAlign(tview.AlignRight).
+			SetTextColor(tcell.ColorSilver))
+		table.SetCell(row, 2, tview.NewTableCell(option.label).
+			SetExpansion(2))
+		table.SetCell(row, 3, tview.NewTableCell(option.description).
+			SetExpansion(3).
+			SetTextColor(tcell.ColorSilver))
+	}
+	table.Select(defaultRow, 0)
+	refreshDescription(defaultRow)
+
+	var result *onboardModelOption
+	table.SetSelectedFunc(func(row, column int) {
+		if row < 0 || row >= len(options) {
+			return
+		}
+		selected := options[row]
+		result = &selected
+		app.Stop()
+	})
+	table.SetSelectionChangedFunc(func(row, column int) {
+		refreshDescription(row)
+	})
+	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			app.Stop()
+			return nil
+		}
+		return event
+	})
+
+	layout := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(tview.NewTextView().
+			SetDynamicColors(true).
+			SetText("[::b]Models🦐[::-]\nSelect the default model provider. API key setup opens after selection."), 2, 0, false).
+		AddItem(tview.NewFlex().
+			AddItem(table, 0, 3, true).
+			AddItem(description, 0, 2, false), 0, 1, true).
+		AddItem(help, 1, 0, false)
+
+	if err := app.SetRoot(layout, true).EnableMouse(false).Run(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func promptSkillSelectionTUI(options []onboardSkillOption, defaultSelected []string) ([]string, error) {
