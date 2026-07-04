@@ -576,3 +576,5 @@ For detailed guides beyond this README:
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
 | [Tools Configuration](docs/tools_configuration.md) | Per-tool enable/disable, exec policies, MCP, Skills |
 | [Hardware Compatibility](docs/hardware-compatibility.md) | Tested boards, minimum requirements |
+
+Built with Claude
