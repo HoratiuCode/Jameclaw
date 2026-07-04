@@ -126,7 +126,7 @@ func TestSpawnStatusTool_ListAll(t *testing.T) {
 	}
 
 	// Status values
-	for _, status := range []string{"running", "completed", "failed"} {
+	for _, status := range []string{"running", "succeeded", "failed"} {
 		if !strings.Contains(result.ForLLM, status) {
 			t.Errorf("Expected status '%s' in output, got:\n%s", status, result.ForLLM)
 		}
@@ -135,6 +135,45 @@ func TestSpawnStatusTool_ListAll(t *testing.T) {
 	// Result content
 	if !strings.Contains(result.ForLLM, "Done successfully") {
 		t.Errorf("Expected result text in output, got:\n%s", result.ForLLM)
+	}
+}
+
+func TestSpawnStatusTool_OpenClawStyleLifecycleFields(t *testing.T) {
+	provider := &MockLLMProvider{}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test")
+	now := time.Now().UnixMilli()
+
+	manager.mu.Lock()
+	manager.tasks["subagent-99"] = &SubagentTask{
+		ID:              "subagent-99",
+		Task:            "Do real background work",
+		Label:           "real-agent",
+		Status:          SubagentStatusSucceeded,
+		Result:          "raw result",
+		TerminalSummary: "ready for parent review",
+		DeliveryStatus:  "pending",
+		Created:         now,
+		Started:         now + 1,
+		Ended:           now + 2,
+	}
+	manager.mu.Unlock()
+
+	tool := NewSpawnStatusTool(manager)
+	result := tool.Execute(context.Background(), map[string]any{"task_id": "subagent-99"})
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+	for _, want := range []string{
+		"status=succeeded",
+		"delivery=pending",
+		"started=",
+		"ended=",
+		"ready for parent review",
+		"terminal: true",
+	} {
+		if !strings.Contains(result.ForLLM, want) {
+			t.Fatalf("expected %q in output:\n%s", want, result.ForLLM)
+		}
 	}
 }
 
@@ -281,7 +320,7 @@ func TestSpawnStatusTool_StatusCounts(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", result.ForLLM)
 	}
 	// The summary line should mention all statuses that have counts
-	for _, want := range []string{"Running:", "Completed:", "Failed:", "Canceled:"} {
+	for _, want := range []string{"Running:", "Succeeded:", "Failed:", "Cancelled:"} {
 		if !strings.Contains(result.ForLLM, want) {
 			t.Errorf("Expected %q in summary, got:\n%s", want, result.ForLLM)
 		}

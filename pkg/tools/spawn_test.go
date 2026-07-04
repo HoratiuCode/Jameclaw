@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -79,6 +80,50 @@ func TestSpawnTool_Execute_ValidTask(t *testing.T) {
 	}
 	if !result.Async {
 		t.Error("SpawnTool should return async result")
+	}
+}
+
+func TestSubagentManager_SpawnTracksOpenClawStyleLifecycle(t *testing.T) {
+	provider := &MockLLMProvider{}
+	manager := NewSubagentManager(provider, "test-model", t.TempDir())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	manager.SetSpawner(func(
+		ctx context.Context,
+		task, label, agentID string,
+		tools *ToolRegistry,
+		maxTokens int,
+		temperature float64,
+		hasMaxTokens, hasTemperature bool,
+	) (*ToolResult, error) {
+		defer wg.Done()
+		return NewToolResult("done: " + task), nil
+	})
+
+	msg, err := manager.Spawn(context.Background(), "check status", "status-check", "", "telegram", "chat-1", nil)
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+	if !strings.Contains(msg, "subagent-1") {
+		t.Fatalf("spawn acknowledgement should include task id, got %q", msg)
+	}
+
+	wg.Wait()
+	task, ok := manager.GetTaskCopy("subagent-1")
+	if !ok {
+		t.Fatal("expected task subagent-1")
+	}
+	if task.Status != SubagentStatusSucceeded {
+		t.Fatalf("status = %q, want %q", task.Status, SubagentStatusSucceeded)
+	}
+	if task.Created == 0 || task.Started == 0 || task.Ended == 0 {
+		t.Fatalf("expected created/started/ended timestamps, got %+v", task)
+	}
+	if task.DeliveryStatus != "pending" {
+		t.Fatalf("delivery status = %q, want pending", task.DeliveryStatus)
+	}
+	if !strings.Contains(task.TerminalSummary, "done: check status") {
+		t.Fatalf("terminal summary = %q", task.TerminalSummary)
 	}
 }
 

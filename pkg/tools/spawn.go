@@ -7,6 +7,7 @@ import (
 )
 
 type SpawnTool struct {
+	manager        *SubagentManager
 	spawner        SubTurnSpawner
 	defaultModel   string
 	maxTokens      int
@@ -22,6 +23,7 @@ func NewSpawnTool(manager *SubagentManager) *SpawnTool {
 		return &SpawnTool{}
 	}
 	return &SpawnTool{
+		manager:      manager,
 		defaultModel: manager.defaultModel,
 		maxTokens:    manager.maxTokens,
 		temperature:  manager.temperature,
@@ -119,6 +121,22 @@ Task: %s`,
 	}
 
 	// Use spawner if available (direct SpawnSubTurn call)
+	if t.manager != nil && t.manager.HasSpawner() {
+		message, err := t.manager.Spawn(
+			ctx,
+			task,
+			label,
+			agentID,
+			ToolChannel(ctx),
+			ToolChatID(ctx),
+			cb,
+		)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("Spawn failed: %v", err)).WithError(err)
+		}
+		return AsyncResult(message)
+	}
+
 	if t.spawner != nil {
 		// Launch async sub-turn in goroutine
 		go func() {

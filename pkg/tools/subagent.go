@@ -33,15 +33,20 @@ type SubTurnConfig struct {
 }
 
 type SubagentTask struct {
-	ID            string
-	Task          string
-	Label         string
-	AgentID       string
-	OriginChannel string
-	OriginChatID  string
-	Status        string
-	Result        string
-	Created       int64
+	ID              string
+	Task            string
+	Label           string
+	AgentID         string
+	OriginChannel   string
+	OriginChatID    string
+	Status          string
+	Result          string
+	Created         int64
+	Started         int64
+	Ended           int64
+	Error           string
+	DeliveryStatus  string
+	TerminalSummary string
 }
 
 type SpawnSubTurnFunc func(
@@ -90,6 +95,12 @@ func (sm *SubagentManager) SetSpawner(spawner SpawnSubTurnFunc) {
 	sm.spawner = spawner
 }
 
+func (sm *SubagentManager) HasSpawner() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.spawner != nil
+}
+
 // SetLLMOptions sets max tokens and temperature for subagent LLM calls.
 func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.mu.Lock()
@@ -127,14 +138,15 @@ func (sm *SubagentManager) Spawn(
 	sm.nextID++
 
 	subagentTask := &SubagentTask{
-		ID:            taskID,
-		Task:          task,
-		Label:         label,
-		AgentID:       agentID,
-		OriginChannel: originChannel,
-		OriginChatID:  originChatID,
-		Status:        "running",
-		Created:       time.Now().UnixMilli(),
+		ID:             taskID,
+		Task:           task,
+		Label:          label,
+		AgentID:        agentID,
+		OriginChannel:  originChannel,
+		OriginChatID:   originChatID,
+		Status:         "queued",
+		Created:        time.Now().UnixMilli(),
+		DeliveryStatus: "pending",
 	}
 	sm.tasks[taskID] = subagentTask
 
@@ -142,9 +154,9 @@ func (sm *SubagentManager) Spawn(
 	go sm.runTask(ctx, subagentTask, callback)
 
 	if label != "" {
-		return fmt.Sprintf("Spawned subagent '%s' for task: %s", label, task), nil
+		return fmt.Sprintf("Spawned subagent '%s' as %s for task: %s", label, taskID, task), nil
 	}
-	return fmt.Sprintf("Spawned subagent for task: %s", task), nil
+	return fmt.Sprintf("Spawned subagent %s for task: %s", taskID, task), nil
 }
 
 func (sm *SubagentManager) runTask(
@@ -152,8 +164,13 @@ func (sm *SubagentManager) runTask(
 	task *SubagentTask,
 	callback AsyncCallback,
 ) {
+	sm.mu.Lock()
 	task.Status = "running"
-	task.Created = time.Now().UnixMilli()
+	task.Started = time.Now().UnixMilli()
+	if task.Created == 0 {
+		task.Created = task.Started
+	}
+	sm.mu.Unlock()
 	// TODO(eventbus): once subagents are modeled as child turns inside
 	// pkg/agent, emit SubTurnEnd and SubTurnResultDelivered from the parent
 	// AgentLoop instead of this legacy manager.
@@ -162,8 +179,11 @@ func (sm *SubagentManager) runTask(
 	select {
 	case <-ctx.Done():
 		sm.mu.Lock()
-		task.Status = "canceled"
+		task.Status = "cancelled"
 		task.Result = "Task canceled before execution"
+		task.Error = ctx.Err().Error()
+		task.TerminalSummary = task.Result
+		task.Ended = time.Now().UnixMilli()
 		sm.mu.Unlock()
 		return
 	default:
@@ -253,11 +273,14 @@ After completing the task, provide a clear summary of what was done.`
 	if err != nil {
 		task.Status = "failed"
 		task.Result = fmt.Sprintf("Error: %v", err)
+		task.Error = err.Error()
 		// Check if it was canceled
 		if ctx.Err() != nil {
-			task.Status = "canceled"
+			task.Status = "cancelled"
 			task.Result = "Task canceled during execution"
+			task.Error = ctx.Err().Error()
 		}
+		task.TerminalSummary = task.Result
 		result = &ToolResult{
 			ForLLM:  task.Result,
 			ForUser: "",
@@ -267,9 +290,11 @@ After completing the task, provide a clear summary of what was done.`
 			Err:     err,
 		}
 	} else {
-		task.Status = "completed"
+		task.Status = "succeeded"
 		task.Result = result.ForLLM
+		task.TerminalSummary = result.ForLLM
 	}
+	task.Ended = time.Now().UnixMilli()
 }
 
 func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {

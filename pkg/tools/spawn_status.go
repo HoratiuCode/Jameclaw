@@ -27,7 +27,7 @@ func (t *SpawnStatusTool) Name() string {
 func (t *SpawnStatusTool) Description() string {
 	return "Get the status of spawned subagents. " +
 		"Returns a list of all subagents and their current state " +
-		"(running, completed, failed, or canceled), or retrieves details " +
+		"(queued, running, succeeded, failed, timed_out, cancelled, or lost), or retrieves details " +
 		"for a specific subagent task when task_id is provided. " +
 		"Results are scoped to the current conversation's channel and chat ID; " +
 		"all tasks are listed only when no channel/chat context is injected " +
@@ -123,12 +123,20 @@ func (t *SpawnStatusTool) Execute(ctx context.Context, args map[string]any) *Too
 
 	counts := map[string]int{}
 	for _, task := range tasks {
-		counts[task.Status]++
+		counts[normalizeSubagentStatus(task.Status)]++
 	}
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Subagent status report (%d total):\n", len(tasks)))
-	for _, status := range []string{"running", "completed", "failed", "canceled"} {
+	for _, status := range []string{
+		SubagentStatusQueued,
+		SubagentStatusRunning,
+		SubagentStatusSucceeded,
+		SubagentStatusFailed,
+		SubagentStatusTimedOut,
+		SubagentStatusCancelled,
+		SubagentStatusLost,
+	} {
 		if n := counts[status]; n > 0 {
 			label := strings.ToUpper(status[:1]) + status[1:] + ":"
 			sb.WriteString(fmt.Sprintf("  %-10s %d\n", label, n))
@@ -148,30 +156,51 @@ func (t *SpawnStatusTool) Execute(ctx context.Context, args map[string]any) *Too
 func spawnStatusFormatTask(task *SubagentTask) string {
 	var sb strings.Builder
 
-	header := fmt.Sprintf("[%s] status=%s", task.ID, task.Status)
+	status := normalizeSubagentStatus(task.Status)
+	header := fmt.Sprintf("[%s] status=%s", task.ID, status)
 	if task.Label != "" {
 		header += fmt.Sprintf("  label=%q", task.Label)
 	}
 	if task.AgentID != "" {
 		header += fmt.Sprintf("  agent=%s", task.AgentID)
 	}
+	if task.DeliveryStatus != "" {
+		header += fmt.Sprintf("  delivery=%s", task.DeliveryStatus)
+	}
 	if task.Created > 0 {
 		created := time.UnixMilli(task.Created).UTC().Format("2006-01-02 15:04:05 UTC")
 		header += fmt.Sprintf("  created=%s", created)
+	}
+	if task.Started > 0 {
+		started := time.UnixMilli(task.Started).UTC().Format("2006-01-02 15:04:05 UTC")
+		header += fmt.Sprintf("  started=%s", started)
+	}
+	if task.Ended > 0 {
+		ended := time.UnixMilli(task.Ended).UTC().Format("2006-01-02 15:04:05 UTC")
+		header += fmt.Sprintf("  ended=%s", ended)
 	}
 	sb.WriteString(header)
 
 	if task.Task != "" {
 		sb.WriteString(fmt.Sprintf("\n  task:   %s", task.Task))
 	}
-	if task.Result != "" {
-		result := task.Result
+	result := task.Result
+	if task.TerminalSummary != "" {
+		result = task.TerminalSummary
+	}
+	if result != "" {
 		const maxResultLen = 300
 		runes := []rune(result)
 		if len(runes) > maxResultLen {
 			result = string(runes[:maxResultLen]) + "…"
 		}
 		sb.WriteString(fmt.Sprintf("\n  result: %s", result))
+	}
+	if task.Error != "" {
+		sb.WriteString(fmt.Sprintf("\n  error:  %s", task.Error))
+	}
+	if isTerminalSubagentStatus(status) {
+		sb.WriteString("\n  terminal: true")
 	}
 
 	return sb.String()
