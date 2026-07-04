@@ -1,7 +1,7 @@
 <div align="center">
 <img src="assets/logo.png" alt="JameClaw" width="512">
 
-<h1>JameClaw: Local-First AI Assistant in Go</h1>
+<h1>Your AI agent for fancy jobs</h1>
 
 <h3>Web Console · TUI Launcher · Multi-Channel Gateway</h3>
   <p>
