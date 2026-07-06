@@ -27,9 +27,10 @@ func onReady() {
 
 	// Create menu items
 	mOpen := systray.AddMenuItem(T(MenuOpen), T(MenuOpenTooltip))
+	mConsole := mOpen.AddSubMenuItem(T(MenuConsole), T(MenuConsoleTooltip))
 	var terminalClicked <-chan struct{}
 	if runtime.GOOS == "darwin" {
-		mTerminalChat := systray.AddMenuItem(T(MenuTerminalChat), T(MenuTerminalTooltip))
+		mTerminalChat := mOpen.AddSubMenuItem(T(MenuTerminalChat), T(MenuTerminalTooltip))
 		terminalClicked = mTerminalChat.ClickedCh
 	}
 	mAbout := systray.AddMenuItem(T(MenuAbout), T(MenuAboutTooltip))
@@ -54,7 +55,7 @@ func onReady() {
 	go func() {
 		for {
 			select {
-			case <-mOpen.ClickedCh:
+			case <-mConsole.ClickedCh:
 				if err := openBrowser(); err != nil {
 					logger.Errorf("Failed to open browser: %v", err)
 				}

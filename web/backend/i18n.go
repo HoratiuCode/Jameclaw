@@ -24,6 +24,8 @@ const (
 	AppTooltip          TranslationKey = "AppTooltip"
 	MenuOpen            TranslationKey = "MenuOpen"
 	MenuOpenTooltip     TranslationKey = "MenuOpenTooltip"
+	MenuConsole         TranslationKey = "MenuConsole"
+	MenuConsoleTooltip  TranslationKey = "MenuConsoleTooltip"
 	MenuTerminalChat    TranslationKey = "MenuTerminalChat"
 	MenuTerminalTooltip TranslationKey = "MenuTerminalTooltip"
 	MenuAbout           TranslationKey = "MenuAbout"
@@ -44,9 +46,11 @@ const (
 var translations = map[Language]map[TranslationKey]string{
 	LanguageEnglish: {
 		AppTooltip:          "%s - Web Console",
-		MenuOpen:            "Open Console",
-		MenuOpenTooltip:     "Open JameClaw console in browser",
-		MenuTerminalChat:    "Open Terminal",
+		MenuOpen:            "Open",
+		MenuOpenTooltip:     "Open JameClaw",
+		MenuConsole:         "Console",
+		MenuConsoleTooltip:  "Open JameClaw console in browser",
+		MenuTerminalChat:    "Terminal",
 		MenuTerminalTooltip: "Open JameClaw agent chat in Terminal",
 		MenuAbout:           "About",
 		MenuAboutTooltip:    "About JameClaw",
@@ -63,9 +67,11 @@ var translations = map[Language]map[TranslationKey]string{
 	},
 	LanguageChinese: {
 		AppTooltip:          "%s - Web Console",
-		MenuOpen:            "Open Console",
-		MenuOpenTooltip:     "Open JameClaw console in browser",
-		MenuTerminalChat:    "Open Terminal",
+		MenuOpen:            "Open",
+		MenuOpenTooltip:     "Open JameClaw",
+		MenuConsole:         "Console",
+		MenuConsoleTooltip:  "Open JameClaw console in browser",
+		MenuTerminalChat:    "Terminal",
 		MenuTerminalTooltip: "Open JameClaw agent chat in Terminal",
 		MenuAbout:           "About",
 		MenuAboutTooltip:    "About JameClaw",
