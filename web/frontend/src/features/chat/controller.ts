@@ -1,7 +1,7 @@
 import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
-import { getJameToken } from "@/api/jame"
+import { setupJame } from "@/api/jame"
 import {
   loadSessionMessages,
   mergeHistoryMessages,
@@ -194,7 +194,7 @@ export async function connectChat() {
   }))
 
   try {
-    const { token, ws_url } = await getJameToken()
+    const { token, ws_url } = await setupJame()
     const sessionId = activeSessionIdRef
 
     if (generation !== connectionGeneration) {

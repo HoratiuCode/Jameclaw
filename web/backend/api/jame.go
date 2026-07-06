@@ -164,6 +164,14 @@ func (h *Handler) handleJameSetup(w http.ResponseWriter, r *http.Request) {
 		"enabled": true,
 		"changed": changed,
 	})
+
+	if changed {
+		go func() {
+			if _, err := h.RestartGateway(); err != nil {
+				h.TryAutoStartGateway()
+			}
+		}()
+	}
 }
 
 func (h *Handler) handleExtensionBootstrapOptions(w http.ResponseWriter, r *http.Request) {

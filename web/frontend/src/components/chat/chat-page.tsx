@@ -47,9 +47,7 @@ export function ChatPage() {
     handleSetDefault,
   } = useChatModels({ isConnected: isGatewayRunning })
   const canSend =
-    isGatewayRunning &&
-    connectionState === "connected" &&
-    Boolean(defaultModelName)
+    isGatewayRunning && Boolean(defaultModelName)
   const gatewayStopHint =
     gwState === "running" && !owned
       ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}. Use Stop in the top bar or run ${pid ? `kill ${pid} then kill -9 ${pid}` : "pkill -f 'jameclaw gateway'"}.`
@@ -62,22 +60,18 @@ export function ChatPage() {
         ? gatewayStopHint
         : !isGatewayRunning
           ? "The gateway is not running."
-          : connectionState === "offline"
-            ? (errorMessage ??
-              "Your phone is offline. JameClaw will reconnect when the network returns.")
-            : connectionState === "reconnecting"
-              ? (errorMessage ?? "Reconnecting to JameClaw...")
-              : connectionState === "connecting"
-                ? "Connecting the Web Console to JameClaw..."
-                : connectionState === "error"
-                  ? (errorMessage ??
-                    "The Web Console could not connect to JameClaw.")
-                  : null
+          : connectionState === "error"
+            ? (errorMessage ?? "The Web Console could not connect to JameClaw.")
+            : null
   const connectionNotice =
-    isGatewayRunning &&
-    (connectionState === "offline" || connectionState === "reconnecting")
-      ? disabledReason
-      : null
+    isGatewayRunning && connectionState === "offline"
+      ? (errorMessage ??
+        "Your phone is offline. JameClaw will reconnect when the network returns.")
+      : isGatewayRunning && connectionState === "reconnecting"
+        ? (errorMessage ?? "Reconnecting to JameClaw...")
+        : isGatewayRunning && connectionState === "connecting"
+          ? "Connecting the Web Console to JameClaw..."
+          : null
 
   const {
     sessions,
@@ -218,7 +212,7 @@ export function ChatPage() {
         onInputChange={setInput}
         onSend={handleSend}
         disabledReason={disabledReason}
-        isConnected={canSend}
+        isConnected={isGatewayRunning}
         hasDefaultModel={Boolean(defaultModelName)}
       />
     </div>

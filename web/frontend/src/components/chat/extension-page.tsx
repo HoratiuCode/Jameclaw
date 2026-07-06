@@ -53,10 +53,6 @@ export function ExtensionPage() {
   const { state: gwState, canStart, startReason, pid, owned } = useGateway()
   const isGatewayRunning = gwState === "running"
   const { defaultModelName } = useChatModels({ isConnected: isGatewayRunning })
-  const canSend =
-    isGatewayRunning &&
-    connectionState === "connected" &&
-    Boolean(defaultModelName)
 
   const disabledReason = !defaultModelName
     ? "Choose a default model in JameClaw before sending messages."
@@ -66,22 +62,18 @@ export function ExtensionPage() {
         ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}.`
         : !isGatewayRunning
           ? "The gateway is not running."
-          : connectionState === "offline"
-            ? (errorMessage ??
-              "Your phone is offline. JameClaw will reconnect when the network returns.")
-            : connectionState === "reconnecting"
-              ? (errorMessage ?? "Reconnecting to JameClaw...")
-              : connectionState === "connecting"
-                ? "Connecting to JameClaw..."
-                : connectionState === "error"
-                  ? (errorMessage ??
-                    "Could not connect to the Jame chat session.")
-                  : null
+          : connectionState === "error"
+            ? (errorMessage ?? "Could not connect to the Jame chat session.")
+            : null
   const connectionNotice =
-    isGatewayRunning &&
-    (connectionState === "offline" || connectionState === "reconnecting")
-      ? disabledReason
-      : null
+    isGatewayRunning && connectionState === "offline"
+      ? (errorMessage ??
+        "Your phone is offline. JameClaw will reconnect when the network returns.")
+      : isGatewayRunning && connectionState === "reconnecting"
+        ? (errorMessage ?? "Reconnecting to JameClaw...")
+        : isGatewayRunning && connectionState === "connecting"
+          ? "Connecting to JameClaw..."
+          : null
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
@@ -169,7 +161,7 @@ export function ExtensionPage() {
         onInputChange={setInput}
         onSend={handleSend}
         disabledReason={disabledReason}
-        isConnected={canSend}
+        isConnected={isGatewayRunning}
         hasDefaultModel={Boolean(defaultModelName)}
       />
       <Toaster position="bottom-center" />
