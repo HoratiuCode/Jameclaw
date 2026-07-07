@@ -426,6 +426,18 @@ export async function hydrateActiveSession() {
 }
 
 export function sendChatMessage(content: string) {
+  const command = normalizeLocalChatCommand(content)
+  if (command === "new") {
+    void newChatSession({ force: true })
+    toast.success(i18n.t("chat.newChatStarted"))
+    return true
+  }
+  if (command === "reset") {
+    void newChatSession({ force: true })
+    toast.success(i18n.t("chat.chatReset"))
+    return true
+  }
+
   const id = `msg-${++msgIdCounter}-${Date.now()}`
   const sessionId = activeSessionIdRef
 
@@ -523,8 +535,19 @@ export async function switchChatSession(sessionId: string) {
   }
 }
 
-export async function newChatSession() {
-  if (getChatState().messages.length === 0) {
+function normalizeLocalChatCommand(content: string): "new" | "reset" | null {
+  const normalized = content.trim().toLowerCase()
+  if (normalized === "/new" || normalized === "/new chat") {
+    return "new"
+  }
+  if (normalized === "/reset") {
+    return "reset"
+  }
+  return null
+}
+
+export async function newChatSession(options: { force?: boolean } = {}) {
+  if (!options.force && getChatState().messages.length === 0) {
     return
   }
 

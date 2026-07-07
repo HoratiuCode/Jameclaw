@@ -144,7 +144,9 @@ export function ChatPage() {
         <Button
           variant="secondary"
           size="sm"
-          onClick={newChat}
+          onClick={() => {
+            void newChat()
+          }}
           className="h-9 gap-2"
         >
           <IconPlus className="size-4" />

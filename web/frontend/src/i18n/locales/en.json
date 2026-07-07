@@ -19,6 +19,8 @@
     "welcomeDesc": "Start with one of the prompt ideas on the right, or type your own request below.",
     "placeholder": "Start a new message...\nPress Enter to send, Shift + Enter for a new line",
     "newChat": "New Chat",
+    "newChatStarted": "Started a new chat.",
+    "chatReset": "Chat reset.",
     "notConnected": "Gateway is not running. Start it to chat.",
     "thinking": {
       "step1": "Thinking...",

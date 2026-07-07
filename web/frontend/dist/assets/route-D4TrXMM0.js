@@ -1,0 +1,1 @@
+import{U as e,j as a,Y as n,V as s}from"./index-BlI51i-f.js";function r(){return e({select:t=>t.location.pathname})==="/channels"?a.jsx(n,{to:"/channels/$name",params:{name:"telegram"}}):a.jsx(s,{})}export{r as component};

@@ -29,6 +29,7 @@ import (
 	"github.com/sipeed/jameclaw/pkg/extensions"
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/sipeed/jameclaw/pkg/skills"
 	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
 
@@ -207,10 +208,18 @@ func (t *terminalChat) submit() {
 			t.mu.Unlock()
 			t.addSystem(fmt.Sprintf("Queued for next turn (%d pending).", depth))
 			t.setActivity("queued follow-up")
+		} else if t.currentBusyMode() == "interrupt" {
+			_ = t.loop.InterruptGraceful("User redirected the active turn. Stop safely and continue with the latest instruction.")
+			t.mu.Lock()
+			t.pendingInputs = append(t.pendingInputs, text)
+			depth := len(t.pendingInputs)
+			t.mu.Unlock()
+			t.addSystem(fmt.Sprintf("Interrupted current turn and queued redirect (%d pending).", depth))
+			t.setActivity("interrupt queued")
 		} else if err := t.loop.Steer(providers.Message{Role: "user", Content: text}); err != nil {
 			t.addSystem("Unable to queue message: " + err.Error())
 		} else {
-			t.setActivity("interrupt queued")
+			t.setActivity("steering active turn")
 		}
 		return
 	}
@@ -350,7 +359,7 @@ func (t *terminalChat) openModelPicker() {
 			Main:      label,
 			Secondary: secondary,
 			Action: func() {
-				t.runAgentCommand("/switch model to " + name)
+				t.switchDefaultModel(name)
 			},
 		})
 	}
@@ -379,6 +388,240 @@ func (t *terminalChat) runAgentCommand(text string) {
 			t.refreshAll()
 		}
 	}()
+}
+
+func terminalHelpText() string {
+	return "Local TUI commands: /help, /commands, /model [name], /models, /new, /reset, /retry, /undo, /compress, /usage, /skills, /personality [text], /busy interrupt|queue|steer|status, /steer <prompt>, /stop, /sessions, /settings, /gateway-status, /auth [provider], /webui, /background <prompt>, /allow-computer-search on|off, /computer-search <query> [path], /clear, /status, /quit. Shortcuts: Enter/Ctrl-S send, Ctrl-J newline, Tab complete, Ctrl-C clear/warn/exit, Ctrl-X hard abort, Ctrl-G graceful stop, Ctrl-T reasoning, Ctrl-R reload history, Ctrl-L clear view, Ctrl-D exit."
+}
+
+func (t *terminalChat) switchDefaultModel(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		t.openModelPicker()
+		return
+	}
+	cfg, err := internal.LoadConfig()
+	if err != nil {
+		t.addSystem("Unable to load config: " + err.Error())
+		return
+	}
+	found := false
+	for _, model := range cfg.ModelList {
+		if model != nil && model.ModelName == name && model.APIKey() != "" {
+			found = true
+			break
+		}
+	}
+	if !found && name != "local-model" {
+		t.addSystem("Unknown configured model: " + name + ". Use /models to pick from configured models.")
+		return
+	}
+	old := cfg.Agents.Defaults.ModelName
+	cfg.Agents.Defaults.ModelName = name
+	if err := config.SaveConfig(internal.GetConfigPath(), cfg); err != nil {
+		t.addSystem("Unable to save model selection: " + err.Error())
+		return
+	}
+	t.mu.Lock()
+	t.currentModel = name
+	t.mu.Unlock()
+	t.addSystem(fmt.Sprintf("Default model changed from %s to %s. Restart the terminal agent if the active provider does not switch immediately.", formatTerminalModelName(old), name))
+	t.refreshAll()
+}
+
+func formatTerminalModelName(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "<none>"
+	}
+	return name
+}
+
+func (t *terminalChat) startNewSession() {
+	t.mu.Lock()
+	t.sessionKey = fmt.Sprintf("cli:%d", time.Now().Unix())
+	t.entries = nil
+	t.pendingInputs = nil
+	t.sessionStarted = time.Now()
+	t.mu.Unlock()
+	writeLastTerminalSession(t.sessionKey)
+	setTerminalAgentTitle(t.agentEmoji, t.sessionKey)
+	t.addSystem("Started new session " + t.sessionKey + ".")
+	t.refreshAll()
+}
+
+func (t *terminalChat) resetCurrentSession() {
+	if err := t.loop.ResetSession(t.sessionKey); err != nil {
+		t.addSystem("Reset failed: " + err.Error())
+		return
+	}
+	t.mu.Lock()
+	t.entries = nil
+	t.pendingInputs = nil
+	t.mu.Unlock()
+	t.addSystem("Session reset.")
+	t.refreshAll()
+}
+
+func (t *terminalChat) undoLastTurn() bool {
+	removed, err := t.loop.UndoLastTurn(t.sessionKey)
+	if err != nil {
+		t.addSystem("Undo failed: " + err.Error())
+		return false
+	}
+	if removed == 0 {
+		t.addSystem("Nothing to undo.")
+		return false
+	}
+	t.mu.Lock()
+	t.entries = nil
+	t.mu.Unlock()
+	t.loadHistory()
+	t.addSystem(fmt.Sprintf("Undid last turn (%d messages removed).", removed))
+	t.refreshAll()
+	return true
+}
+
+func (t *terminalChat) retryLastTurn() {
+	if t.currentBusyMode() != "" {
+		t.mu.Lock()
+		busy := t.busy
+		t.mu.Unlock()
+		if busy {
+			t.addSystem("Session is busy. Use /stop first, or wait for the current turn to finish.")
+			return
+		}
+	}
+	prompt, ok, err := t.loop.LastUserPrompt(t.sessionKey)
+	if err != nil {
+		t.addSystem("Retry failed: " + err.Error())
+		return
+	}
+	if !ok {
+		t.addSystem("No user prompt to retry.")
+		return
+	}
+	if !t.undoLastTurn() {
+		return
+	}
+	t.addSystem("Retrying last prompt.")
+	t.startForegroundTurn(prompt)
+}
+
+func (t *terminalChat) compressCurrentSession() {
+	dropped, remaining, ok, err := t.loop.CompressSession(t.sessionKey)
+	if err != nil {
+		t.addSystem("Compress failed: " + err.Error())
+		return
+	}
+	if !ok {
+		t.addSystem("Session is too small to compress.")
+		return
+	}
+	t.mu.Lock()
+	t.entries = nil
+	t.mu.Unlock()
+	t.loadHistory()
+	t.addSystem(fmt.Sprintf("Compressed session: dropped %d older messages, kept %d.", dropped, remaining))
+	t.refreshAll()
+}
+
+func (t *terminalChat) showUsage() {
+	stats, err := t.loop.SessionStats(t.sessionKey)
+	if err != nil {
+		t.addSystem("Usage unavailable: " + err.Error())
+		return
+	}
+	usage := formatUsage(stats.TokenEstimate, stats.ContextWindow)
+	summary := "no"
+	if strings.TrimSpace(stats.Summary) != "" {
+		summary = "yes"
+	}
+	t.addSystem(fmt.Sprintf("Usage: session=%s, messages=%d, %s, summary=%s.", stats.SessionKey, stats.MessageCount, usage, summary))
+}
+
+func (t *terminalChat) showSkills() {
+	agent := t.loop.GetRegistry().GetDefaultAgent()
+	if agent == nil {
+		t.addSystem("No default agent available.")
+		return
+	}
+	globalDir := filepath.Dir(internal.GetConfigPath())
+	globalSkillsDir := filepath.Join(globalDir, "skills")
+	builtinSkillsDir := filepath.Join(globalDir, "jameclaw", "skills")
+	loader := skills.NewSkillsLoader(agent.Workspace, globalSkillsDir, builtinSkillsDir)
+	all := loader.ListSkills()
+	if len(all) == 0 {
+		t.addSystem("No skills installed.")
+		return
+	}
+	lines := make([]string, 0, min(len(all), 25)+1)
+	for i, skill := range all {
+		if i >= 25 {
+			lines = append(lines, fmt.Sprintf("...and %d more.", len(all)-i))
+			break
+		}
+		desc := strings.TrimSpace(skill.Description)
+		if desc != "" {
+			lines = append(lines, fmt.Sprintf("/%s - %s", skill.Name, desc))
+		} else {
+			lines = append(lines, "/"+skill.Name)
+		}
+	}
+	t.addSystem("Skills:\n" + strings.Join(lines, "\n"))
+}
+
+func (t *terminalChat) setPersonality(text string) {
+	text = strings.TrimSpace(text)
+	agent := t.loop.GetRegistry().GetDefaultAgent()
+	if agent == nil {
+		t.addSystem("No default agent available.")
+		return
+	}
+	if text == "" {
+		summary := strings.TrimSpace(agent.Sessions.GetSummary(t.sessionKey))
+		if summary == "" {
+			t.addSystem("No session personality override set. Use /personality <instruction>.")
+			return
+		}
+		t.addSystem("Current session summary/personality context:\n" + summary)
+		return
+	}
+	summary := strings.TrimSpace(agent.Sessions.GetSummary(t.sessionKey))
+	note := "[Session personality override: " + text + "]"
+	if summary != "" {
+		summary += "\n\n" + note
+	} else {
+		summary = note
+	}
+	agent.Sessions.SetSummary(t.sessionKey, summary)
+	if err := agent.Sessions.Save(t.sessionKey); err != nil {
+		t.addSystem("Personality saved in memory but failed to persist: " + err.Error())
+		return
+	}
+	t.addSystem("Personality override added for this session.")
+}
+
+func (t *terminalChat) stopCurrentTurn() {
+	if err := t.loop.InterruptGraceful("Stop the current turn and return the best partial result."); err != nil {
+		t.addSystem(err.Error())
+	} else {
+		t.setActivity("stopping gracefully")
+		t.addSystem("Stop requested.")
+	}
+}
+
+func (t *terminalChat) steerCurrentTurn(prompt string) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		t.addSystem("Usage: /steer <prompt>")
+		return
+	}
+	if err := t.loop.Steer(providers.Message{Role: "user", Content: prompt}); err != nil {
+		t.addSystem("Steer failed: " + err.Error())
+		return
+	}
+	t.setActivity("steering active turn")
+	t.addSystem("Steer message queued for the active turn.")
 }
 
 func (t *terminalChat) openSettingsOverlay() {
@@ -456,10 +699,52 @@ func (t *terminalChat) handleLocalCommand(text string) bool {
 	lower := strings.ToLower(trimmed)
 	switch {
 	case lower == "/help":
-		t.addSystem("Local TUI commands: /help, /models, /sessions, /settings, /gateway-status, /auth [provider], /webui, /background <prompt>, /busy interrupt|queue, /allow-computer-search on|off, /computer-search <query> [path], /clear, /status, /quit. Shortcuts: Enter/Ctrl-S send, Ctrl-J newline, Tab complete, Ctrl-C clear/warn/exit, Ctrl-X hard abort, Ctrl-G graceful stop, Ctrl-T reasoning, Ctrl-R reload history, Ctrl-L clear view, Ctrl-D exit.")
+		t.addSystem(terminalHelpText())
+		return true
+	case lower == "/commands":
+		t.addSystem(strings.Join(terminalCompletions(t.loop), "\n"))
+		return true
+	case lower == "/model":
+		t.openModelPicker()
+		return true
+	case strings.HasPrefix(lower, "/model "):
+		t.switchDefaultModel(strings.TrimSpace(trimmed[len("/model "):]))
 		return true
 	case lower == "/models":
 		t.openModelPicker()
+		return true
+	case lower == "/new":
+		t.startNewSession()
+		return true
+	case lower == "/reset":
+		t.resetCurrentSession()
+		return true
+	case lower == "/retry":
+		t.retryLastTurn()
+		return true
+	case lower == "/undo":
+		t.undoLastTurn()
+		return true
+	case lower == "/compress":
+		t.compressCurrentSession()
+		return true
+	case lower == "/usage":
+		t.showUsage()
+		return true
+	case lower == "/skills":
+		t.showSkills()
+		return true
+	case lower == "/personality":
+		t.setPersonality("")
+		return true
+	case strings.HasPrefix(lower, "/personality "):
+		t.setPersonality(strings.TrimSpace(trimmed[len("/personality "):]))
+		return true
+	case lower == "/stop":
+		t.stopCurrentTurn()
+		return true
+	case strings.HasPrefix(lower, "/steer "):
+		t.steerCurrentTurn(strings.TrimSpace(trimmed[len("/steer "):]))
 		return true
 	case lower == "/sessions":
 		t.openSessionPicker()
@@ -490,12 +775,15 @@ func (t *terminalChat) handleLocalCommand(text string) bool {
 		t.addSystem(t.statusSummary())
 		return true
 	case lower == "/busy":
-		t.addSystem("Busy input mode is " + t.currentBusyMode() + ". Use /busy interrupt or /busy queue.")
+		t.addSystem("Busy input mode is " + t.currentBusyMode() + ". Use /busy interrupt, /busy queue, /busy steer, or /busy status.")
+		return true
+	case lower == "/busy status":
+		t.addSystem("Busy input mode is " + t.currentBusyMode() + ".")
 		return true
 	case strings.HasPrefix(lower, "/busy "):
 		mode := strings.TrimSpace(strings.TrimPrefix(lower, "/busy "))
-		if mode != "interrupt" && mode != "queue" {
-			t.addSystem("Usage: /busy interrupt|queue")
+		if mode != "interrupt" && mode != "queue" && mode != "steer" {
+			t.addSystem("Usage: /busy interrupt|queue|steer|status")
 			return true
 		}
 		t.mu.Lock()
@@ -1111,7 +1399,19 @@ func terminalCompletions(loop *agentcore.AgentLoop) []string {
 		"/quit",
 		"/exit",
 		"/help",
+		"/commands",
+		"/model ",
 		"/models",
+		"/new",
+		"/reset",
+		"/retry",
+		"/undo",
+		"/compress",
+		"/usage",
+		"/skills",
+		"/personality ",
+		"/stop",
+		"/steer ",
 		"/sessions",
 		"/settings",
 		"/gateway-status",
@@ -1120,6 +1420,8 @@ func terminalCompletions(loop *agentcore.AgentLoop) []string {
 		"/background ",
 		"/busy interrupt",
 		"/busy queue",
+		"/busy steer",
+		"/busy status",
 		"/allow-computer-search on",
 		"/allow-computer-search off",
 		"/computer-search ",
@@ -1230,7 +1532,7 @@ func (t *terminalChat) handleKey(event *tcell.EventKey) *tcell.EventKey {
 		t.chat.ScrollTo(row+10, col)
 		return nil
 	case tcell.KeyF1:
-		t.addSystem("Shortcuts: Enter/Ctrl-S send; Ctrl-J newline; submit while busy interrupts or queues based on /busy; Tab autocomplete; Ctrl-C clear/warn/exit; Ctrl-X hard abort; Ctrl-G graceful stop; Ctrl-T reasoning; Ctrl-R reload history; Ctrl-L clear view; PageUp/PageDown scroll; Ctrl-D exit. Local commands: /models, /sessions, /settings, /gateway-status, /auth [provider], /background <prompt>, /busy interrupt|queue, /status, /clear.")
+		t.addSystem(terminalHelpText())
 		return nil
 	}
 	return event
