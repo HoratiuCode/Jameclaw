@@ -51,7 +51,7 @@ interface NavGroup {
   isChannelsGroup?: boolean
 }
 
-const fallbackVersion = 904
+const fallbackVersion = "707I"
 
 function extractVersionNumber(version: string | undefined): number | null {
   if (!version) {
@@ -101,7 +101,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     queryFn: getAppStatus,
     staleTime: 60_000,
   })
-  const displayedVersion = appStatus?.version || String(fallbackVersion)
+  const displayedVersion = appStatus?.version || fallbackVersion
   const currentVersion = extractVersionNumber(displayedVersion)
   const latestVersion = extractVersionNumber(appStatus?.version)
   const hasUpdate =
