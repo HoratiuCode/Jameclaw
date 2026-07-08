@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsageRouteImport } from './routes/usage'
+import { Route as SessionsRouteImport } from './routes/sessions'
+import { Route as ProfilesRouteImport } from './routes/profiles'
+import { Route as PluginsRouteImport } from './routes/plugins'
+import { Route as PairingRouteImport } from './routes/pairing'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as LandingRouteImport } from './routes/landing'
 import { Route as ExtensionRouteImport } from './routes/extension'
+import { Route as CronRouteImport } from './routes/cron'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as ConfigRouteImport } from './routes/config'
+import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AgentRouteImport } from './routes/agent'
 import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
@@ -29,6 +35,26 @@ import { Route as AgentLearnedRouteImport } from './routes/agent/learned'
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
   path: '/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionsRoute = SessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfilesRoute = ProfilesRouteImport.update({
+  id: '/profiles',
+  path: '/profiles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PluginsRoute = PluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PairingRoute = PairingRouteImport.update({
+  id: '/pairing',
+  path: '/pairing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsRoute = ModelsRouteImport.update({
@@ -51,6 +77,11 @@ const ExtensionRoute = ExtensionRouteImport.update({
   path: '/extension',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CronRoute = CronRouteImport.update({
+  id: '/cron',
+  path: '/cron',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CredentialsRoute = CredentialsRouteImport.update({
   id: '/credentials',
   path: '/credentials',
@@ -59,6 +90,11 @@ const CredentialsRoute = CredentialsRouteImport.update({
 const ConfigRoute = ConfigRouteImport.update({
   id: '/config',
   path: '/config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnalyticsRoute = AnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsRoute = AgentsRouteImport.update({
@@ -112,12 +148,18 @@ export interface FileRoutesByFullPath {
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
+  '/analytics': typeof AnalyticsRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
+  '/cron': typeof CronRoute
   '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/pairing': typeof PairingRoute
+  '/plugins': typeof PluginsRoute
+  '/profiles': typeof ProfilesRoute
+  '/sessions': typeof SessionsRoute
   '/usage': typeof UsageRoute
   '/agent/learned': typeof AgentLearnedRoute
   '/agent/skills': typeof AgentSkillsRoute
@@ -130,12 +172,18 @@ export interface FileRoutesByTo {
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
+  '/analytics': typeof AnalyticsRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
+  '/cron': typeof CronRoute
   '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/pairing': typeof PairingRoute
+  '/plugins': typeof PluginsRoute
+  '/profiles': typeof ProfilesRoute
+  '/sessions': typeof SessionsRoute
   '/usage': typeof UsageRoute
   '/agent/learned': typeof AgentLearnedRoute
   '/agent/skills': typeof AgentSkillsRoute
@@ -149,12 +197,18 @@ export interface FileRoutesById {
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
+  '/analytics': typeof AnalyticsRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
+  '/cron': typeof CronRoute
   '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
+  '/pairing': typeof PairingRoute
+  '/plugins': typeof PluginsRoute
+  '/profiles': typeof ProfilesRoute
+  '/sessions': typeof SessionsRoute
   '/usage': typeof UsageRoute
   '/agent/learned': typeof AgentLearnedRoute
   '/agent/skills': typeof AgentSkillsRoute
@@ -169,12 +223,18 @@ export interface FileRouteTypes {
     | '/channels'
     | '/agent'
     | '/agents'
+    | '/analytics'
     | '/config'
     | '/credentials'
+    | '/cron'
     | '/extension'
     | '/landing'
     | '/logs'
     | '/models'
+    | '/pairing'
+    | '/plugins'
+    | '/profiles'
+    | '/sessions'
     | '/usage'
     | '/agent/learned'
     | '/agent/skills'
@@ -187,12 +247,18 @@ export interface FileRouteTypes {
     | '/channels'
     | '/agent'
     | '/agents'
+    | '/analytics'
     | '/config'
     | '/credentials'
+    | '/cron'
     | '/extension'
     | '/landing'
     | '/logs'
     | '/models'
+    | '/pairing'
+    | '/plugins'
+    | '/profiles'
+    | '/sessions'
     | '/usage'
     | '/agent/learned'
     | '/agent/skills'
@@ -205,12 +271,18 @@ export interface FileRouteTypes {
     | '/channels'
     | '/agent'
     | '/agents'
+    | '/analytics'
     | '/config'
     | '/credentials'
+    | '/cron'
     | '/extension'
     | '/landing'
     | '/logs'
     | '/models'
+    | '/pairing'
+    | '/plugins'
+    | '/profiles'
+    | '/sessions'
     | '/usage'
     | '/agent/learned'
     | '/agent/skills'
@@ -224,12 +296,18 @@ export interface RootRouteChildren {
   ChannelsRouteRoute: typeof ChannelsRouteRouteWithChildren
   AgentRoute: typeof AgentRouteWithChildren
   AgentsRoute: typeof AgentsRoute
+  AnalyticsRoute: typeof AnalyticsRoute
   ConfigRoute: typeof ConfigRouteWithChildren
   CredentialsRoute: typeof CredentialsRoute
+  CronRoute: typeof CronRoute
   ExtensionRoute: typeof ExtensionRoute
   LandingRoute: typeof LandingRoute
   LogsRoute: typeof LogsRoute
   ModelsRoute: typeof ModelsRoute
+  PairingRoute: typeof PairingRoute
+  PluginsRoute: typeof PluginsRoute
+  ProfilesRoute: typeof ProfilesRoute
+  SessionsRoute: typeof SessionsRoute
   UsageRoute: typeof UsageRoute
 }
 
@@ -240,6 +318,34 @@ declare module '@tanstack/react-router' {
       path: '/usage'
       fullPath: '/usage'
       preLoaderRoute: typeof UsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sessions': {
+      id: '/sessions'
+      path: '/sessions'
+      fullPath: '/sessions'
+      preLoaderRoute: typeof SessionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profiles': {
+      id: '/profiles'
+      path: '/profiles'
+      fullPath: '/profiles'
+      preLoaderRoute: typeof ProfilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plugins': {
+      id: '/plugins'
+      path: '/plugins'
+      fullPath: '/plugins'
+      preLoaderRoute: typeof PluginsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pairing': {
+      id: '/pairing'
+      path: '/pairing'
+      fullPath: '/pairing'
+      preLoaderRoute: typeof PairingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models': {
@@ -270,6 +376,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExtensionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cron': {
+      id: '/cron'
+      path: '/cron'
+      fullPath: '/cron'
+      preLoaderRoute: typeof CronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/credentials': {
       id: '/credentials'
       path: '/credentials'
@@ -282,6 +395,13 @@ declare module '@tanstack/react-router' {
       path: '/config'
       fullPath: '/config'
       preLoaderRoute: typeof ConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analytics': {
+      id: '/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AnalyticsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents': {
@@ -392,12 +512,18 @@ const rootRouteChildren: RootRouteChildren = {
   ChannelsRouteRoute: ChannelsRouteRouteWithChildren,
   AgentRoute: AgentRouteWithChildren,
   AgentsRoute: AgentsRoute,
+  AnalyticsRoute: AnalyticsRoute,
   ConfigRoute: ConfigRouteWithChildren,
   CredentialsRoute: CredentialsRoute,
+  CronRoute: CronRoute,
   ExtensionRoute: ExtensionRoute,
   LandingRoute: LandingRoute,
   LogsRoute: LogsRoute,
   ModelsRoute: ModelsRoute,
+  PairingRoute: PairingRoute,
+  PluginsRoute: PluginsRoute,
+  ProfilesRoute: ProfilesRoute,
+  SessionsRoute: SessionsRoute,
   UsageRoute: UsageRoute,
 }
 export const routeTree = rootRouteImport

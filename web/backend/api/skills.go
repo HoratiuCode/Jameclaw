@@ -60,6 +60,7 @@ func (h *Handler) registerSkillRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/skills/learned", h.handleListLearnedSkills)
 	mux.HandleFunc("GET /api/skills/{name}", h.handleGetSkill)
 	mux.HandleFunc("POST /api/skills/import", h.handleImportSkill)
+	mux.HandleFunc("POST /api/skills/evolve", h.handleEvolveSkill)
 	mux.HandleFunc("DELETE /api/skills/{name}", h.handleDeleteSkill)
 }
 
@@ -229,6 +230,29 @@ func (h *Handler) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Skill not found", http.StatusNotFound)
+}
+
+func (h *Handler) handleEvolveSkill(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var req skills.EvolutionRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	result, err := skills.ApplyEvolution(cfg.WorkspacePath(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func newSkillsLoader(workspace string) *skills.SkillsLoader {

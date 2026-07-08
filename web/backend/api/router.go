@@ -52,6 +52,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	h.registerSessionRoutes(mux)
 	h.registerUsageRoutes(mux)
 	h.registerAgentRoutes(mux)
+	h.registerDashboardRoutes(mux)
 
 	// OAuth login and credential management
 	h.registerOAuthRoutes(mux)

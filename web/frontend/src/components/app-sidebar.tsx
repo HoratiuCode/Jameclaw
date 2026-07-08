@@ -2,15 +2,20 @@ import { IconChevronRight } from "@tabler/icons-react"
 import {
   IconAtom,
   IconBrain,
+  IconCalendarTime,
   IconChartBar,
   IconChevronsDown,
   IconChevronsUp,
+  IconPlug,
   IconKey,
   IconListDetails,
   IconMessageCircle,
+  IconReportAnalytics,
   IconSettings,
   IconSparkles,
   IconTools,
+  IconUserCircle,
+  IconUsers,
 } from "@tabler/icons-react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
@@ -160,6 +165,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             translateTitle: false,
           },
           {
+            title: "Profiles",
+            url: "/profiles",
+            icon: IconUserCircle,
+            translateTitle: false,
+          },
+          {
+            title: "Sessions",
+            url: "/sessions",
+            icon: IconMessageCircle,
+            translateTitle: false,
+          },
+          {
             title: "Learned",
             url: "/agent/learned",
             icon: IconBrain,
@@ -186,6 +203,30 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             title: "Usage",
             url: "/usage",
             icon: IconChartBar,
+            translateTitle: false,
+          },
+          {
+            title: "Analytics",
+            url: "/analytics",
+            icon: IconReportAnalytics,
+            translateTitle: false,
+          },
+          {
+            title: "Cron",
+            url: "/cron",
+            icon: IconCalendarTime,
+            translateTitle: false,
+          },
+          {
+            title: "Pairing",
+            url: "/pairing",
+            icon: IconUsers,
+            translateTitle: false,
+          },
+          {
+            title: "Plugins",
+            url: "/plugins",
+            icon: IconPlug,
             translateTitle: false,
           },
           {
