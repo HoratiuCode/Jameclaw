@@ -155,6 +155,7 @@ func (h *Handler) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 	// Copy security credentials before validation so security-managed
 	// fields (e.g. jame token) are available for validation checks.
 	newCfg.SecurityCopyFrom(cfg)
+	applyConfigPatchSecrets(&newCfg, patch)
 
 	if errs := validateConfig(&newCfg); len(errs) > 0 {
 		w.Header().Set("Content-Type", "application/json")
@@ -217,6 +218,72 @@ func validateConfig(cfg *config.Config) []string {
 	}
 
 	return errs
+}
+
+func applyConfigPatchSecrets(cfg *config.Config, patch map[string]any) {
+	channels := nestedMap(patch, "channels")
+	if channels == nil {
+		return
+	}
+
+	if token := nestedString(channels, "telegram", "token"); token != "" {
+		cfg.Channels.Telegram.SetToken(token)
+	}
+	if token := nestedString(channels, "discord", "token"); token != "" {
+		cfg.Channels.Discord.SetToken(token)
+	}
+	if token := nestedString(channels, "jame", "token"); token != "" {
+		cfg.Channels.Jame.SetToken(token)
+	}
+	if botToken := nestedString(channels, "slack", "bot_token"); botToken != "" {
+		cfg.Channels.Slack.SetBotToken(botToken)
+	}
+	if appToken := nestedString(channels, "slack", "app_token"); appToken != "" {
+		cfg.Channels.Slack.SetAppToken(appToken)
+	}
+	if appSecret := nestedString(channels, "feishu", "app_secret"); appSecret != "" {
+		cfg.Channels.Feishu.SetAppSecret(appSecret)
+	}
+	if encryptKey := nestedString(channels, "feishu", "encrypt_key"); encryptKey != "" {
+		cfg.Channels.Feishu.SetEncryptKey(encryptKey)
+	}
+	if verificationToken := nestedString(channels, "feishu", "verification_token"); verificationToken != "" {
+		cfg.Channels.Feishu.SetVerificationToken(verificationToken)
+	}
+}
+
+func nestedMap(root map[string]any, key string) map[string]any {
+	value, ok := root[key]
+	if !ok {
+		return nil
+	}
+	out, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return out
+}
+
+func nestedString(root map[string]any, keys ...string) string {
+	current := root
+	for index, key := range keys {
+		value, ok := current[key]
+		if !ok {
+			return ""
+		}
+		if index == len(keys)-1 {
+			if text, ok := value.(string); ok {
+				return text
+			}
+			return ""
+		}
+		next, ok := value.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = next
+	}
+	return ""
 }
 
 func validateRegexPatterns(field string, patterns []string) []string {

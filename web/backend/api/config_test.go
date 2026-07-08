@@ -181,6 +181,43 @@ func TestHandlePatchConfig_PersistsWebExtensionSettings(t *testing.T) {
 	}
 }
 
+func TestHandlePatchConfig_PersistsTelegramToken(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
+		"channels": {
+			"telegram": {
+				"enabled": true,
+				"token": "telegram-token-from-web-ui",
+				"allow_from": ["alice"]
+			}
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if got := cfg.Channels.Telegram.Token(); got != "telegram-token-from-web-ui" {
+		t.Fatalf("telegram token = %q, want saved token", got)
+	}
+	if got := cfg.Channels.Telegram.AllowFrom; len(got) != 1 || got[0] != "alice" {
+		t.Fatalf("telegram allow_from = %#v, want [alice]", got)
+	}
+}
+
 // setupJameEnabledEnv creates a test environment with Jame channel enabled and
 // its token stored only in .security.yml (not in the JSON payload).
 func setupJameEnabledEnv(t *testing.T) (string, func()) {
