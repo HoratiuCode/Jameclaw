@@ -96,3 +96,35 @@ func TestLocalSessionAuth_AllowsLocalExtensionBootstrap(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
+
+func TestLocalSessionAuth_AllowsLocalJameWebSocketUpgrade(t *testing.T) {
+	h := LocalSessionAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/jame/ws", nil)
+	req.RemoteAddr = "127.0.0.1:45678"
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestLocalSessionAuth_RejectsJameWebSocketWithoutUpgrade(t *testing.T) {
+	h := LocalSessionAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/jame/ws", nil)
+	req.RemoteAddr = "127.0.0.1:45678"
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}

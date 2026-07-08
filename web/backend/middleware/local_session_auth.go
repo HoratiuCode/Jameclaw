@@ -27,6 +27,11 @@ func LocalSessionAuth(accessToken string, next http.Handler) http.Handler {
 			return
 		}
 
+		if isLocalJameWebSocketRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if hasLauncherSessionCookie(r, accessToken) {
 			next.ServeHTTP(w, r)
 			return
@@ -62,6 +67,14 @@ func LocalSessionAuth(accessToken string, next http.Handler) http.Handler {
 	})
 }
 
+func isLocalJameWebSocketRequest(r *http.Request) bool {
+	if r.URL.Path != "/jame/ws" || !isWebSocketUpgrade(r) {
+		return false
+	}
+
+	return isLoopbackRemote(r)
+}
+
 func isLocalExtensionRequest(r *http.Request) bool {
 	if !(strings.HasPrefix(r.URL.Path, "/api/extension/") || strings.HasPrefix(r.URL.Path, "/extension/ws")) {
 		return false
@@ -72,6 +85,10 @@ func isLocalExtensionRequest(r *http.Request) bool {
 		return false
 	}
 
+	return isLoopbackRemote(r)
+}
+
+func isLoopbackRemote(r *http.Request) bool {
 	host := r.RemoteAddr
 	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		host = h
@@ -79,6 +96,22 @@ func isLocalExtensionRequest(r *http.Request) bool {
 
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	return headerContainsToken(r.Header, "Connection", "upgrade") &&
+		strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket")
+}
+
+func headerContainsToken(header http.Header, key string, token string) bool {
+	for _, value := range header.Values(key) {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hasLauncherSessionCookie(r *http.Request, accessToken string) bool {
