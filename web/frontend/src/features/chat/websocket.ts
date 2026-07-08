@@ -11,6 +11,17 @@ export function normalizeWsUrlForBrowser(wsUrl: string): string {
       window.location.hostname === "localhost" ||
       window.location.hostname === "127.0.0.1"
 
+    if (
+      isLocalHost &&
+      isBrowserLocal &&
+      window.location.port &&
+      parsedUrl.port !== window.location.port
+    ) {
+      parsedUrl.hostname = window.location.hostname
+      parsedUrl.port = window.location.port
+      finalWsUrl = parsedUrl.toString()
+    }
+
     if (isLocalHost && !isBrowserLocal) {
       parsedUrl.hostname = window.location.hostname
       finalWsUrl = parsedUrl.toString()
