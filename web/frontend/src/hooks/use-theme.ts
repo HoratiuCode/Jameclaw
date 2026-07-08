@@ -1,28 +1,25 @@
-import { useCallback, useEffect, useState } from "react"
+import { useAtom } from "jotai"
+import { useCallback } from "react"
 
-type Theme = "light" | "dark"
-
-function getStoredTheme(): Theme {
-  if (typeof window === "undefined") return "dark"
-  return (localStorage.getItem("theme") as Theme) || "dark"
-}
+import { designAtom, updateDesignStore } from "@/store/design"
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(getStoredTheme)
+  const [design] = useAtom(designAtom)
 
-  useEffect(() => {
-    const root = document.documentElement
-    if (theme === "dark") {
-      root.classList.add("dark")
-    } else {
-      root.classList.remove("dark")
-    }
-    localStorage.setItem("theme", theme)
-  }, [theme])
+  const darkThemes = ["dark", "nord", "cyberpunk", "forest", "sunset"]
+  const isDark = darkThemes.includes(design.theme)
 
   const toggleTheme = useCallback(() => {
-    setThemeState((prev) => (prev === "dark" ? "light" : "dark"))
+    updateDesignStore((prev) => {
+      const currentlyDark = ["dark", "nord", "cyberpunk", "forest", "sunset"].includes(prev.theme)
+      return {
+        theme: currentlyDark ? "light" : "dark",
+      }
+    })
   }, [])
 
-  return { theme, toggleTheme }
+  return {
+    theme: (isDark ? "dark" : "light") as "dark" | "light",
+    toggleTheme,
+  }
 }

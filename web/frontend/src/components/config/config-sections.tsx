@@ -5,9 +5,12 @@ import {
   IconRefresh,
   IconVersions,
 } from "@tabler/icons-react"
+import { useAtom } from "jotai"
 import * as React from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+
+import { designAtom, updateDesignStore, type Theme, type Font, type FontSize } from "@/store/design"
 
 import type { UpdateStatusResponse } from "@/api/update"
 import {
@@ -812,3 +815,107 @@ export function SystemSection({
     </ConfigSectionCard>
   )
 }
+
+export function DesignSection() {
+  const { t } = useTranslation()
+  const [design] = useAtom(designAtom)
+
+  const THEME_OPTIONS = [
+    { value: "light", label: "Light Theme" },
+    { value: "dark", label: "Dark Theme" },
+    { value: "nord", label: "Nordic Frost (Dark)" },
+    { value: "sepia", label: "Sepia Reading (Light)" },
+    { value: "cyberpunk", label: "Cyberpunk Neon (Dark)" },
+    { value: "forest", label: "Forest Green (Dark)" },
+    { value: "sunset", label: "Sunset Crimson (Dark)" },
+  ]
+
+  const FONT_OPTIONS = [
+    { value: "inter", label: "Inter (Sans-Serif)" },
+    { value: "outfit", label: "Outfit (Modern Rounded)" },
+    { value: "firacode", label: "Fira Code (Monospace)" },
+    { value: "playfair", label: "Playfair Display (Elegant Serif)" },
+    { value: "spacegrotesk", label: "Space Grotesk (Tech/Futuristic)" },
+  ]
+
+  const FONT_SIZE_OPTIONS = [
+    { value: "sm", label: "Small (14px)" },
+    { value: "md", label: "Medium (16px)" },
+    { value: "lg", label: "Large (18px)" },
+    { value: "xl", label: "Extra Large (20px)" },
+  ]
+
+  return (
+    <ConfigSectionCard
+      title={t("pages.config.sections.design")}
+      description="Customize the typography, theme, and text scaling of the web console."
+    >
+      <Field
+        label={t("pages.config.design_theme")}
+        hint={t("pages.config.design_theme_hint")}
+        layout="setting-row"
+      >
+        <Select
+          value={design.theme}
+          onValueChange={(val) => updateDesignStore({ theme: val as Theme })}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {THEME_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label={t("pages.config.design_font")}
+        hint={t("pages.config.design_font_hint")}
+        layout="setting-row"
+      >
+        <Select
+          value={design.font}
+          onValueChange={(val) => updateDesignStore({ font: val as Font })}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FONT_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label={t("pages.config.design_font_size")}
+        hint={t("pages.config.design_font_size_hint")}
+        layout="setting-row"
+      >
+        <Select
+          value={design.fontSize}
+          onValueChange={(val) => updateDesignStore({ fontSize: val as FontSize })}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FONT_SIZE_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+    </ConfigSectionCard>
+  )
+}
+

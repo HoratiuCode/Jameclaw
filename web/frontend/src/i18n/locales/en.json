@@ -497,8 +497,15 @@
         "cron": "Cron Tasks",
         "launcher": "Service",
         "devices": "Devices",
-        "system": "System"
+        "system": "System",
+        "design": "Design"
       },
+      "design_theme": "Theme",
+      "design_theme_hint": "Choose the color palette and overall theme of the web console.",
+      "design_font": "Typography Font",
+      "design_font_hint": "Select the typeface for the console text.",
+      "design_font_size": "Text Font Size",
+      "design_font_size_hint": "Adjust the base text scaling of the console.",
       "open_raw": "Raw Config",
       "back_to_visual": "Visual Config",
       "raw_json_title": "Raw JSON Configuration",
