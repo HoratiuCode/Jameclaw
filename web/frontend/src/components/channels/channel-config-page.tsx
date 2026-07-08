@@ -104,6 +104,17 @@ function buildSavePayload(
     payload[key] = value
   }
 
+  // Also handle secrets where the original config did not have the key,
+  // but the user has now provided a value in the corresponding "_" key.
+  for (const [key, editKey] of Object.entries(SECRET_FIELD_MAP)) {
+    if (!(key in payload) && editKey in editConfig) {
+      const incoming = asString(editConfig[editKey])
+      if (incoming !== "") {
+        payload[key] = incoming
+      }
+    }
+  }
+
   if (channel.name === "whatsapp_native") {
     payload.use_native = true
   }

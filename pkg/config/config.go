@@ -2291,3 +2291,113 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return true
 	}
 }
+
+// Custom JSON marshaling for channel configs to mask and return secret fields
+
+func maskSecret(secret string) string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return ""
+	}
+	if len(secret) <= 6 {
+		return fmt.Sprintf("%c***%c", secret[0], secret[len(secret)-1])
+	}
+	if len(secret) <= 12 {
+		return fmt.Sprintf("%s****%s", secret[:2], secret[len(secret)-2:])
+	}
+	return fmt.Sprintf("%s*****%s", secret[:3], secret[len(secret)-4:])
+}
+
+func (c TelegramConfig) MarshalJSON() ([]byte, error) {
+	type Alias TelegramConfig
+	masked := ""
+	if c.token != "" {
+		masked = maskSecret(c.token)
+	}
+	return json.Marshal(&struct {
+		Alias
+		Token string `json:"token,omitempty"`
+	}{
+		Alias: Alias(c),
+		Token: masked,
+	})
+}
+
+func (c DiscordConfig) MarshalJSON() ([]byte, error) {
+	type Alias DiscordConfig
+	masked := ""
+	if c.token != "" {
+		masked = maskSecret(c.token)
+	}
+	return json.Marshal(&struct {
+		Alias
+		Token string `json:"token,omitempty"`
+	}{
+		Alias: Alias(c),
+		Token: masked,
+	})
+}
+
+func (c SlackConfig) MarshalJSON() ([]byte, error) {
+	type Alias SlackConfig
+	maskedBotToken := ""
+	if c.botToken != "" {
+		maskedBotToken = maskSecret(c.botToken)
+	}
+	maskedAppToken := ""
+	if c.appToken != "" {
+		maskedAppToken = maskSecret(c.appToken)
+	}
+	return json.Marshal(&struct {
+		Alias
+		BotToken string `json:"bot_token,omitempty"`
+		AppToken string `json:"app_token,omitempty"`
+	}{
+		Alias:    Alias(c),
+		BotToken: maskedBotToken,
+		AppToken: maskedAppToken,
+	})
+}
+
+func (c FeishuConfig) MarshalJSON() ([]byte, error) {
+	type Alias FeishuConfig
+	maskedAppSecret := ""
+	if c.appSecret != "" {
+		maskedAppSecret = maskSecret(c.appSecret)
+	}
+	maskedEncryptKey := ""
+	if c.encryptKey != "" {
+		maskedEncryptKey = maskSecret(c.encryptKey)
+	}
+	maskedVerificationToken := ""
+	if c.verificationToken != "" {
+		maskedVerificationToken = maskSecret(c.verificationToken)
+	}
+	return json.Marshal(&struct {
+		Alias
+		AppSecret         string `json:"app_secret,omitempty"`
+		EncryptKey        string `json:"encrypt_key,omitempty"`
+		VerificationToken string `json:"verification_token,omitempty"`
+	}{
+		Alias:             Alias(c),
+		AppSecret:         maskedAppSecret,
+		EncryptKey:        maskedEncryptKey,
+		VerificationToken: maskedVerificationToken,
+	})
+}
+
+func (c JameConfig) MarshalJSON() ([]byte, error) {
+	type Alias JameConfig
+	masked := ""
+	if c.token != "" {
+		masked = maskSecret(c.token)
+	}
+	return json.Marshal(&struct {
+		Alias
+		Token string `json:"token,omitempty"`
+	}{
+		Alias: Alias(c),
+		Token: masked,
+	})
+}
+

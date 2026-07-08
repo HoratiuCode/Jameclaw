@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/logger"
@@ -226,28 +227,28 @@ func applyConfigPatchSecrets(cfg *config.Config, patch map[string]any) {
 		return
 	}
 
-	if token := nestedString(channels, "telegram", "token"); token != "" {
+	if token := nestedString(channels, "telegram", "token"); token != "" && !strings.Contains(token, "*") {
 		cfg.Channels.Telegram.SetToken(token)
 	}
-	if token := nestedString(channels, "discord", "token"); token != "" {
+	if token := nestedString(channels, "discord", "token"); token != "" && !strings.Contains(token, "*") {
 		cfg.Channels.Discord.SetToken(token)
 	}
-	if token := nestedString(channels, "jame", "token"); token != "" {
+	if token := nestedString(channels, "jame", "token"); token != "" && !strings.Contains(token, "*") {
 		cfg.Channels.Jame.SetToken(token)
 	}
-	if botToken := nestedString(channels, "slack", "bot_token"); botToken != "" {
+	if botToken := nestedString(channels, "slack", "bot_token"); botToken != "" && !strings.Contains(botToken, "*") {
 		cfg.Channels.Slack.SetBotToken(botToken)
 	}
-	if appToken := nestedString(channels, "slack", "app_token"); appToken != "" {
+	if appToken := nestedString(channels, "slack", "app_token"); appToken != "" && !strings.Contains(appToken, "*") {
 		cfg.Channels.Slack.SetAppToken(appToken)
 	}
-	if appSecret := nestedString(channels, "feishu", "app_secret"); appSecret != "" {
+	if appSecret := nestedString(channels, "feishu", "app_secret"); appSecret != "" && !strings.Contains(appSecret, "*") {
 		cfg.Channels.Feishu.SetAppSecret(appSecret)
 	}
-	if encryptKey := nestedString(channels, "feishu", "encrypt_key"); encryptKey != "" {
+	if encryptKey := nestedString(channels, "feishu", "encrypt_key"); encryptKey != "" && !strings.Contains(encryptKey, "*") {
 		cfg.Channels.Feishu.SetEncryptKey(encryptKey)
 	}
-	if verificationToken := nestedString(channels, "feishu", "verification_token"); verificationToken != "" {
+	if verificationToken := nestedString(channels, "feishu", "verification_token"); verificationToken != "" && !strings.Contains(verificationToken, "*") {
 		cfg.Channels.Feishu.SetVerificationToken(verificationToken)
 	}
 }
