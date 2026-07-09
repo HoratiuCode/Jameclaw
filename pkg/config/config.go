@@ -1279,6 +1279,15 @@ type ReadFileToolConfig struct {
 	MaxReadFileSize int  `json:"max_read_file_size"`
 }
 
+type MacControlToolsConfig struct {
+	ToolConfig        `                         envPrefix:"JAMECLAW_TOOLS_MAC_CONTROL_"`
+	AllowUIAutomation bool `json:"allow_ui_automation" env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_UI_AUTOMATION"`
+	AllowTyping       bool `json:"allow_typing"        env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_TYPING"`
+	AllowShortcuts    bool `json:"allow_shortcuts"     env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SHORTCUTS"`
+	AllowScreenshots  bool `json:"allow_screenshots"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SCREENSHOTS"`
+	AllowAppleScript  bool `json:"allow_applescript"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_APPLESCRIPT"`
+}
+
 type ToolsConfig struct {
 	AllowReadPaths  []string `json:"allow_read_paths"  env:"JAMECLAW_TOOLS_ALLOW_READ_PATHS"`
 	AllowWritePaths []string `json:"allow_write_paths" env:"JAMECLAW_TOOLS_ALLOW_WRITE_PATHS"`
@@ -1289,29 +1298,30 @@ type ToolsConfig struct {
 	// FilterMinLength is the minimum content length required for filtering.
 	// Content shorter than this will be returned unchanged for performance.
 	// Default: 8
-	FilterMinLength int                `json:"filter_min_length" env:"JAMECLAW_TOOLS_FILTER_MIN_LENGTH"`
-	Web             WebToolsConfig     `json:"web"`
-	Cron            CronToolsConfig    `json:"cron"`
-	Exec            ExecConfig         `json:"exec"`
-	Skills          SkillsToolsConfig  `json:"skills"`
-	MediaCleanup    MediaCleanupConfig `json:"media_cleanup"`
-	MCP             MCPConfig          `json:"mcp"`
-	AppendFile      ToolConfig         `json:"append_file"                                              envPrefix:"JAMECLAW_TOOLS_APPEND_FILE_"`
-	EditFile        ToolConfig         `json:"edit_file"                                                envPrefix:"JAMECLAW_TOOLS_EDIT_FILE_"`
-	FindSkills      ToolConfig         `json:"find_skills"                                              envPrefix:"JAMECLAW_TOOLS_FIND_SKILLS_"`
-	I2C             ToolConfig         `json:"i2c"                                                      envPrefix:"JAMECLAW_TOOLS_I2C_"`
-	InstallSkill    ToolConfig         `json:"install_skill"                                            envPrefix:"JAMECLAW_TOOLS_INSTALL_SKILL_"`
-	ListDir         ToolConfig         `json:"list_dir"                                                 envPrefix:"JAMECLAW_TOOLS_LIST_DIR_"`
-	Message         ToolConfig         `json:"message"                                                  envPrefix:"JAMECLAW_TOOLS_MESSAGE_"`
-	ReadFile        ReadFileToolConfig `json:"read_file"                                                envPrefix:"JAMECLAW_TOOLS_READ_FILE_"`
-	SendFile        ToolConfig         `json:"send_file"                                                envPrefix:"JAMECLAW_TOOLS_SEND_FILE_"`
-	Spawn           ToolConfig         `json:"spawn"                                                    envPrefix:"JAMECLAW_TOOLS_SPAWN_"`
-	SpawnStatus     ToolConfig         `json:"spawn_status"                                             envPrefix:"JAMECLAW_TOOLS_SPAWN_STATUS_"`
-	SPI             ToolConfig         `json:"spi"                                                      envPrefix:"JAMECLAW_TOOLS_SPI_"`
-	Subagent        ToolConfig         `json:"subagent"                                                 envPrefix:"JAMECLAW_TOOLS_SUBAGENT_"`
-	WebhookPost     ToolConfig         `json:"webhook_post"                                             envPrefix:"JAMECLAW_TOOLS_WEBHOOK_POST_"`
-	WebFetch        ToolConfig         `json:"web_fetch"                                                envPrefix:"JAMECLAW_TOOLS_WEB_FETCH_"`
-	WriteFile       ToolConfig         `json:"write_file"                                               envPrefix:"JAMECLAW_TOOLS_WRITE_FILE_"`
+	FilterMinLength int                   `json:"filter_min_length" env:"JAMECLAW_TOOLS_FILTER_MIN_LENGTH"`
+	Web             WebToolsConfig        `json:"web"`
+	Cron            CronToolsConfig       `json:"cron"`
+	Exec            ExecConfig            `json:"exec"`
+	Skills          SkillsToolsConfig     `json:"skills"`
+	MediaCleanup    MediaCleanupConfig    `json:"media_cleanup"`
+	MCP             MCPConfig             `json:"mcp"`
+	AppendFile      ToolConfig            `json:"append_file"                                              envPrefix:"JAMECLAW_TOOLS_APPEND_FILE_"`
+	EditFile        ToolConfig            `json:"edit_file"                                                envPrefix:"JAMECLAW_TOOLS_EDIT_FILE_"`
+	FindSkills      ToolConfig            `json:"find_skills"                                              envPrefix:"JAMECLAW_TOOLS_FIND_SKILLS_"`
+	I2C             ToolConfig            `json:"i2c"                                                      envPrefix:"JAMECLAW_TOOLS_I2C_"`
+	InstallSkill    ToolConfig            `json:"install_skill"                                            envPrefix:"JAMECLAW_TOOLS_INSTALL_SKILL_"`
+	ListDir         ToolConfig            `json:"list_dir"                                                 envPrefix:"JAMECLAW_TOOLS_LIST_DIR_"`
+	MacControl      MacControlToolsConfig `json:"mac_control"                                           envPrefix:"JAMECLAW_TOOLS_MAC_CONTROL_"`
+	Message         ToolConfig            `json:"message"                                                  envPrefix:"JAMECLAW_TOOLS_MESSAGE_"`
+	ReadFile        ReadFileToolConfig    `json:"read_file"                                                envPrefix:"JAMECLAW_TOOLS_READ_FILE_"`
+	SendFile        ToolConfig            `json:"send_file"                                                envPrefix:"JAMECLAW_TOOLS_SEND_FILE_"`
+	Spawn           ToolConfig            `json:"spawn"                                                    envPrefix:"JAMECLAW_TOOLS_SPAWN_"`
+	SpawnStatus     ToolConfig            `json:"spawn_status"                                             envPrefix:"JAMECLAW_TOOLS_SPAWN_STATUS_"`
+	SPI             ToolConfig            `json:"spi"                                                      envPrefix:"JAMECLAW_TOOLS_SPI_"`
+	Subagent        ToolConfig            `json:"subagent"                                                 envPrefix:"JAMECLAW_TOOLS_SUBAGENT_"`
+	WebhookPost     ToolConfig            `json:"webhook_post"                                             envPrefix:"JAMECLAW_TOOLS_WEBHOOK_POST_"`
+	WebFetch        ToolConfig            `json:"web_fetch"                                                envPrefix:"JAMECLAW_TOOLS_WEB_FETCH_"`
+	WriteFile       ToolConfig            `json:"write_file"                                               envPrefix:"JAMECLAW_TOOLS_WRITE_FILE_"`
 }
 
 // IsFilterSensitiveDataEnabled returns true if sensitive data filtering is enabled
@@ -2274,6 +2284,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.InstallSkill.Enabled
 	case "list_dir":
 		return t.ListDir.Enabled
+	case "mac_control":
+		return t.MacControl.Enabled
 	case "message":
 		return t.Message.Enabled
 	case "read_file":

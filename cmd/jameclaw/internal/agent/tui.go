@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -30,6 +31,7 @@ import (
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/pkg/providers"
 	"github.com/sipeed/jameclaw/pkg/skills"
+	"github.com/sipeed/jameclaw/pkg/voice"
 	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
 
@@ -81,6 +83,13 @@ type terminalChat struct {
 	stopSpinner    chan struct{}
 	spinnerFrame   string
 	lastCtrlCAt    time.Time
+	voiceMode      bool
+	voiceRecorder  *terminalVoiceRecorder
+}
+
+type terminalVoiceRecorder struct {
+	path string
+	cmd  *exec.Cmd
 }
 
 func runTerminalChat(loop *agentcore.AgentLoop, sessionKey, agentEmoji string, reasoningDisplay reasoningMode) error {
@@ -298,6 +307,11 @@ type terminalPickerItem struct {
 	Action    func()
 }
 
+type terminalCommandItem struct {
+	Command     string
+	Description string
+}
+
 func (t *terminalChat) showListOverlay(title, hint string, items []terminalPickerItem) {
 	list := tview.NewList().
 		SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorGreen).Bold(true)).
@@ -322,6 +336,148 @@ func (t *terminalChat) showListOverlay(title, hint string, items []terminalPicke
 			AddItem(tview.NewBox(), 0, 1, false), 0, 4, true).
 		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[gray]"+hint+"[-]"), 1, 0, false)
 	t.app.SetRoot(frame, true).SetFocus(list)
+}
+
+func (t *terminalChat) openCommandPalette(initialQuery string) {
+	allItems := t.commandPaletteItems()
+	var filtered []terminalCommandItem
+
+	search := tview.NewInputField().
+		SetLabel(" Search / ").
+		SetFieldWidth(0)
+	search.SetBorder(true).SetTitle(" Slash Commands ")
+
+	list := tview.NewList().
+		SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorGreen).Bold(true)).
+		SetHighlightFullLine(true)
+	list.SetBorder(true).SetTitle(" Matches ")
+
+	insertSelected := func() {
+		if len(filtered) == 0 {
+			return
+		}
+		index := list.GetCurrentItem()
+		if index < 0 || index >= len(filtered) {
+			index = 0
+		}
+		t.input.SetText(filtered[index].Command, true)
+		t.restoreLayout()
+	}
+
+	refresh := func(query string) {
+		filtered = filterCommandItems(allItems, query)
+		list.Clear()
+		if len(filtered) == 0 {
+			list.AddItem("No matching commands", "Try another search term", 0, nil)
+			return
+		}
+		for _, item := range filtered {
+			command := item.Command
+			list.AddItem(command, item.Description, 0, func() {
+				t.input.SetText(command, true)
+				t.restoreLayout()
+			})
+		}
+		list.SetCurrentItem(0)
+	}
+
+	search.SetChangedFunc(refresh)
+	search.SetDoneFunc(func(key tcell.Key) {
+		switch key {
+		case tcell.KeyEnter:
+			insertSelected()
+		case tcell.KeyEscape:
+			t.restoreLayout()
+		case tcell.KeyTab:
+			t.app.SetFocus(list)
+		}
+	})
+	search.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyDown:
+			t.app.SetFocus(list)
+			return nil
+		}
+		return event
+	})
+
+	list.SetSelectedFunc(func(index int, _, _ string, _ rune) {
+		if index < 0 || index >= len(filtered) {
+			return
+		}
+		t.input.SetText(filtered[index].Command, true)
+		t.restoreLayout()
+	})
+	list.SetDoneFunc(t.restoreLayout)
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEsc:
+			t.restoreLayout()
+			return nil
+		case tcell.KeyTab, tcell.KeyBacktab:
+			t.app.SetFocus(search)
+			return nil
+		}
+		return event
+	})
+
+	frame := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(tview.NewBox(), 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(search, 3, 0, true).
+			AddItem(list, 0, 1, false), 0, 5, true).
+		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[gray]Type to search, Enter inserts, Down selects list, Esc closes[-]"), 1, 0, false)
+
+	search.SetText(strings.TrimPrefix(strings.TrimSpace(initialQuery), "/"))
+	refresh(search.GetText())
+	t.app.SetRoot(frame, true).SetFocus(search)
+}
+
+func (t *terminalChat) commandPaletteItems() []terminalCommandItem {
+	descriptions := terminalCommandDescriptions()
+	seen := make(map[string]bool)
+	items := make([]terminalCommandItem, 0, len(t.completionList))
+	for _, command := range t.completionList {
+		command = strings.TrimSpace(command)
+		if command == "" || seen[command] {
+			continue
+		}
+		seen[command] = true
+		items = append(items, terminalCommandItem{
+			Command:     command,
+			Description: commandDescription(command, descriptions),
+		})
+	}
+	return items
+}
+
+func filterCommandItems(items []terminalCommandItem, query string) []terminalCommandItem {
+	query = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(query, "/")))
+	if query == "" {
+		return append([]terminalCommandItem(nil), items...)
+	}
+	var matches []terminalCommandItem
+	for _, item := range items {
+		haystack := strings.ToLower(item.Command + " " + item.Description)
+		if strings.Contains(haystack, query) {
+			matches = append(matches, item)
+		}
+	}
+	return matches
+}
+
+func commandDescription(command string, descriptions map[string]string) string {
+	if description, ok := descriptions[command]; ok {
+		return description
+	}
+	base := command
+	if idx := strings.IndexAny(base, " [<"); idx >= 0 {
+		base = base[:idx]
+	}
+	if description, ok := descriptions[base]; ok {
+		return description
+	}
+	return "Slash command"
 }
 
 func (t *terminalChat) restoreLayout() {
@@ -391,7 +547,7 @@ func (t *terminalChat) runAgentCommand(text string) {
 }
 
 func terminalHelpText() string {
-	return "Local TUI commands: /help, /commands, /model [name], /models, /new, /reset, /retry, /undo, /compress, /usage, /skills, /personality [text], /busy interrupt|queue|steer|status, /steer <prompt>, /stop, /sessions, /settings, /gateway-status, /auth [provider], /webui, /background <prompt>, /allow-computer-search on|off, /computer-search <query> [path], /clear, /status, /quit. Shortcuts: Enter/Ctrl-S send, Ctrl-J newline, Tab complete, Ctrl-C clear/warn/exit, Ctrl-X hard abort, Ctrl-G graceful stop, Ctrl-T reasoning, Ctrl-R reload history, Ctrl-L clear view, Ctrl-D exit."
+	return "Local TUI commands: /help, /commands, /model [name], /models, /new, /reset, /retry, /undo, /compress, /usage, /skills, /personality [text], /voice, /busy interrupt|queue|steer|status, /steer <prompt>, /stop, /sessions, /settings, /gateway-status, /auth [provider], /webui, /background <prompt>, /allow-computer-search on|off, /computer-search <query> [path], /clear, /status, /quit. Shortcuts: Enter/Ctrl-S send, Ctrl-J newline, Tab complete, Ctrl-C clear/warn/exit, Ctrl-X hard abort, Ctrl-G graceful stop, Ctrl-T reasoning, Ctrl-R reload history, Ctrl-L clear view, Ctrl-D exit."
 }
 
 func (t *terminalChat) switchDefaultModel(name string) {
@@ -427,6 +583,203 @@ func (t *terminalChat) switchDefaultModel(name string) {
 	t.mu.Unlock()
 	t.addSystem(fmt.Sprintf("Default model changed from %s to %s. Restart the terminal agent if the active provider does not switch immediately.", formatTerminalModelName(old), name))
 	t.refreshAll()
+}
+
+func (t *terminalChat) enterVoiceMode() {
+	cfg, err := internal.LoadConfig()
+	if err != nil {
+		t.addSystem("Voice mode unavailable: " + err.Error())
+		return
+	}
+	if voice.DetectTranscriber(cfg) == nil {
+		t.addSystem("Voice mode needs a configured transcription provider. Configure voice.model_name, ElevenLabs, or a Groq model/API key first.")
+		return
+	}
+	if _, err := resolveVoiceRecorderCommand(""); err != nil {
+		t.addSystem("Voice mode needs a local recorder. Install ffmpeg, sox/rec, or arecord, then try /voice again.")
+		return
+	}
+
+	t.mu.Lock()
+	t.voiceMode = true
+	t.suggestionText = "voice mode: press Space to start recording, Space again to transcribe, Esc to cancel"
+	t.mu.Unlock()
+	t.input.SetText("", true)
+	t.refreshStatus()
+}
+
+func (t *terminalChat) leaveVoiceMode(message string) {
+	t.mu.Lock()
+	t.voiceMode = false
+	t.voiceRecorder = nil
+	t.suggestionText = message
+	t.mu.Unlock()
+	t.refreshStatus()
+}
+
+func (t *terminalChat) toggleVoiceRecording() {
+	t.mu.Lock()
+	recorder := t.voiceRecorder
+	t.mu.Unlock()
+	if recorder == nil {
+		t.startVoiceRecording()
+		return
+	}
+	t.stopVoiceRecording(recorder)
+}
+
+func (t *terminalChat) startVoiceRecording() {
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("jameclaw-voice-%d.wav", time.Now().UnixNano()))
+	cmd, err := resolveVoiceRecorderCommand(path)
+	if err != nil {
+		t.leaveVoiceMode("voice recorder unavailable")
+		t.addSystem("Voice recording failed: " + err.Error())
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		t.leaveVoiceMode("voice recorder failed")
+		t.addSystem("Voice recording failed: " + err.Error())
+		return
+	}
+
+	t.mu.Lock()
+	t.voiceRecorder = &terminalVoiceRecorder{path: path, cmd: cmd}
+	t.suggestionText = "recording voice... press Space to stop and transcribe"
+	t.mu.Unlock()
+	t.refreshStatus()
+}
+
+func (t *terminalChat) stopVoiceRecording(recorder *terminalVoiceRecorder) {
+	t.mu.Lock()
+	if t.voiceRecorder == recorder {
+		t.voiceRecorder = nil
+		t.suggestionText = "transcribing voice..."
+	}
+	t.mu.Unlock()
+	t.refreshStatus()
+
+	go func() {
+		if err := stopVoiceRecorder(recorder.cmd); err != nil {
+			t.addSystem("Voice recording stopped with warning: " + err.Error())
+		}
+		defer os.Remove(recorder.path)
+
+		cfg, err := internal.LoadConfig()
+		if err != nil {
+			t.leaveVoiceMode("voice transcription failed")
+			t.addSystem("Voice transcription failed: " + err.Error())
+			return
+		}
+		transcriber := voice.DetectTranscriber(cfg)
+		if transcriber == nil {
+			t.leaveVoiceMode("voice transcription unavailable")
+			t.addSystem("Voice transcription failed: no configured transcription provider.")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		result, err := transcriber.Transcribe(ctx, recorder.path)
+		if err != nil {
+			t.leaveVoiceMode("voice transcription failed")
+			t.addSystem("Voice transcription failed: " + err.Error())
+			return
+		}
+		text := strings.TrimSpace(result.Text)
+		if text == "" {
+			t.leaveVoiceMode("no speech detected")
+			t.addSystem("Voice transcription returned no text.")
+			return
+		}
+
+		t.app.QueueUpdateDraw(func() {
+			t.insertVoiceText(text)
+			t.leaveVoiceMode("voice text inserted")
+		})
+	}()
+}
+
+func (t *terminalChat) cancelVoiceMode() {
+	t.mu.Lock()
+	recorder := t.voiceRecorder
+	t.voiceRecorder = nil
+	t.voiceMode = false
+	t.suggestionText = "voice mode cancelled"
+	t.mu.Unlock()
+	t.refreshStatus()
+	if recorder == nil {
+		return
+	}
+	go func() {
+		_ = stopVoiceRecorder(recorder.cmd)
+		_ = os.Remove(recorder.path)
+	}()
+}
+
+func (t *terminalChat) insertVoiceText(text string) {
+	current := t.input.GetText()
+	if strings.TrimSpace(current) == "" {
+		t.input.SetText(text, true)
+		return
+	}
+	separator := " "
+	if strings.HasSuffix(current, "\n") || strings.HasSuffix(current, " ") {
+		separator = ""
+	}
+	t.input.SetText(current+separator+text, true)
+}
+
+func resolveVoiceRecorderCommand(path string) (*exec.Cmd, error) {
+	if ffmpeg, err := exec.LookPath("ffmpeg"); err == nil {
+		args := []string{"-hide_banner", "-loglevel", "error", "-y"}
+		switch runtime.GOOS {
+		case "darwin":
+			args = append(args, "-f", "avfoundation", "-i", ":0")
+		case "linux":
+			args = append(args, "-f", "pulse", "-i", "default")
+		default:
+			args = nil
+		}
+		if args != nil {
+			args = append(args, "-ar", "16000", "-ac", "1", path)
+			return exec.Command(ffmpeg, args...), nil
+		}
+	}
+	if rec, err := exec.LookPath("rec"); err == nil {
+		return exec.Command(rec, "-q", "-r", "16000", "-c", "1", path), nil
+	}
+	if arecord, err := exec.LookPath("arecord"); err == nil {
+		return exec.Command(arecord, "-f", "S16_LE", "-r", "16000", "-c", "1", path), nil
+	}
+	return nil, fmt.Errorf("no supported recorder found in PATH")
+}
+
+func stopVoiceRecorder(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		_ = cmd.Process.Kill()
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			return nil
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil
+		}
+		return err
+	case <-time.After(2 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+		return nil
+	}
 }
 
 func formatTerminalModelName(name string) string {
@@ -739,6 +1092,9 @@ func (t *terminalChat) handleLocalCommand(text string) bool {
 		return true
 	case strings.HasPrefix(lower, "/personality "):
 		t.setPersonality(strings.TrimSpace(trimmed[len("/personality "):]))
+		return true
+	case lower == "/voice" || lower == "/vocie":
+		t.enterVoiceMode()
 		return true
 	case lower == "/stop":
 		t.stopCurrentTurn()
@@ -1410,6 +1766,7 @@ func terminalCompletions(loop *agentcore.AgentLoop) []string {
 		"/usage",
 		"/skills",
 		"/personality ",
+		"/voice",
 		"/stop",
 		"/steer ",
 		"/sessions",
@@ -1447,7 +1804,99 @@ func terminalCompletions(loop *agentcore.AgentLoop) []string {
 	return values
 }
 
+func terminalCommandDescriptions() map[string]string {
+	descriptions := map[string]string{
+		"/quit":                      "Exit terminal chat.",
+		"/exit":                      "Exit terminal chat.",
+		"/help":                      "Show local terminal help.",
+		"/commands":                  "List available slash commands.",
+		"/model":                     "Pick or set the default model.",
+		"/model ":                    "Set the default model by name.",
+		"/models":                    "Open the model picker.",
+		"/new":                       "Start a new terminal session.",
+		"/reset":                     "Reset the current session history.",
+		"/retry":                     "Retry the last user turn.",
+		"/undo":                      "Remove the last user turn and following messages.",
+		"/compress":                  "Compact older session history.",
+		"/usage":                     "Show token and session usage.",
+		"/skills":                    "Show installed skills.",
+		"/personality":               "Clear the session personality note.",
+		"/personality ":              "Set a session personality note.",
+		"/voice":                     "Record speech, transcribe it, and insert text into the chat box.",
+		"/stop":                      "Stop the current turn.",
+		"/steer":                     "Steer the active turn.",
+		"/steer ":                    "Send steering text to the active turn.",
+		"/sessions":                  "Open saved session picker.",
+		"/settings":                  "Open terminal settings.",
+		"/gateway-status":            "Show gateway process status.",
+		"/auth":                      "Open auth provider picker.",
+		"/auth ":                     "Run auth login for a provider.",
+		"/webui":                     "Open or start the Web UI.",
+		"/background":                "Run a prompt in a background session.",
+		"/background ":               "Run a prompt in a background session.",
+		"/busy interrupt":            "Interrupt and queue new input while busy.",
+		"/busy queue":                "Queue new input while busy.",
+		"/busy steer":                "Steer the active turn while busy.",
+		"/busy status":               "Show current busy input behavior.",
+		"/allow-computer-search on":  "Allow local computer search in this terminal session.",
+		"/allow-computer-search off": "Disable local computer search.",
+		"/computer-search":           "Search local files from the terminal.",
+		"/computer-search ":          "Search local files by query and optional path.",
+		"/clear":                     "Clear the terminal transcript view.",
+		"/status":                    "Show current terminal status.",
+		"/start":                     "Start or resume an agent workflow.",
+		"/show":                      "Show configured workspace information.",
+		"/list":                      "List available resources.",
+		"/use":                       "Switch the active agent.",
+		"/emoji":                     "Set or show the agent emoji.",
+		"/persona":                   "Set or show persona notes.",
+		"/style":                     "Set or show style notes.",
+		"/switch":                    "Switch model, agent, or profile.",
+		"/check":                     "Run configured checks.",
+		"/subagents":                 "Show or manage subagents.",
+		"/reload":                    "Reload configuration.",
+	}
+	for _, definition := range commands.BuiltinDefinitions() {
+		base := "/" + definition.Name
+		if definition.Description != "" {
+			descriptions[base] = definition.Description
+		}
+		usage := definition.EffectiveUsage()
+		if definition.Description != "" {
+			descriptions[usage] = definition.Description
+		}
+		for _, sub := range definition.SubCommands {
+			command := base + " " + sub.Name
+			if sub.ArgsUsage != "" {
+				command += " " + sub.ArgsUsage
+			}
+			if sub.Description != "" {
+				descriptions[command] = sub.Description
+			}
+		}
+	}
+	return descriptions
+}
+
 func (t *terminalChat) handleKey(event *tcell.EventKey) *tcell.EventKey {
+	t.mu.Lock()
+	voiceMode := t.voiceMode
+	t.mu.Unlock()
+	if voiceMode {
+		switch {
+		case event.Key() == tcell.KeyEsc:
+			t.cancelVoiceMode()
+			return nil
+		case event.Key() == tcell.KeyRune && event.Rune() == ' ':
+			t.toggleVoiceRecording()
+			return nil
+		}
+	}
+	if event.Key() == tcell.KeyRune && event.Rune() == '/' && strings.TrimSpace(t.input.GetText()) == "" {
+		t.openCommandPalette("")
+		return nil
+	}
+
 	switch event.Key() {
 	case tcell.KeyEnter, tcell.KeyCtrlS:
 		t.submit()

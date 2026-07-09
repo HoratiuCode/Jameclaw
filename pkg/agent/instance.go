@@ -98,6 +98,9 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("append_file") {
 		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
 	}
+	if cfg.Tools.IsToolEnabled("mac_control") {
+		toolsRegistry.Register(tools.NewMacControlTool(cfg.Tools.MacControl))
+	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessions := initSessionStore(sessionsDir)

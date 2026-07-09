@@ -16,6 +16,7 @@ import (
 const (
 	autoStartEntryName = "JameClawLauncher"
 	launchAgentLabel   = "io.jameclaw.launcher"
+	launchAgentLogDir  = "JameClaw"
 )
 
 type autoStartRequest struct {
@@ -191,6 +192,9 @@ func setDarwinAutoStart(enabled bool, exePath string, args []string) error {
 		if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
 			return err
 		}
+		if err := os.MkdirAll(macLaunchAgentLogDir(), 0o755); err != nil {
+			return err
+		}
 		content := buildDarwinPlist(exePath, args)
 		return os.WriteFile(plistPath, []byte(content), 0o644)
 	}
@@ -226,6 +230,7 @@ func buildDarwinPlist(exePath string, args []string) string {
 	programArgs := make([]string, 0, len(args)+1)
 	programArgs = append(programArgs, exePath)
 	programArgs = append(programArgs, args...)
+	logDir := macLaunchAgentLogDir()
 
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
@@ -246,9 +251,18 @@ func buildDarwinPlist(exePath string, args []string) string {
 	b.WriteString(`  <true/>` + "\n")
 	b.WriteString(`  <key>ProcessType</key>` + "\n")
 	b.WriteString(`  <string>Background</string>` + "\n")
+	b.WriteString(`  <key>StandardOutPath</key>` + "\n")
+	b.WriteString(`  <string>` + xmlEscape(filepath.Join(logDir, "jameclaw-web.log")) + `</string>` + "\n")
+	b.WriteString(`  <key>StandardErrorPath</key>` + "\n")
+	b.WriteString(`  <string>` + xmlEscape(filepath.Join(logDir, "jameclaw-web.err.log")) + `</string>` + "\n")
 	b.WriteString(`</dict>` + "\n")
 	b.WriteString(`</plist>` + "\n")
 	return b.String()
+}
+
+func macLaunchAgentLogDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "Logs", launchAgentLogDir)
 }
 
 func linuxAutoStartPath() string {

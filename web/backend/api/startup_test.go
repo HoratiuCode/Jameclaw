@@ -54,3 +54,22 @@ func TestBuildDarwinPlistIncludesRunAtLoad(t *testing.T) {
 		t.Fatalf("plist missing RunAtLoad true value:\n%s", plist)
 	}
 }
+
+func TestBuildDarwinPlistIncludesLogPaths(t *testing.T) {
+	plist := buildDarwinPlist("/tmp/jameclaw-web", []string{"-no-browser", "/tmp/config & data.json"})
+	if !strings.Contains(plist, "<key>StandardOutPath</key>") {
+		t.Fatalf("plist missing StandardOutPath key:\n%s", plist)
+	}
+	if !strings.Contains(plist, "<key>StandardErrorPath</key>") {
+		t.Fatalf("plist missing StandardErrorPath key:\n%s", plist)
+	}
+	if !strings.Contains(plist, "Library/Logs/JameClaw/jameclaw-web.log") {
+		t.Fatalf("plist missing stdout log path:\n%s", plist)
+	}
+	if !strings.Contains(plist, "Library/Logs/JameClaw/jameclaw-web.err.log") {
+		t.Fatalf("plist missing stderr log path:\n%s", plist)
+	}
+	if !strings.Contains(plist, "/tmp/config &amp; data.json") {
+		t.Fatalf("plist did not XML-escape arguments:\n%s", plist)
+	}
+}

@@ -458,7 +458,7 @@
       "web_extension_usage_notes": "How to Use",
       "web_extension_usage_notes_hint": "Edit these notes if you want to keep a custom install checklist with the config.",
       "autostart_label": "Launch at Login",
-      "autostart_hint": "Start JameClaw Web automatically when you log in.",
+      "autostart_hint": "Start the JameClaw Web service automatically when you log in to this computer.",
       "autostart_unsupported": "Launch at login is not supported on this platform.",
       "autostart_load_error": "Failed to load launch-at-login status.",
       "server_port": "Service Port",

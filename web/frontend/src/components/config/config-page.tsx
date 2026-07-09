@@ -361,11 +361,6 @@ export function ConfigPage() {
                 launcherForm={launcherForm}
                 onFieldChange={updateLauncherField}
                 disabled={saving || isLauncherLoading}
-              />
-
-              <DevicesSection
-                form={form}
-                onFieldChange={updateField}
                 autoStartEnabled={autoStartEnabled}
                 autoStartHint={autoStartHint}
                 autoStartDisabled={
@@ -376,6 +371,8 @@ export function ConfigPage() {
                 }
                 onAutoStartChange={setAutoStartEnabled}
               />
+
+              <DevicesSection form={form} onFieldChange={updateField} />
 
               <SystemSection
                 appVersion={appStatus?.version}

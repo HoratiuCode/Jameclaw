@@ -508,6 +508,16 @@ func DefaultConfig() *Config {
 			ListDir: ToolConfig{
 				Enabled: true,
 			},
+			MacControl: MacControlToolsConfig{
+				ToolConfig: ToolConfig{
+					Enabled: true,
+				},
+				AllowUIAutomation: true,
+				AllowTyping:       true,
+				AllowShortcuts:    true,
+				AllowScreenshots:  true,
+				AllowAppleScript:  false,
+			},
 			Message: ToolConfig{
 				Enabled: true,
 			},

@@ -72,6 +72,12 @@ var toolCatalog = []toolCatalogEntry{
 		ConfigKey:   "exec",
 	},
 	{
+		Name:        "mac_control",
+		Description: "Open macOS apps, URLs, local paths, and browser search results.",
+		Category:    "automation",
+		ConfigKey:   "mac_control",
+	},
+	{
 		Name:        "cron",
 		Description: "Schedule one-time or recurring reminders, jobs, and shell commands.",
 		Category:    "automation",
@@ -241,6 +247,8 @@ func buildToolSupport(cfg *config.Config) []toolSupportItem {
 			status, reasonCode = resolveDiscoveryToolSupport(cfg, cfg.Tools.MCP.Discovery.UseBM25)
 		case "i2c", "spi":
 			status, reasonCode = resolveHardwareToolSupport(cfg.Tools.IsToolEnabled(entry.ConfigKey))
+		case "mac_control":
+			status, reasonCode = resolveMacControlToolSupport(cfg.Tools.IsToolEnabled(entry.ConfigKey))
 		default:
 			if cfg.Tools.IsToolEnabled(entry.ConfigKey) {
 				status = "enabled"
@@ -257,6 +265,16 @@ func buildToolSupport(cfg *config.Config) []toolSupportItem {
 		})
 	}
 	return items
+}
+
+func resolveMacControlToolSupport(enabled bool) (string, string) {
+	if !enabled {
+		return "disabled", ""
+	}
+	if runtime.GOOS != "darwin" {
+		return "blocked", "requires_macos"
+	}
+	return "enabled", ""
 }
 
 func resolveHardwareToolSupport(enabled bool) (string, string) {
@@ -296,6 +314,8 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		cfg.Tools.AppendFile.Enabled = enabled
 	case "exec":
 		cfg.Tools.Exec.Enabled = enabled
+	case "mac_control":
+		cfg.Tools.MacControl.Enabled = enabled
 	case "cron":
 		cfg.Tools.Cron.Enabled = enabled
 	case "web_search":

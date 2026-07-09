@@ -21,70 +21,76 @@ var currentLang Language = LanguageEnglish
 type TranslationKey string
 
 const (
-	AppTooltip          TranslationKey = "AppTooltip"
-	MenuOpen            TranslationKey = "MenuOpen"
-	MenuOpenTooltip     TranslationKey = "MenuOpenTooltip"
-	MenuConsole         TranslationKey = "MenuConsole"
-	MenuConsoleTooltip  TranslationKey = "MenuConsoleTooltip"
-	MenuTerminalChat    TranslationKey = "MenuTerminalChat"
-	MenuTerminalTooltip TranslationKey = "MenuTerminalTooltip"
-	MenuAbout           TranslationKey = "MenuAbout"
-	MenuAboutTooltip    TranslationKey = "MenuAboutTooltip"
-	MenuVersion         TranslationKey = "MenuVersion"
-	MenuVersionTooltip  TranslationKey = "MenuVersionTooltip"
-	MenuGitHub          TranslationKey = "MenuGitHub"
-	MenuDocs            TranslationKey = "MenuDocs"
-	MenuRestart         TranslationKey = "MenuRestart"
-	MenuRestartTooltip  TranslationKey = "MenuRestartTooltip"
-	MenuQuit            TranslationKey = "MenuQuit"
-	MenuQuitTooltip     TranslationKey = "MenuQuitTooltip"
-	Exiting             TranslationKey = "Exiting"
-	DocUrl              TranslationKey = "DocUrl"
+	AppTooltip           TranslationKey = "AppTooltip"
+	MenuOpen             TranslationKey = "MenuOpen"
+	MenuOpenTooltip      TranslationKey = "MenuOpenTooltip"
+	MenuConsole          TranslationKey = "MenuConsole"
+	MenuConsoleTooltip   TranslationKey = "MenuConsoleTooltip"
+	MenuTerminalChat     TranslationKey = "MenuTerminalChat"
+	MenuTerminalTooltip  TranslationKey = "MenuTerminalTooltip"
+	MenuAbout            TranslationKey = "MenuAbout"
+	MenuAboutTooltip     TranslationKey = "MenuAboutTooltip"
+	MenuVersion          TranslationKey = "MenuVersion"
+	MenuVersionTooltip   TranslationKey = "MenuVersionTooltip"
+	MenuGitHub           TranslationKey = "MenuGitHub"
+	MenuDocs             TranslationKey = "MenuDocs"
+	MenuRestart          TranslationKey = "MenuRestart"
+	MenuRestartTooltip   TranslationKey = "MenuRestartTooltip"
+	MenuKeepAwake        TranslationKey = "MenuKeepAwake"
+	MenuKeepAwakeTooltip TranslationKey = "MenuKeepAwakeTooltip"
+	MenuQuit             TranslationKey = "MenuQuit"
+	MenuQuitTooltip      TranslationKey = "MenuQuitTooltip"
+	Exiting              TranslationKey = "Exiting"
+	DocUrl               TranslationKey = "DocUrl"
 )
 
 // Translation tables
 var translations = map[Language]map[TranslationKey]string{
 	LanguageEnglish: {
-		AppTooltip:          "%s - Web Console",
-		MenuOpen:            "Open",
-		MenuOpenTooltip:     "Open JameClaw",
-		MenuConsole:         "Console",
-		MenuConsoleTooltip:  "Open JameClaw console in browser",
-		MenuTerminalChat:    "Terminal",
-		MenuTerminalTooltip: "Open JameClaw agent chat in Terminal",
-		MenuAbout:           "About",
-		MenuAboutTooltip:    "About JameClaw",
-		MenuVersion:         "Version: %s",
-		MenuVersionTooltip:  "Current version number",
-		MenuGitHub:          "GitHub",
-		MenuDocs:            "Documentation",
-		MenuRestart:         "Restart Service",
-		MenuRestartTooltip:  "Restart Gateway service",
-		MenuQuit:            "Quit",
-		MenuQuitTooltip:     "Exit JameClaw",
-		Exiting:             "Exiting JameClaw...",
-		DocUrl:              "https://docs.jameclaw.io/docs/",
+		AppTooltip:           "%s - Web Console",
+		MenuOpen:             "Open",
+		MenuOpenTooltip:      "Open JameClaw",
+		MenuConsole:          "Console",
+		MenuConsoleTooltip:   "Open JameClaw console in browser",
+		MenuTerminalChat:     "Terminal",
+		MenuTerminalTooltip:  "Open JameClaw agent chat in Terminal",
+		MenuAbout:            "About",
+		MenuAboutTooltip:     "About JameClaw",
+		MenuVersion:          "Version: %s",
+		MenuVersionTooltip:   "Current version number",
+		MenuGitHub:           "GitHub",
+		MenuDocs:             "Documentation",
+		MenuRestart:          "Restart Service",
+		MenuRestartTooltip:   "Restart Gateway service",
+		MenuKeepAwake:        "Keep Mac Awake",
+		MenuKeepAwakeTooltip: "Prevent macOS sleep while JameClaw works",
+		MenuQuit:             "Quit",
+		MenuQuitTooltip:      "Exit JameClaw",
+		Exiting:              "Exiting JameClaw...",
+		DocUrl:               "https://docs.jameclaw.io/docs/",
 	},
 	LanguageChinese: {
-		AppTooltip:          "%s - Web Console",
-		MenuOpen:            "Open",
-		MenuOpenTooltip:     "Open JameClaw",
-		MenuConsole:         "Console",
-		MenuConsoleTooltip:  "Open JameClaw console in browser",
-		MenuTerminalChat:    "Terminal",
-		MenuTerminalTooltip: "Open JameClaw agent chat in Terminal",
-		MenuAbout:           "About",
-		MenuAboutTooltip:    "About JameClaw",
-		MenuVersion:         "Version: %s",
-		MenuVersionTooltip:  "Current version number",
-		MenuGitHub:          "GitHub",
-		MenuDocs:            "Documentation",
-		MenuRestart:         "Restart Service",
-		MenuRestartTooltip:  "Restart Gateway service",
-		MenuQuit:            "Quit",
-		MenuQuitTooltip:     "Exit JameClaw",
-		Exiting:             "Exiting JameClaw...",
-		DocUrl:              "https://docs.jameclaw.io/docs/",
+		AppTooltip:           "%s - Web Console",
+		MenuOpen:             "Open",
+		MenuOpenTooltip:      "Open JameClaw",
+		MenuConsole:          "Console",
+		MenuConsoleTooltip:   "Open JameClaw console in browser",
+		MenuTerminalChat:     "Terminal",
+		MenuTerminalTooltip:  "Open JameClaw agent chat in Terminal",
+		MenuAbout:            "About",
+		MenuAboutTooltip:     "About JameClaw",
+		MenuVersion:          "Version: %s",
+		MenuVersionTooltip:   "Current version number",
+		MenuGitHub:           "GitHub",
+		MenuDocs:             "Documentation",
+		MenuRestart:          "Restart Service",
+		MenuRestartTooltip:   "Restart Gateway service",
+		MenuKeepAwake:        "Keep Mac Awake",
+		MenuKeepAwakeTooltip: "Prevent macOS sleep while JameClaw works",
+		MenuQuit:             "Quit",
+		MenuQuitTooltip:      "Exit JameClaw",
+		Exiting:              "Exiting JameClaw...",
+		DocUrl:               "https://docs.jameclaw.io/docs/",
 	},
 }
 

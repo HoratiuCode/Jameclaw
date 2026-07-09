@@ -45,6 +45,12 @@ func onReady() {
 
 	// Add restart option
 	mRestart := systray.AddMenuItem(T(MenuRestart), T(MenuRestartTooltip))
+	var keepAwakeClicked <-chan struct{}
+	var mKeepAwake *systray.MenuItem
+	if runtime.GOOS == "darwin" {
+		mKeepAwake = systray.AddMenuItemCheckbox(T(MenuKeepAwake), T(MenuKeepAwakeTooltip), false)
+		keepAwakeClicked = mKeepAwake.ClickedCh
+	}
 
 	systray.AddSeparator()
 
@@ -53,6 +59,7 @@ func onReady() {
 
 	// Handle menu clicks
 	go func() {
+		keepAwakeChecked := false
 		for {
 			select {
 			case <-mConsole.ClickedCh:
@@ -88,6 +95,25 @@ func onReady() {
 					}
 				}
 
+			case <-keepAwakeClicked:
+				next := !keepAwakeChecked
+				if err := setKeepAwake(next); err != nil {
+					logger.Errorf("Failed to update keep-awake mode: %v", err)
+					if mKeepAwake != nil {
+						mKeepAwake.Uncheck()
+					}
+					keepAwakeChecked = false
+					continue
+				}
+				keepAwakeChecked = next
+				if mKeepAwake != nil {
+					if keepAwakeChecked {
+						mKeepAwake.Check()
+					} else {
+						mKeepAwake.Uncheck()
+					}
+				}
+
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 			}
@@ -105,6 +131,7 @@ func onReady() {
 
 // onExit is called when the system tray is exiting
 func onExit() {
+	stopKeepAwake()
 	logger.Info(T(Exiting))
 }
 

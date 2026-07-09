@@ -1,0 +1,1 @@
+import{c as e}from"./index-DNY4oquq.js";const o=[["path",{d:"M17 4h-10a3 3 0 0 0 -3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3 -3v-10a3 3 0 0 0 -3 -3z",key:"svg-0"}]],l=e("filled","player-stop-filled","PlayerStopFilled",o);export{l as I};

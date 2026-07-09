@@ -10,8 +10,6 @@ import * as React from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
-import { designAtom, updateDesignStore, type Theme, type Font, type FontSize } from "@/store/design"
-
 import type { UpdateStatusResponse } from "@/api/update"
 import {
   type CoreConfigForm,
@@ -36,6 +34,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  type Font,
+  type FontSize,
+  type Theme,
+  designAtom,
+  updateDesignStore,
+} from "@/store/design"
 
 type UpdateCoreField = <K extends keyof CoreConfigForm>(
   key: K,
@@ -507,17 +512,34 @@ interface LauncherSectionProps {
   launcherForm: LauncherForm
   onFieldChange: UpdateLauncherField
   disabled: boolean
+  autoStartEnabled: boolean
+  autoStartHint: string
+  autoStartDisabled: boolean
+  onAutoStartChange: (checked: boolean) => void
 }
 
 export function LauncherSection({
   launcherForm,
   onFieldChange,
   disabled,
+  autoStartEnabled,
+  autoStartHint,
+  autoStartDisabled,
+  onAutoStartChange,
 }: LauncherSectionProps) {
   const { t } = useTranslation()
 
   return (
     <ConfigSectionCard title={t("pages.config.sections.launcher")}>
+      <SwitchCardField
+        label={t("pages.config.autostart_label")}
+        hint={autoStartHint}
+        layout="setting-row"
+        checked={autoStartEnabled}
+        disabled={autoStartDisabled}
+        onCheckedChange={onAutoStartChange}
+      />
+
       <SwitchCardField
         label={t("pages.config.lan_access")}
         hint={t("pages.config.lan_access_hint")}
@@ -563,20 +585,9 @@ export function LauncherSection({
 interface DevicesSectionProps {
   form: CoreConfigForm
   onFieldChange: UpdateCoreField
-  autoStartEnabled: boolean
-  autoStartHint: string
-  autoStartDisabled: boolean
-  onAutoStartChange: (checked: boolean) => void
 }
 
-export function DevicesSection({
-  form,
-  onFieldChange,
-  autoStartEnabled,
-  autoStartHint,
-  autoStartDisabled,
-  onAutoStartChange,
-}: DevicesSectionProps) {
+export function DevicesSection({ form, onFieldChange }: DevicesSectionProps) {
   const { t } = useTranslation()
 
   return (
@@ -595,15 +606,6 @@ export function DevicesSection({
         layout="setting-row"
         checked={form.monitorUSB}
         onCheckedChange={(checked) => onFieldChange("monitorUSB", checked)}
-      />
-
-      <SwitchCardField
-        label={t("pages.config.autostart_label")}
-        hint={autoStartHint}
-        layout="setting-row"
-        checked={autoStartEnabled}
-        disabled={autoStartDisabled}
-        onCheckedChange={onAutoStartChange}
       />
     </ConfigSectionCard>
   )
@@ -901,7 +903,9 @@ export function DesignSection() {
       >
         <Select
           value={design.fontSize}
-          onValueChange={(val) => updateDesignStore({ fontSize: val as FontSize })}
+          onValueChange={(val) =>
+            updateDesignStore({ fontSize: val as FontSize })
+          }
         >
           <SelectTrigger className="w-full">
             <SelectValue />
@@ -918,4 +922,3 @@ export function DesignSection() {
     </ConfigSectionCard>
   )
 }
-
