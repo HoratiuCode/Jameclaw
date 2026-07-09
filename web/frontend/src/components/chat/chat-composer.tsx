@@ -1,4 +1,9 @@
-import { IconArrowUp } from "@tabler/icons-react"
+import {
+  IconArrowUp,
+  IconMicrophone,
+  IconPaperclip,
+  IconPlayerStopFilled,
+} from "@tabler/icons-react"
 import type { KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
@@ -10,18 +15,28 @@ interface ChatComposerProps {
   input: string
   onInputChange: (value: string) => void
   onSend: () => void
+  onFileSelect?: (files: FileList) => void
+  onVoiceToggle?: () => void
   disabledReason?: string | null
   isConnected: boolean
   hasDefaultModel: boolean
+  isRecording?: boolean
+  canRecord?: boolean
+  isUploading?: boolean
 }
 
 export function ChatComposer({
   input,
   onInputChange,
   onSend,
+  onFileSelect,
+  onVoiceToggle,
   disabledReason,
   isConnected,
   hasDefaultModel,
+  isRecording = false,
+  canRecord = true,
+  isUploading = false,
 }: ChatComposerProps) {
   const { t } = useTranslation()
   const canInput = isConnected && hasDefaultModel
@@ -63,15 +78,63 @@ export function ChatComposer({
             )}
           </div>
 
-          <Button
-            size="icon"
-            className="size-8 rounded-full bg-violet-500 text-white transition-transform hover:bg-violet-600 active:scale-95"
-            onClick={onSend}
-            disabled={!input.trim() || !canInput}
-            title={disabledReason ?? undefined}
-          >
-            <IconArrowUp className="size-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {onFileSelect && (
+              <>
+                <input
+                  id="chat-file-upload"
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    if (event.target.files && event.target.files.length > 0) {
+                      onFileSelect(event.target.files)
+                    }
+                    event.target.value = ""
+                  }}
+                />
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  className="size-8 rounded-full transition-transform active:scale-95"
+                  disabled={!canInput || isUploading}
+                  title="Attach files"
+                  asChild
+                >
+                  <label htmlFor="chat-file-upload" className="cursor-pointer">
+                    <IconPaperclip className="size-4" />
+                  </label>
+                </Button>
+              </>
+            )}
+
+            {onVoiceToggle && (
+              <Button
+                size="icon"
+                variant={isRecording ? "destructive" : "secondary"}
+                className="size-8 rounded-full transition-transform active:scale-95"
+                onClick={onVoiceToggle}
+                disabled={!canInput || !canRecord}
+                title={isRecording ? "Stop recording" : "Record voice message"}
+              >
+                {isRecording ? (
+                  <IconPlayerStopFilled className="size-4" />
+                ) : (
+                  <IconMicrophone className="size-4" />
+                )}
+              </Button>
+            )}
+
+            <Button
+              size="icon"
+              className="size-8 rounded-full bg-violet-500 text-white transition-transform hover:bg-violet-600 active:scale-95"
+              onClick={onSend}
+              disabled={!input.trim() || !canInput}
+              title={disabledReason ?? undefined}
+            >
+              <IconArrowUp className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

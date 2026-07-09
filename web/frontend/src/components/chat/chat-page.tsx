@@ -17,12 +17,19 @@ import { useGateway } from "@/hooks/use-gateway"
 import { useJameChat } from "@/hooks/use-jame-chat"
 import { useSessionHistory } from "@/hooks/use-session-history"
 
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
 export function ChatPage() {
   const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const recordedChunksRef = useRef<Blob[]>([])
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [hasScrolled, setHasScrolled] = useState(false)
   const [input, setInput] = useState("")
+  const [isRecording, setIsRecording] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
 
   const {
     messages,
@@ -31,6 +38,8 @@ export function ChatPage() {
     isTyping,
     activeSessionId,
     sendMessage,
+    sendFile,
+    sendVoice,
     switchSession,
     newChat,
   } = useJameChat()
@@ -121,6 +130,126 @@ export function ChatPage() {
       )
     }
   }
+
+  const stopRecording = () => {
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop()
+    }
+  }
+
+  const handleVoiceToggle = async () => {
+    if (isRecording) {
+      stopRecording()
+      return
+    }
+    if (!canSend) {
+      if (disabledReason) {
+        toast.error(disabledReason)
+      }
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      toast.error("Voice recording is not available in this browser.")
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const preferredType = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+      ].find((type) => MediaRecorder.isTypeSupported(type))
+      const recorder = preferredType
+        ? new MediaRecorder(stream, { mimeType: preferredType })
+        : new MediaRecorder(stream)
+
+      recordedChunksRef.current = []
+      mediaStreamRef.current = stream
+      mediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunksRef.current.push(event.data)
+        }
+      }
+      recorder.onstop = () => {
+        const chunks = recordedChunksRef.current
+        const type = recorder.mimeType || preferredType || "audio/webm"
+        recordedChunksRef.current = []
+        mediaRecorderRef.current = null
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.current = null
+        setIsRecording(false)
+
+        if (chunks.length === 0) {
+          toast.error("No audio was recorded.")
+          return
+        }
+        void sendVoice(new Blob(chunks, { type }))
+      }
+      recorder.onerror = () => {
+        toast.error("Voice recording failed.")
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.current = null
+        mediaRecorderRef.current = null
+        setIsRecording(false)
+      }
+
+      recorder.start()
+      setIsRecording(true)
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not start voice recording."
+      toast.error(message)
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+      mediaStreamRef.current = null
+      mediaRecorderRef.current = null
+      setIsRecording(false)
+    }
+  }
+
+  const handleFileSelect = async (files: FileList) => {
+    if (!canSend) {
+      if (disabledReason) {
+        toast.error(disabledReason)
+      }
+      return
+    }
+
+    const selected = Array.from(files)
+    if (selected.length === 0) {
+      return
+    }
+
+    setIsUploading(true)
+    try {
+      for (const file of selected) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          toast.error(`${file.name} is larger than 25 MB.`)
+          continue
+        }
+        const caption = input.trim()
+        const sent = await sendFile(file, caption)
+        if (sent && caption) {
+          setInput("")
+        }
+      }
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      stopRecording()
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+    }
+  }, [])
 
   return (
     <div className="bg-background/95 flex h-full flex-col">
@@ -213,9 +342,14 @@ export function ChatPage() {
         input={input}
         onInputChange={setInput}
         onSend={handleSend}
+        onFileSelect={handleFileSelect}
+        onVoiceToggle={handleVoiceToggle}
         disabledReason={disabledReason}
         isConnected={isGatewayRunning}
         hasDefaultModel={Boolean(defaultModelName)}
+        isRecording={isRecording}
+        canRecord={typeof MediaRecorder !== "undefined"}
+        isUploading={isUploading}
       />
     </div>
   )

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -27,6 +28,7 @@ type agentSummary struct {
 
 func (h *Handler) registerAgentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents", h.handleListAgents)
+	mux.HandleFunc("POST /api/agents", h.handleCreateAgent)
 	mux.HandleFunc("PATCH /api/agents/{id}", h.handlePatchAgent)
 }
 
@@ -149,6 +151,117 @@ func stringListOrEmpty(values []string) []string {
 		return []string{}
 	}
 	return append([]string(nil), values...)
+}
+
+var agentIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	type createAgentRequest struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Model     string `json:"model"`
+		Workspace string `json:"workspace"`
+		ParentID  string `json:"parent_id"`
+	}
+	var req createAgentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	req.ID = strings.TrimSpace(req.ID)
+	req.Name = strings.TrimSpace(req.Name)
+	req.Model = strings.TrimSpace(req.Model)
+	req.Workspace = strings.TrimSpace(req.Workspace)
+	req.ParentID = strings.TrimSpace(req.ParentID)
+	if req.ParentID == "" {
+		req.ParentID = "main"
+	}
+	if req.ID == "" {
+		http.Error(w, "missing agent id", http.StatusBadRequest)
+		return
+	}
+	if req.ID == "main" {
+		http.Error(w, "agent id main is reserved", http.StatusBadRequest)
+		return
+	}
+	if !agentIDPattern.MatchString(req.ID) {
+		http.Error(w, "agent id can only contain letters, numbers, underscores, and hyphens", http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+
+	for _, agent := range cfg.Agents.List {
+		if agent.ID == req.ID {
+			http.Error(w, "agent id already exists", http.StatusConflict)
+			return
+		}
+	}
+
+	agent := config.AgentConfig{
+		ID:        req.ID,
+		Name:      req.Name,
+		Workspace: req.Workspace,
+	}
+	if req.Model != "" {
+		agent.Model = &config.AgentModelConfig{Primary: req.Model}
+	}
+	cfg.Agents.List = append(cfg.Agents.List, agent)
+
+	if err := allowSubagent(cfg, req.ParentID, req.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "id": req.ID})
+}
+
+func allowSubagent(cfg *config.Config, parentID string, subagentID string) error {
+	if parentID == "main" {
+		for i := range cfg.Agents.List {
+			if cfg.Agents.List[i].ID == "main" {
+				appendAllowedSubagent(&cfg.Agents.List[i], subagentID)
+				return nil
+			}
+		}
+		main := config.AgentConfig{ID: "main", Name: "Main"}
+		appendAllowedSubagent(&main, subagentID)
+		cfg.Agents.List = append(cfg.Agents.List, main)
+		return nil
+	}
+
+	for i := range cfg.Agents.List {
+		if cfg.Agents.List[i].ID == parentID {
+			appendAllowedSubagent(&cfg.Agents.List[i], subagentID)
+			return nil
+		}
+	}
+	return fmt.Errorf("parent agent not found")
+}
+
+func appendAllowedSubagent(agent *config.AgentConfig, subagentID string) {
+	if agent.Subagents == nil {
+		agent.Subagents = &config.SubagentsConfig{}
+	}
+	agent.Subagents.AllowAgents = cleanStringList(append(agent.Subagents.AllowAgents, subagentID))
 }
 
 func (h *Handler) handlePatchAgent(w http.ResponseWriter, r *http.Request) {

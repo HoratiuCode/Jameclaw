@@ -508,6 +508,127 @@ export function sendChatMessage(content: string) {
   }
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      if (typeof result !== "string") {
+        reject(new Error("Could not read audio recording."))
+        return
+      }
+      const comma = result.indexOf(",")
+      resolve(comma >= 0 ? result.slice(comma + 1) : result)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read audio recording."))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function audioExtensionForType(type: string): string {
+  const normalized = type.toLowerCase()
+  if (normalized.includes("ogg")) return "ogg"
+  if (normalized.includes("mp4") || normalized.includes("m4a")) return "m4a"
+  if (normalized.includes("mpeg") || normalized.includes("mp3")) return "mp3"
+  if (normalized.includes("wav")) return "wav"
+  return "webm"
+}
+
+async function sendChatMedia({
+  blob,
+  content,
+  filename,
+  contentType,
+  kind,
+}: {
+  blob: Blob
+  content: string
+  filename: string
+  contentType: string
+  kind: "audio" | "image" | "file"
+}) {
+  if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
+    if (store.get(gatewayAtom).status === "running") {
+      shouldMaintainConnection = true
+      void connectChat()
+    }
+    const message =
+      getChatState().errorMessage ||
+      "Chat is not connected. Wait for the Web Console to reconnect and try again."
+    updateChatStore({ errorMessage: message })
+    toast.error(message)
+    return false
+  }
+
+  const id = `${kind}-${++msgIdCounter}-${Date.now()}`
+  const socket = wsRef
+  const visibleContent = content.trim() || filename
+
+  updateChatStore((prev) => ({
+    messages: [
+      ...prev.messages,
+      { id, role: "user", content: visibleContent, timestamp: Date.now() },
+    ],
+    errorMessage: null,
+    isTyping: true,
+  }))
+
+  try {
+    const data = await blobToBase64(blob)
+    socket.send(
+      JSON.stringify({
+        type: "media.send",
+        id,
+        payload: {
+          content: content.trim(),
+          data,
+          filename,
+          content_type: contentType,
+          kind,
+        },
+      }),
+    )
+    return true
+  } catch (error) {
+    console.error("Failed to send jame voice message:", error)
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to send the voice message to JameClaw."
+    updateChatStore({ errorMessage: message })
+    toast.error(message)
+    updateChatStore((prev) => ({
+      messages: prev.messages.filter((message) => message.id !== id),
+      isTyping: false,
+    }))
+    return false
+  }
+}
+
+export async function sendChatVoice(audio: Blob, caption = "") {
+  const contentType = audio.type || "audio/webm"
+  const ext = audioExtensionForType(contentType)
+  return sendChatMedia({
+    blob: audio,
+    content: caption,
+    filename: `voice-${Date.now()}.${ext}`,
+    contentType,
+    kind: "audio",
+  })
+}
+
+export async function sendChatFile(file: File, caption = "") {
+  const contentType = file.type || "application/octet-stream"
+  const kind = contentType.startsWith("image/") ? "image" : "file"
+  return sendChatMedia({
+    blob: file,
+    content: caption,
+    filename: file.name || `upload-${Date.now()}`,
+    contentType,
+    kind,
+  })
+}
+
 export async function switchChatSession(sessionId: string) {
   if (sessionId === activeSessionIdRef) {
     return

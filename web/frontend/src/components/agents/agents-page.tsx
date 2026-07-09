@@ -1,9 +1,9 @@
-import { IconBrain, IconLoader2, IconRefresh, IconStar } from "@tabler/icons-react"
+import { IconBrain, IconLoader2, IconPlus, IconRefresh, IconStar } from "@tabler/icons-react"
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import { getAgents, updateAgent, type AgentSummary } from "@/api/agents"
+import { createAgent, getAgents, updateAgent, type AgentSummary } from "@/api/agents"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,6 +31,17 @@ export function AgentsPage() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Agent update failed")
+    },
+  })
+  const createMutation = useMutation({
+    mutationFn: createAgent,
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["agents-admin"] })
+      setSelectedID(result.id)
+      toast.success("Subagent created")
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Subagent creation failed")
     },
   })
 
@@ -68,7 +79,10 @@ export function AgentsPage() {
                 key={selected?.id ?? "none"}
                 selected={selected}
                 isSaving={mutation.isPending}
+                isCreating={createMutation.isPending}
+                defaultModel={data?.default_model ?? ""}
                 onSave={(agent, body) => mutation.mutate({ id: agent.id, body })}
+                onCreateSubagent={(body) => createMutation.mutate(body)}
               />
             </div>
           </div>
@@ -145,11 +159,17 @@ function AgentOverview({
 function AgentPanels({
   selected,
   isSaving,
+  isCreating,
+  defaultModel,
   onSave,
+  onCreateSubagent,
 }: {
   selected: AgentSummary | null
   isSaving: boolean
+  isCreating: boolean
+  defaultModel: string
   onSave: (agent: AgentSummary, body: Parameters<typeof updateAgent>[1]) => void
+  onCreateSubagent: (body: Parameters<typeof createAgent>[0]) => void
 }) {
   const selectedFallbacks = selected?.model_fallbacks ?? EMPTY_STRING_LIST
   const selectedSkills = selected?.skills ?? EMPTY_STRING_LIST
@@ -252,12 +272,110 @@ function AgentPanels({
         <CardHeader>
           <CardTitle>Subagents</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <PillList values={selectedSubagents} empty="No subagents allowed." />
+          <CreateSubagentForm
+            parent={selected}
+            defaultModel={defaultModel}
+            isCreating={isCreating}
+            onCreate={onCreateSubagent}
+          />
         </CardContent>
       </Card>
     </div>
   )
+}
+
+function CreateSubagentForm({
+  parent,
+  defaultModel,
+  isCreating,
+  onCreate,
+}: {
+  parent: AgentSummary
+  defaultModel: string
+  isCreating: boolean
+  onCreate: (body: Parameters<typeof createAgent>[0]) => void
+}) {
+  const [name, setName] = useState("")
+  const [id, setID] = useState("")
+  const [model, setModel] = useState(parent.model || defaultModel)
+  const [workspace, setWorkspace] = useState(parent.workspace)
+  const [idTouched, setIDTouched] = useState(false)
+
+  const handleNameChange = (value: string) => {
+    setName(value)
+    if (!idTouched) {
+      setID(slugAgentID(value))
+    }
+  }
+
+  const submit = () => {
+    const cleanID = id.trim()
+    if (!cleanID) {
+      toast.error("Subagent ID is required")
+      return
+    }
+    onCreate({
+      id: cleanID,
+      name: name.trim() || cleanID,
+      model: model.trim(),
+      workspace: workspace.trim(),
+      parent_id: parent.id,
+    })
+  }
+
+  return (
+    <div className="border-border/70 space-y-3 border-t pt-4 text-sm">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <div className="text-muted-foreground mb-1 text-xs">Subagent name</div>
+          <Input
+            value={name}
+            onChange={(event) => handleNameChange(event.target.value)}
+            placeholder="Research assistant"
+          />
+        </div>
+        <div>
+          <div className="text-muted-foreground mb-1 text-xs">Agent ID</div>
+          <Input
+            value={id}
+            onChange={(event) => {
+              setIDTouched(true)
+              setID(event.target.value)
+            }}
+            placeholder="research-assistant"
+          />
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <div className="text-muted-foreground mb-1 text-xs">Primary model</div>
+          <Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model name" />
+        </div>
+        <div>
+          <div className="text-muted-foreground mb-1 text-xs">Workspace</div>
+          <Input
+            value={workspace}
+            onChange={(event) => setWorkspace(event.target.value)}
+            placeholder="Default workspace"
+          />
+        </div>
+      </div>
+      <Button size="sm" disabled={isCreating} onClick={submit}>
+        {isCreating ? <IconLoader2 className="size-4 animate-spin" /> : <IconPlus className="size-4" />}
+        Create subagent
+      </Button>
+    </div>
+  )
+}
+
+function slugAgentID(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
 }
 
 function Field({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {

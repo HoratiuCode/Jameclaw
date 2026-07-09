@@ -59,3 +59,22 @@ export async function updateAgent(
   }
   return res.json() as Promise<{ status: string }>
 }
+
+export async function createAgent(body: {
+  id: string
+  name?: string
+  model?: string
+  workspace?: string
+  parent_id?: string
+}): Promise<{ status: string; id: string }> {
+  const res = await fetch("/api/agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const message = await res.text()
+    throw new Error(message.trim() || `Failed to create agent: ${res.status}`)
+  }
+  return res.json() as Promise<{ status: string; id: string }>
+}

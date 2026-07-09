@@ -1,1 +1,0 @@
-import{j as t}from"./index-OGXRdVSg.js";import{D as o}from"./dashboard-page-Dngs3dgv.js";import"./page-header-DKW53myz.js";const n=()=>t.jsx(o,{title:"Analytics",kind:"analytics",empty:"No analytics data has been recorded yet."});export{n as component};

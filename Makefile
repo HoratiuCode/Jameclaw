@@ -119,7 +119,7 @@ build-launcher:
 	@mkdir -p $(BUILD_DIR)
 	@echo "Building frontend..."
 	@cd web/frontend && pnpm build:backend
-	@$(WEB_GO) build $(GOFLAGS) -o $(BUILD_DIR)/jameclaw-launcher-$(PLATFORM)-$(ARCH) ./web/backend
+	@$(WEB_GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/jameclaw-launcher-$(PLATFORM)-$(ARCH) ./web/backend
 	@ln -sf jameclaw-launcher-$(PLATFORM)-$(ARCH) $(BUILD_DIR)/jameclaw-launcher
 	@echo "Build complete: $(BUILD_DIR)/jameclaw-launcher"
 

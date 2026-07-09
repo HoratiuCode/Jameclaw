@@ -3,7 +3,9 @@ import { useAtomValue } from "jotai"
 
 import {
   newChatSession,
+  sendChatFile,
   sendChatMessage,
+  sendChatVoice,
   switchChatSession,
 } from "@/features/chat/controller"
 import { chatAtom } from "@/store/chat"
@@ -65,6 +67,8 @@ export function useJameChat() {
     isTyping,
     activeSessionId,
     sendMessage: sendChatMessage,
+    sendVoice: sendChatVoice,
+    sendFile: sendChatFile,
     switchSession: switchChatSession,
     newChat: newChatSession,
   }

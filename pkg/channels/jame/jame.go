@@ -2,9 +2,12 @@ package jame
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +21,11 @@ import (
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/identity"
 	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/sipeed/jameclaw/pkg/media"
+	"github.com/sipeed/jameclaw/pkg/utils"
 )
+
+const maxJameInboundMediaBytes = 25 << 20
 
 // jameConn represents a single WebSocket connection.
 type jameConn struct {
@@ -478,6 +485,9 @@ func (c *JameChannel) handleMessage(pc *jameConn, msg JameMessage) {
 	case TypeMessageSend:
 		c.handleMessageSend(pc, msg)
 
+	case TypeMediaSend:
+		c.handleMediaSend(pc, msg)
+
 	default:
 		errMsg := newError("unknown_type", fmt.Sprintf("unknown message type: %s", msg.Type))
 		pc.writeJSON(errMsg)
@@ -525,6 +535,171 @@ func (c *JameChannel) handleMessageSend(pc *jameConn, msg JameMessage) {
 	}
 
 	c.HandleMessage(c.ctx, peer, msg.ID, senderID, chatID, content, nil, metadata, sender)
+}
+
+// handleMediaSend processes inbound browser media such as recorded voice clips,
+// images, files, and documents.
+func (c *JameChannel) handleMediaSend(pc *jameConn, msg JameMessage) {
+	payload := msg.Payload
+	if payload == nil {
+		pc.writeJSON(newError("missing_payload", "media payload is required"))
+		return
+	}
+
+	content, _ := payload["content"].(string)
+	data, _ := payload["data"].(string)
+	contentType, _ := payload["content_type"].(string)
+	filename, _ := payload["filename"].(string)
+	kind, _ := payload["kind"].(string)
+	if strings.TrimSpace(data) == "" {
+		pc.writeJSON(newError("missing_media", "media data is required"))
+		return
+	}
+
+	if filename = sanitizeJameFilename(filename); filename == "" {
+		filename = defaultJameFilename(kind, contentType)
+	}
+	if contentType = strings.TrimSpace(contentType); contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	mediaBytes, err := decodeJameBase64(data)
+	if err != nil {
+		pc.writeJSON(newError("invalid_media", "media data must be base64 encoded"))
+		return
+	}
+	if len(mediaBytes) == 0 {
+		pc.writeJSON(newError("empty_media", "media data is empty"))
+		return
+	}
+	if len(mediaBytes) > maxJameInboundMediaBytes {
+		pc.writeJSON(newError("media_too_large", "media file is too large"))
+		return
+	}
+
+	store := c.GetMediaStore()
+	if store == nil {
+		pc.writeJSON(newError("media_store_unavailable", "media store is not available"))
+		return
+	}
+
+	if err = os.MkdirAll(media.TempDir(), 0o700); err != nil {
+		pc.writeJSON(newError("media_temp_failed", "could not prepare media storage"))
+		return
+	}
+	tmp, err := os.CreateTemp(media.TempDir(), "jame-voice-*"+filepath.Ext(filename))
+	if err != nil {
+		pc.writeJSON(newError("media_temp_failed", "could not create media file"))
+		return
+	}
+	tmpPath := tmp.Name()
+	if _, err = tmp.Write(mediaBytes); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		pc.writeJSON(newError("media_write_failed", "could not write media file"))
+		return
+	}
+	if err = tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		pc.writeJSON(newError("media_write_failed", "could not close media file"))
+		return
+	}
+
+	sessionID := msg.SessionID
+	if sessionID == "" {
+		sessionID = pc.sessionID
+	}
+	chatID := "jame:" + sessionID
+	messageID := msg.ID
+	if messageID == "" {
+		messageID = uuid.NewString()
+	}
+	scope := channels.BuildMediaScope("jame", chatID, messageID)
+	ref, err := store.Store(tmpPath, media.MediaMeta{
+		Filename:      filename,
+		ContentType:   contentType,
+		Source:        "jame",
+		CleanupPolicy: media.CleanupPolicyDeleteOnCleanup,
+	}, scope)
+	if err != nil {
+		os.Remove(tmpPath)
+		pc.writeJSON(newError("media_store_failed", "could not store media"))
+		return
+	}
+
+	if strings.TrimSpace(content) == "" {
+		content = jameMediaAnnotation(filename, contentType)
+	} else {
+		content = strings.TrimSpace(content) + "\n" + jameMediaAnnotation(filename, contentType)
+	}
+
+	senderID := "jame-user"
+	peer := bus.Peer{Kind: "direct", ID: "jame:" + sessionID}
+	metadata := map[string]string{
+		"platform":     "jame",
+		"session_id":   sessionID,
+		"conn_id":      pc.id,
+		"content_type": contentType,
+	}
+	sender := bus.SenderInfo{
+		Platform:    "jame",
+		PlatformID:  senderID,
+		CanonicalID: identity.BuildCanonicalID("jame", senderID),
+	}
+	if !c.IsAllowedSender(sender) {
+		return
+	}
+
+	logger.DebugCF("jame", "Received media message", map[string]any{
+		"session_id": sessionID,
+		"filename":   filename,
+		"bytes":      len(mediaBytes),
+	})
+
+	c.HandleMessage(c.ctx, peer, messageID, senderID, chatID, content, []string{ref}, metadata, sender)
+}
+
+func defaultJameFilename(kind, contentType string) string {
+	if strings.HasPrefix(strings.ToLower(contentType), "audio/") || kind == "audio" {
+		return "voice.webm"
+	}
+	if strings.HasPrefix(strings.ToLower(contentType), "image/") || kind == "image" {
+		return "image"
+	}
+	return "document"
+}
+
+func jameMediaAnnotation(filename, contentType string) string {
+	switch {
+	case utils.IsAudioFile(filename, contentType):
+		return "[voice]"
+	case strings.HasPrefix(strings.ToLower(contentType), "image/"):
+		return "[image: " + filename + "]"
+	default:
+		return "[file: " + filename + "]"
+	}
+}
+
+func decodeJameBase64(data string) ([]byte, error) {
+	if comma := strings.Index(data, ","); comma >= 0 && strings.Contains(data[:comma], "base64") {
+		data = data[comma+1:]
+	}
+	return base64.StdEncoding.DecodeString(strings.TrimSpace(data))
+}
+
+func sanitizeJameFilename(name string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	if name == "." || name == string(filepath.Separator) {
+		return ""
+	}
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', ':', 0:
+			return -1
+		default:
+			return r
+		}
+	}, name)
 }
 
 // truncate truncates a string to maxLen runes.
