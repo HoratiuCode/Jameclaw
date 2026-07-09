@@ -7,9 +7,18 @@ export interface AgentSummary {
   model_fallbacks: string[] | null
   skills: string[] | null
   subagents: string[] | null
+  human: AgentHuman
   session_count: number
   message_count: number
   tool_calls: number
+}
+
+export interface AgentHuman {
+  persona: string
+  tone: string
+  discussion_mode: string
+  memory_notes: string
+  status_style: string
 }
 
 export interface AgentsResponse {
@@ -32,6 +41,7 @@ export async function getAgents(): Promise<AgentsResponse> {
       model_fallbacks: agent.model_fallbacks ?? [],
       skills: agent.skills ?? [],
       subagents: agent.subagents ?? [],
+      human: normalizeHuman(agent.human),
       session_count: agent.session_count ?? 0,
       message_count: agent.message_count ?? 0,
       tool_calls: agent.tool_calls ?? 0,
@@ -47,6 +57,7 @@ export async function updateAgent(
     default?: boolean
     model?: string
     model_fallbacks?: string[]
+    human?: Partial<AgentHuman>
   },
 ): Promise<{ status: string }> {
   const res = await fetch(`/api/agents/${encodeURIComponent(id)}`, {
@@ -66,6 +77,7 @@ export async function createAgent(body: {
   model?: string
   workspace?: string
   parent_id?: string
+  human?: Partial<AgentHuman>
 }): Promise<{ status: string; id: string }> {
   const res = await fetch("/api/agents", {
     method: "POST",
@@ -77,4 +89,14 @@ export async function createAgent(body: {
     throw new Error(message.trim() || `Failed to create agent: ${res.status}`)
   }
   return res.json() as Promise<{ status: string; id: string }>
+}
+
+function normalizeHuman(value?: Partial<AgentHuman> | null): AgentHuman {
+  return {
+    persona: value?.persona ?? "",
+    tone: value?.tone ?? "",
+    discussion_mode: value?.discussion_mode ?? "",
+    memory_notes: value?.memory_notes ?? "",
+    status_style: value?.status_style ?? "",
+  }
 }

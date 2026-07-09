@@ -22,7 +22,14 @@ func TestHandleCreateAgent_AddsSubagentToParent(t *testing.T) {
 		"name": "Research Helper",
 		"model": "custom-default",
 		"workspace": "/tmp/research",
-		"parent_id": "main"
+		"parent_id": "main",
+		"human": {
+			"persona": "Research partner",
+			"tone": "direct and warm",
+			"discussion_mode": "collaborative",
+			"memory_notes": "Remember the user prefers implementation first.",
+			"status_style": "short progress updates"
+		}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -58,6 +65,15 @@ func TestHandleCreateAgent_AddsSubagentToParent(t *testing.T) {
 	}
 	if created.Model == nil || created.Model.Primary != "custom-default" {
 		t.Fatalf("created.Model.Primary = %#v, want custom-default", created.Model)
+	}
+	if created.Human == nil {
+		t.Fatal("created.Human is nil")
+	}
+	if created.Human.Persona != "Research partner" {
+		t.Fatalf("created.Human.Persona = %q, want %q", created.Human.Persona, "Research partner")
+	}
+	if created.Human.MemoryNotes != "Remember the user prefers implementation first." {
+		t.Fatalf("created.Human.MemoryNotes = %q", created.Human.MemoryNotes)
 	}
 	if main == nil || main.Subagents == nil {
 		t.Fatal("main subagent allow-list was not created")

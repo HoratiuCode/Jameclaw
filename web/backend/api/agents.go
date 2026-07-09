@@ -21,9 +21,18 @@ type agentSummary struct {
 	ModelFallbacks []string `json:"model_fallbacks"`
 	Skills         []string `json:"skills"`
 	Subagents      []string `json:"subagents"`
+	Human          human    `json:"human"`
 	SessionCount   int      `json:"session_count"`
 	MessageCount   int      `json:"message_count"`
 	ToolCalls      int      `json:"tool_calls"`
+}
+
+type human struct {
+	Persona        string `json:"persona"`
+	Tone           string `json:"tone"`
+	DiscussionMode string `json:"discussion_mode"`
+	MemoryNotes    string `json:"memory_notes"`
+	StatusStyle    string `json:"status_style"`
 }
 
 func (h *Handler) registerAgentRoutes(mux *http.ServeMux) {
@@ -68,6 +77,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	mainFallbacks := stringListOrEmpty(cfg.Agents.Defaults.ModelFallbacks)
 	mainSkills := []string{}
 	mainSubagents := []string{}
+	mainHuman := human{}
 	if mainOverride != nil {
 		if mainOverride.Model != nil {
 			if mainOverride.Model.Primary != "" {
@@ -81,6 +91,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		if mainOverride.Subagents != nil {
 			mainSubagents = stringListOrEmpty(mainOverride.Subagents.AllowAgents)
 		}
+		mainHuman = summarizeHuman(mainOverride.Human)
 	}
 
 	agents := []agentSummary{
@@ -93,6 +104,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			ModelFallbacks: mainFallbacks,
 			Skills:         mainSkills,
 			Subagents:      mainSubagents,
+			Human:          mainHuman,
 			SessionCount:   sessionCount,
 			MessageCount:   messageCount,
 			ToolCalls:      toolCalls,
@@ -134,6 +146,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			ModelFallbacks: fallbacks,
 			Skills:         stringListOrEmpty(agent.Skills),
 			Subagents:      subagents,
+			Human:          summarizeHuman(agent.Human),
 		})
 	}
 
@@ -144,6 +157,19 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		"enabled_channels":  countEnabledChannels(cfg.Channels),
 		"configured_models": len(cfg.ModelList),
 	})
+}
+
+func summarizeHuman(value *config.HumanConfig) human {
+	if value == nil {
+		return human{}
+	}
+	return human{
+		Persona:        value.Persona,
+		Tone:           value.Tone,
+		DiscussionMode: value.DiscussionMode,
+		MemoryNotes:    value.MemoryNotes,
+		StatusStyle:    value.StatusStyle,
+	}
 }
 
 func stringListOrEmpty(values []string) []string {
@@ -169,6 +195,7 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model     string `json:"model"`
 		Workspace string `json:"workspace"`
 		ParentID  string `json:"parent_id"`
+		Human     *human `json:"human"`
 	}
 	var req createAgentRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -218,6 +245,7 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != "" {
 		agent.Model = &config.AgentModelConfig{Primary: req.Model}
 	}
+	agent.Human = cleanHuman(req.Human)
 	cfg.Agents.List = append(cfg.Agents.List, agent)
 
 	if err := allowSubagent(cfg, req.ParentID, req.ID); err != nil {
@@ -282,6 +310,7 @@ func (h *Handler) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		Default        *bool    `json:"default"`
 		Model          *string  `json:"model"`
 		ModelFallbacks []string `json:"model_fallbacks"`
+		Human          *human   `json:"human"`
 	}
 	var req patchAgentRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -306,6 +335,11 @@ func (h *Handler) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.ModelFallbacks != nil {
 			cfg.Agents.Defaults.ModelFallbacks = cleanStringList(req.ModelFallbacks)
+		}
+		if req.Human != nil {
+			main := findOrCreateAgent(&cfg.Agents.List, "main")
+			main.Name = "Main"
+			main.Human = cleanHuman(req.Human)
 		}
 	} else {
 		index := -1
@@ -337,6 +371,9 @@ func (h *Handler) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 			}
 			cfg.Agents.List[index].Model = model
 		}
+		if req.Human != nil {
+			cfg.Agents.List[index].Human = cleanHuman(req.Human)
+		}
 	}
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
@@ -346,6 +383,34 @@ func (h *Handler) handlePatchAgent(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func findOrCreateAgent(agents *[]config.AgentConfig, id string) *config.AgentConfig {
+	for i := range *agents {
+		if (*agents)[i].ID == id {
+			return &(*agents)[i]
+		}
+	}
+	*agents = append(*agents, config.AgentConfig{ID: id})
+	return &(*agents)[len(*agents)-1]
+}
+
+func cleanHuman(value *human) *config.HumanConfig {
+	if value == nil {
+		return nil
+	}
+	cleaned := &config.HumanConfig{
+		Persona:        strings.TrimSpace(value.Persona),
+		Tone:           strings.TrimSpace(value.Tone),
+		DiscussionMode: strings.TrimSpace(value.DiscussionMode),
+		MemoryNotes:    strings.TrimSpace(value.MemoryNotes),
+		StatusStyle:    strings.TrimSpace(value.StatusStyle),
+	}
+	if cleaned.Persona == "" && cleaned.Tone == "" && cleaned.DiscussionMode == "" &&
+		cleaned.MemoryNotes == "" && cleaned.StatusStyle == "" {
+		return nil
+	}
+	return cleaned
 }
 
 func cleanStringList(values []string) []string {

@@ -27,6 +27,8 @@ type ContextBuilder struct {
 	memory             *MemoryStore
 	toolDiscoveryBM25  bool
 	toolDiscoveryRegex bool
+	agentName          string
+	human              *config.HumanConfig
 
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
@@ -50,6 +52,12 @@ type ContextBuilder struct {
 func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuilder {
 	cb.toolDiscoveryBM25 = useBM25
 	cb.toolDiscoveryRegex = useRegex
+	return cb
+}
+
+func (cb *ContextBuilder) WithHumanConfig(agentName string, human *config.HumanConfig) *ContextBuilder {
+	cb.agentName = strings.TrimSpace(agentName)
+	cb.human = human
 	return cb
 }
 
@@ -155,6 +163,10 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 	// Core identity section
 	parts = append(parts, cb.getIdentity())
 
+	if humanContext := cb.buildHumanDiscussionContext(); humanContext != "" {
+		parts = append(parts, humanContext)
+	}
+
 	// Bootstrap files
 	bootstrapContent := cb.LoadBootstrapFiles()
 	if bootstrapContent != "" {
@@ -173,6 +185,53 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 
 	// Join with "---" separator
 	return strings.Join(parts, "\n\n---\n\n")
+}
+
+func (cb *ContextBuilder) buildHumanDiscussionContext() string {
+	persona := ""
+	tone := "direct, warm, pragmatic, and natural"
+	mode := "collaborative"
+	memoryNotes := ""
+	statusStyle := "brief, concrete progress updates during longer work"
+
+	if cb.agentName != "" {
+		persona = cb.agentName
+	}
+	if cb.human != nil {
+		if value := strings.TrimSpace(cb.human.Persona); value != "" {
+			persona = value
+		}
+		if value := strings.TrimSpace(cb.human.Tone); value != "" {
+			tone = value
+		}
+		if value := strings.TrimSpace(cb.human.DiscussionMode); value != "" {
+			mode = value
+		}
+		if value := strings.TrimSpace(cb.human.MemoryNotes); value != "" {
+			memoryNotes = value
+		}
+		if value := strings.TrimSpace(cb.human.StatusStyle); value != "" {
+			statusStyle = value
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Human Discussion Style\n\n")
+	if persona != "" {
+		fmt.Fprintf(&sb, "- Persona: %s\n", persona)
+	}
+	fmt.Fprintf(&sb, "- Tone: %s\n", tone)
+	fmt.Fprintf(&sb, "- Discussion mode: %s\n", mode)
+	fmt.Fprintf(&sb, "- Status updates: %s\n", statusStyle)
+	sb.WriteString("- Ask clarifying questions only when a safe assumption would materially risk the outcome.\n")
+	sb.WriteString("- When the user sounds frustrated, be concise, acknowledge the concrete problem, and move to the fix.\n")
+	sb.WriteString("- Adapt response length to the task: short for simple commands, fuller for planning or tradeoffs.\n")
+	sb.WriteString("- Surface useful next steps after completing work, but do not bury the result under suggestions.\n")
+	sb.WriteString("- Remember stable user preferences, project facts, and recurring workflows using the memory rules above.\n")
+	if memoryNotes != "" {
+		fmt.Fprintf(&sb, "\n### Persistent Human Notes\n%s", memoryNotes)
+	}
+	return sb.String()
 }
 
 // BuildSystemPromptWithCache returns the cached system prompt if available

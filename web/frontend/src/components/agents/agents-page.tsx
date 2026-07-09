@@ -176,6 +176,11 @@ function AgentPanels({
   const selectedSubagents = selected?.subagents ?? EMPTY_STRING_LIST
   const [model, setModel] = useState(selected?.model ?? "")
   const [fallbacksText, setFallbacksText] = useState(selectedFallbacks.join("\n"))
+  const [humanPersona, setHumanPersona] = useState(selected?.human.persona ?? "")
+  const [humanTone, setHumanTone] = useState(selected?.human.tone ?? "")
+  const [humanMode, setHumanMode] = useState(selected?.human.discussion_mode ?? "")
+  const [humanStatus, setHumanStatus] = useState(selected?.human.status_style ?? "")
+  const [humanNotes, setHumanNotes] = useState(selected?.human.memory_notes ?? "")
 
   if (!selected) {
     return (
@@ -261,6 +266,76 @@ function AgentPanels({
 
       <Card>
         <CardHeader>
+          <CardTitle>Human Discussion</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-muted-foreground mb-1 text-xs">Persona</div>
+              <Input
+                value={humanPersona}
+                onChange={(event) => setHumanPersona(event.target.value)}
+                placeholder="Senior engineer, research partner, coach"
+              />
+            </div>
+            <div>
+              <div className="text-muted-foreground mb-1 text-xs">Tone</div>
+              <Input
+                value={humanTone}
+                onChange={(event) => setHumanTone(event.target.value)}
+                placeholder="Direct, warm, concise"
+              />
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-muted-foreground mb-1 text-xs">Discussion mode</div>
+              <Input
+                value={humanMode}
+                onChange={(event) => setHumanMode(event.target.value)}
+                placeholder="Collaborative, do-it-now, brainstorming"
+              />
+            </div>
+            <div>
+              <div className="text-muted-foreground mb-1 text-xs">Status updates</div>
+              <Input
+                value={humanStatus}
+                onChange={(event) => setHumanStatus(event.target.value)}
+                placeholder="Brief concrete progress updates"
+              />
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground mb-1 text-xs">Memory notes</div>
+            <textarea
+              className="border-input bg-background min-h-24 w-full rounded-md border px-2.5 py-2 text-sm"
+              value={humanNotes}
+              onChange={(event) => setHumanNotes(event.target.value)}
+              placeholder="Stable preferences, recurring context, or conversation rules"
+            />
+          </div>
+          <Button
+            size="sm"
+            disabled={isSaving}
+            onClick={() =>
+              onSave(selected, {
+                human: {
+                  persona: humanPersona.trim(),
+                  tone: humanTone.trim(),
+                  discussion_mode: humanMode.trim(),
+                  status_style: humanStatus.trim(),
+                  memory_notes: humanNotes.trim(),
+                },
+              })
+            }
+          >
+            Save discussion style
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Skills</CardTitle>
         </CardHeader>
         <CardContent>
@@ -301,6 +376,8 @@ function CreateSubagentForm({
   const [id, setID] = useState("")
   const [model, setModel] = useState(parent.model || defaultModel)
   const [workspace, setWorkspace] = useState(parent.workspace)
+  const [persona, setPersona] = useState("")
+  const [tone, setTone] = useState(parent.human.tone)
   const [idTouched, setIDTouched] = useState(false)
 
   const handleNameChange = (value: string) => {
@@ -322,6 +399,12 @@ function CreateSubagentForm({
       model: model.trim(),
       workspace: workspace.trim(),
       parent_id: parent.id,
+      human: {
+        persona: persona.trim(),
+        tone: tone.trim(),
+        discussion_mode: "collaborative",
+        status_style: "brief concrete progress updates",
+      },
     })
   }
 
@@ -360,6 +443,20 @@ function CreateSubagentForm({
             onChange={(event) => setWorkspace(event.target.value)}
             placeholder="Default workspace"
           />
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <div className="text-muted-foreground mb-1 text-xs">Persona</div>
+          <Input
+            value={persona}
+            onChange={(event) => setPersona(event.target.value)}
+            placeholder="Research partner"
+          />
+        </div>
+        <div>
+          <div className="text-muted-foreground mb-1 text-xs">Tone</div>
+          <Input value={tone} onChange={(event) => setTone(event.target.value)} placeholder="Direct and warm" />
         </div>
       </div>
       <Button size="sm" disabled={isCreating} onClick={submit}>

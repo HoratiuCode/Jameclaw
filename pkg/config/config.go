@@ -286,11 +286,20 @@ type AgentConfig struct {
 	Model     *AgentModelConfig `json:"model,omitempty"`
 	Skills    []string          `json:"skills,omitempty"`
 	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+	Human     *HumanConfig      `json:"human,omitempty"`
 }
 
 type SubagentsConfig struct {
 	AllowAgents []string          `json:"allow_agents,omitempty"`
 	Model       *AgentModelConfig `json:"model,omitempty"`
+}
+
+type HumanConfig struct {
+	Persona        string `json:"persona,omitempty"`
+	Tone           string `json:"tone,omitempty"`
+	DiscussionMode string `json:"discussion_mode,omitempty"`
+	MemoryNotes    string `json:"memory_notes,omitempty"`
+	StatusStyle    string `json:"status_style,omitempty"`
 }
 
 type PeerMatch struct {
@@ -2400,4 +2409,3 @@ func (c JameConfig) MarshalJSON() ([]byte, error) {
 		Token: masked,
 	})
 }
-

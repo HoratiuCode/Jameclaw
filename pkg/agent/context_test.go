@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/providers"
 )
 
@@ -20,6 +22,30 @@ func assistantWithTools(toolIDs ...string) providers.Message {
 
 func toolResult(id string) providers.Message {
 	return providers.Message{Role: "tool", Content: "result", ToolCallID: id}
+}
+
+func TestBuildSystemPromptIncludesHumanDiscussionConfig(t *testing.T) {
+	builder := NewContextBuilder(t.TempDir()).WithHumanConfig("Research Helper", &config.HumanConfig{
+		Persona:        "Research partner",
+		Tone:           "direct and warm",
+		DiscussionMode: "collaborative",
+		MemoryNotes:    "Remember the user prefers implementation first.",
+		StatusStyle:    "short progress updates",
+	})
+
+	prompt := builder.BuildSystemPrompt()
+	for _, want := range []string{
+		"## Human Discussion Style",
+		"Persona: Research partner",
+		"Tone: direct and warm",
+		"Discussion mode: collaborative",
+		"Status updates: short progress updates",
+		"Remember the user prefers implementation first.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q\n%s", want, prompt)
+		}
+	}
 }
 
 func TestSanitizeHistoryForProvider_EmptyHistory(t *testing.T) {
