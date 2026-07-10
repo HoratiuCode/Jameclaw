@@ -1,0 +1,1 @@
+import{j as e}from"./index-C4L1q9Rp.js";function a(){return e.jsx("div",{className:"h-dvh w-full overflow-hidden bg-white",children:e.jsx("iframe",{title:"JameClaw landing page",src:"/jameclaw-landing.html",className:"block h-full w-full border-0"})})}export{a as component};

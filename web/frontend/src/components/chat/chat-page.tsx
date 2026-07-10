@@ -12,6 +12,7 @@ import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
+import { useAgentDisplayName } from "@/hooks/use-agent-display-name"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { useJameChat } from "@/hooks/use-jame-chat"
@@ -30,6 +31,7 @@ export function ChatPage() {
   const [input, setInput] = useState("")
   const [isRecording, setIsRecording] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const agentName = useAgentDisplayName()
 
   const {
     messages,
@@ -328,6 +330,7 @@ export function ChatPage() {
             <div key={msg.id} className="flex w-full">
               {msg.role === "assistant" ? (
                 <AssistantMessage
+                  agentName={agentName}
                   content={msg.content}
                   timestamp={msg.timestamp}
                   isTyping={isTyping && index === messages.length - 1}
@@ -339,7 +342,9 @@ export function ChatPage() {
             </div>
           ))}
 
-          {isTyping && !hasActiveAssistantPlaceholder && <TypingIndicator />}
+          {isTyping && !hasActiveAssistantPlaceholder && (
+            <TypingIndicator agentName={agentName} />
+          )}
         </div>
       </div>
 

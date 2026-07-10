@@ -16,6 +16,7 @@ import type { ChatMediaAttachment } from "@/store/chat"
 
 interface AssistantMessageProps {
   content: string
+  agentName?: string
   timestamp?: string | number
   isTyping?: boolean
   media?: ChatMediaAttachment[]
@@ -23,6 +24,7 @@ interface AssistantMessageProps {
 
 export function AssistantMessage({
   content,
+  agentName = "JameClaw",
   timestamp = "",
   isTyping = false,
   media = [],
@@ -42,7 +44,7 @@ export function AssistantMessage({
     <div className="group flex w-full flex-col gap-1.5">
       <div className="text-muted-foreground flex items-center justify-between gap-2 px-1 text-xs opacity-70">
         <div className="flex items-center gap-2">
-          <span>JameClaw</span>
+          <span>{agentName}</span>
           {formattedTimestamp && (
             <>
               <span className="opacity-50">•</span>

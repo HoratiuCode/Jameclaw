@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-export function TypingIndicator() {
+interface TypingIndicatorProps {
+  agentName?: string
+}
+
+export function TypingIndicator({ agentName = "JameClaw" }: TypingIndicatorProps) {
   const { t } = useTranslation()
   const thinkingSteps = [
     t("chat.thinking.step1"),
@@ -22,7 +26,7 @@ export function TypingIndicator() {
   return (
     <div className="flex w-full flex-col gap-1.5">
       <div className="text-muted-foreground flex items-center gap-2 px-1 text-xs opacity-70">
-        <span>JameClaw</span>
+        <span>{agentName}</span>
       </div>
       <div className="bg-card inline-flex w-fit max-w-xs flex-col gap-3 rounded-xl border px-5 py-4">
         <div className="flex items-center gap-1.5">

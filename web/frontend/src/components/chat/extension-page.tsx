@@ -5,6 +5,7 @@ import { AssistantMessage } from "@/components/chat/assistant-message"
 import { ChatComposer } from "@/components/chat/chat-composer"
 import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
+import { useAgentDisplayName } from "@/hooks/use-agent-display-name"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { useJameChat } from "@/hooks/use-jame-chat"
@@ -46,6 +47,7 @@ export function ExtensionPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [input, setInput] = useState("")
   const [pageContext, setPageContext] = useState<ExtensionContext>({})
+  const agentName = useAgentDisplayName()
 
   const { messages, connectionState, errorMessage, isTyping, sendMessage } =
     useJameChat()
@@ -142,6 +144,7 @@ export function ExtensionPage() {
             <div key={msg.id} className="flex w-full">
               {msg.role === "assistant" ? (
                 <AssistantMessage
+                  agentName={agentName}
                   content={msg.content}
                   timestamp={msg.timestamp}
                   isTyping={isTyping && index === messages.length - 1}
@@ -153,7 +156,7 @@ export function ExtensionPage() {
             </div>
           ))}
 
-          {isTyping && <TypingIndicator />}
+          {isTyping && <TypingIndicator agentName={agentName} />}
         </div>
       </div>
 
