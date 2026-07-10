@@ -145,6 +145,7 @@ export function ExtensionPage() {
                   content={msg.content}
                   timestamp={msg.timestamp}
                   isTyping={isTyping && index === messages.length - 1}
+                  media={msg.media}
                 />
               ) : (
                 <UserMessage content={msg.content} />

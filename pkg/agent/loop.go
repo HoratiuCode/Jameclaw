@@ -263,6 +263,12 @@ func registerSharedTools(
 			)
 			agent.Tools.Register(sendFileTool)
 		}
+		if cfg.Tools.IsToolEnabled("screenshot") {
+			agent.Tools.Register(tools.NewScreenshotTool(
+				cfg.Agents.Defaults.GetMaxMediaSize(),
+				nil,
+			))
+		}
 
 		// Skill discovery and installation tools
 		skills_enabled := cfg.Tools.IsToolEnabled("skills")
@@ -1059,11 +1065,16 @@ func (al *AgentLoop) GetConfig() *config.Config {
 func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 	al.mediaStore = s
 
-	// Propagate store to send_file tools in all agents.
+	// Propagate store to media-producing tools in all agents.
 	registry := al.GetRegistry()
 	registry.ForEachTool("send_file", func(t tools.Tool) {
 		if sf, ok := t.(*tools.SendFileTool); ok {
 			sf.SetMediaStore(s)
+		}
+	})
+	registry.ForEachTool("screenshot", func(t tools.Tool) {
+		if st, ok := t.(*tools.ScreenshotTool); ok {
+			st.SetMediaStore(s)
 		}
 	})
 }

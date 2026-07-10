@@ -411,6 +411,9 @@ func (t *terminalChat) openCommandPalette(initialQuery string) {
 	list.SetDoneFunc(t.restoreLayout)
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
+		case tcell.KeyEnter:
+			insertSelected()
+			return nil
 		case tcell.KeyEsc:
 			t.restoreLayout()
 			return nil
@@ -426,7 +429,7 @@ func (t *terminalChat) openCommandPalette(initialQuery string) {
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(search, 3, 0, true).
 			AddItem(list, 0, 1, false), 0, 5, true).
-		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[gray]Type to search, Enter inserts, Down selects list, Esc closes[-]"), 1, 0, false)
+		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[gray]Type to search, Enter selects command, Down moves to list, Esc closes[-]"), 1, 0, false)
 
 	search.SetText(strings.TrimPrefix(strings.TrimSpace(initialQuery), "/"))
 	refresh(search.GetText())

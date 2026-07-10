@@ -55,8 +55,7 @@ export function ChatPage() {
     localModels,
     handleSetDefault,
   } = useChatModels({ isConnected: isGatewayRunning })
-  const canSend =
-    isGatewayRunning && Boolean(defaultModelName)
+  const canSend = isGatewayRunning && Boolean(defaultModelName)
   const gatewayStopHint =
     gwState === "running" && !owned
       ? `Another gateway is already running${pid ? ` (PID ${pid})` : ""}. Use Stop in the top bar or run ${pid ? `kill ${pid} then kill -9 ${pid}` : "pkill -f 'jameclaw gateway'"}.`
@@ -149,7 +148,10 @@ export function ChatPage() {
       }
       return
     }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
       toast.error("Voice recording is not available in this browser.")
       return
     }
@@ -327,6 +329,7 @@ export function ChatPage() {
                   content={msg.content}
                   timestamp={msg.timestamp}
                   isTyping={isTyping && index === messages.length - 1}
+                  media={msg.media}
                 />
               ) : (
                 <UserMessage content={msg.content} />

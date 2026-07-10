@@ -26,6 +26,7 @@ import (
 )
 
 const maxJameInboundMediaBytes = 25 << 20
+const maxJameOutboundMediaBytes = 25 << 20
 
 // jameConn represents a single WebSocket connection.
 type jameConn struct {
@@ -160,6 +161,65 @@ func (c *JameChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	})
 
 	return c.broadcastToSession(msg.ChatID, outMsg)
+}
+
+// SendMedia implements channels.MediaSender for the web console protocol.
+func (c *JameChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessage) error {
+	if !c.IsRunning() {
+		return channels.ErrNotRunning
+	}
+	store := c.GetMediaStore()
+	if store == nil {
+		return fmt.Errorf("jame media store is not configured: %w", channels.ErrSendFailed)
+	}
+
+	for _, part := range msg.Parts {
+		localPath, meta, err := store.ResolveWithMeta(part.Ref)
+		if err != nil {
+			return fmt.Errorf("resolve jame media: %w", channels.ErrSendFailed)
+		}
+
+		info, err := os.Stat(localPath)
+		if err != nil || info.IsDir() {
+			return fmt.Errorf("stat jame media: %w", channels.ErrSendFailed)
+		}
+		if info.Size() > maxJameOutboundMediaBytes {
+			return fmt.Errorf("jame media too large: %d bytes: %w", info.Size(), channels.ErrSendFailed)
+		}
+
+		data, err := os.ReadFile(localPath)
+		if err != nil {
+			return fmt.Errorf("read jame media: %w", channels.ErrSendFailed)
+		}
+
+		filename := part.Filename
+		if filename == "" {
+			filename = meta.Filename
+		}
+		if filename == "" {
+			filename = filepath.Base(localPath)
+		}
+
+		contentType := part.ContentType
+		if contentType == "" {
+			contentType = meta.ContentType
+		}
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+
+		outMsg := newMessage(TypeMediaCreate, map[string]any{
+			"caption":      part.Caption,
+			"content_type": contentType,
+			"data":         base64.StdEncoding.EncodeToString(data),
+			"filename":     filename,
+			"kind":         jameMediaKind(part.Type, filename, contentType),
+		})
+		if err := c.broadcastToSession(msg.ChatID, outMsg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // EditMessage implements channels.MessageEditor.
@@ -677,6 +737,21 @@ func jameMediaAnnotation(filename, contentType string) string {
 		return "[image: " + filename + "]"
 	default:
 		return "[file: " + filename + "]"
+	}
+}
+
+func jameMediaKind(partType, filename, contentType string) string {
+	switch {
+	case partType != "":
+		return partType
+	case strings.HasPrefix(strings.ToLower(contentType), "image/"):
+		return "image"
+	case utils.IsAudioFile(filename, contentType):
+		return "audio"
+	case strings.HasPrefix(strings.ToLower(contentType), "video/"):
+		return "video"
+	default:
+		return "file"
 	}
 }
 

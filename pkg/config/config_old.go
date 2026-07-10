@@ -75,6 +75,7 @@ type toolsConfigV0 struct {
 	ListDir         ToolConfig          `json:"list_dir"                                                 envPrefix:"JAMECLAW_TOOLS_LIST_DIR_"`
 	Message         ToolConfig          `json:"message"                                                  envPrefix:"JAMECLAW_TOOLS_MESSAGE_"`
 	ReadFile        ReadFileToolConfig  `json:"read_file"                                                envPrefix:"JAMECLAW_TOOLS_READ_FILE_"`
+	Screenshot      ToolConfig          `json:"screenshot"                                               envPrefix:"JAMECLAW_TOOLS_SCREENSHOT_"`
 	SendFile        ToolConfig          `json:"send_file"                                                envPrefix:"JAMECLAW_TOOLS_SEND_FILE_"`
 	Spawn           ToolConfig          `json:"spawn"                                                    envPrefix:"JAMECLAW_TOOLS_SPAWN_"`
 	SpawnStatus     ToolConfig          `json:"spawn_status"                                             envPrefix:"JAMECLAW_TOOLS_SPAWN_STATUS_"`
@@ -857,6 +858,7 @@ func (c *configV0) Migrate() (*Config, error) {
 	cfg.Tools.ListDir = c.Tools.ListDir
 	cfg.Tools.Message = c.Tools.Message
 	cfg.Tools.ReadFile = c.Tools.ReadFile
+	cfg.Tools.Screenshot = c.Tools.Screenshot
 	cfg.Tools.SendFile = c.Tools.SendFile
 	cfg.Tools.Spawn = c.Tools.Spawn
 	cfg.Tools.SpawnStatus = c.Tools.SpawnStatus

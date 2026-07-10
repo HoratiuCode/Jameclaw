@@ -1,1 +1,0 @@
-import{j as e}from"./index-Be_ch_L9.js";function a(){return e.jsx("div",{className:"h-dvh w-full overflow-hidden bg-white",children:e.jsx("iframe",{title:"JameClaw landing page",src:"/jameclaw-landing.html",className:"block h-full w-full border-0"})})}export{a as component};

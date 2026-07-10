@@ -1,4 +1,9 @@
-import { IconCheck, IconCopy, IconCircleCheck, IconLoader2 } from "@tabler/icons-react"
+import {
+  IconCheck,
+  IconCircleCheck,
+  IconCopy,
+  IconLoader2,
+} from "@tabler/icons-react"
 import { useState } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
@@ -7,17 +12,20 @@ import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
 import { formatMessageTime } from "@/hooks/use-jame-chat"
+import type { ChatMediaAttachment } from "@/store/chat"
 
 interface AssistantMessageProps {
   content: string
   timestamp?: string | number
   isTyping?: boolean
+  media?: ChatMediaAttachment[]
 }
 
 export function AssistantMessage({
   content,
   timestamp = "",
   isTyping = false,
+  media = [],
 }: AssistantMessageProps) {
   const [isCopied, setIsCopied] = useState(false)
   const formattedTimestamp =
@@ -46,49 +54,71 @@ export function AssistantMessage({
 
       <div className="bg-card text-card-foreground relative overflow-hidden rounded-xl border">
         <div className="prose dark:prose-invert prose-p:my-2 prose-pre:my-2 prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-950 prose-pre:p-3 max-w-none p-4 text-[15px] leading-relaxed">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeRaw, rehypeSanitize]}
-            components={{
-              code(props) {
-                const { children, className, ...rest } = props
-                const text = String(children).trim()
-                const match = text.match(/^([\uD800-\uDBFF][\uDCC0-\uDFFF]|[\u2600-\u27BF]|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDD00-\uDFFF]|[\u2600-\u2B55]|💻|🔍|📝|📖|📁|🔧)\s+(.+)$/)
-                const isBlock = className && className.startsWith('language-')
-
-                if (match && !isBlock) {
-                  const emoji = match[1]
-                  const label = match[2]
-                  const cleanContent = content.trim()
-                  const cleanText = text.trim()
-                  const isRunning = isTyping && (
-                    cleanContent.endsWith('`' + cleanText + '`') ||
-                    cleanContent.endsWith(cleanText)
+          {content.trim() && (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, rehypeSanitize]}
+              components={{
+                code(props) {
+                  const { children, className, ...rest } = props
+                  const text = String(children).trim()
+                  const match = text.match(
+                    /^([\uD800-\uDBFF][\uDCC0-\uDFFF]|[\u2600-\u27BF]|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDD00-\uDFFF]|[\u2600-\u2B55]|💻|🔍|📝|📖|📁|🔧)\s+(.+)$/,
                   )
+                  const isBlock = className && className.startsWith("language-")
+
+                  if (match && !isBlock) {
+                    const emoji = match[1]
+                    const label = match[2]
+                    const cleanContent = content.trim()
+                    const cleanText = text.trim()
+                    const isRunning =
+                      isTyping &&
+                      (cleanContent.endsWith("`" + cleanText + "`") ||
+                        cleanContent.endsWith(cleanText))
+
+                    return (
+                      <span
+                        className={`my-0.5 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-0.5 align-middle text-[13px] font-medium shadow-xs transition-all select-none ${
+                          isRunning
+                            ? "animate-pulse border-amber-200/60 bg-amber-50/40 text-amber-800 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300"
+                            : "border-zinc-200/80 bg-zinc-50/80 text-zinc-700 dark:border-zinc-800/80 dark:bg-zinc-900/60 dark:text-zinc-300"
+                        }`}
+                      >
+                        <span className="text-sm">{emoji}</span>
+                        <span className="max-w-xs truncate font-mono text-xs">
+                          {label}
+                        </span>
+                        {isRunning ? (
+                          <IconLoader2 className="h-3.5 w-3.5 animate-spin text-amber-500 dark:text-amber-400" />
+                        ) : (
+                          <IconCircleCheck className="h-3.5 w-3.5 text-emerald-500 dark:text-emerald-400" />
+                        )}
+                      </span>
+                    )
+                  }
 
                   return (
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 my-0.5 rounded-md border text-[13px] font-medium transition-all shadow-xs select-none align-middle ${
-                      isRunning 
-                        ? "bg-amber-50/40 dark:bg-amber-950/20 border-amber-200/60 dark:border-amber-800/40 text-amber-800 dark:text-amber-300 animate-pulse" 
-                        : "bg-zinc-50/80 dark:bg-zinc-900/60 border-zinc-200/80 dark:border-zinc-800/80 text-zinc-700 dark:text-zinc-300"
-                    }`}>
-                      <span className="text-sm">{emoji}</span>
-                      <span className="font-mono text-xs max-w-xs truncate">{label}</span>
-                      {isRunning ? (
-                        <IconLoader2 className="h-3.5 w-3.5 animate-spin text-amber-500 dark:text-amber-400" />
-                      ) : (
-                        <IconCircleCheck className="h-3.5 w-3.5 text-emerald-500 dark:text-emerald-400" />
-                      )}
-                    </span>
+                    <code className={className} {...rest}>
+                      {children}
+                    </code>
                   )
-                }
-
-                return <code className={className} {...rest}>{children}</code>
-              }
-            }}
-          >
-            {content}
-          </ReactMarkdown>
+                },
+              }}
+            >
+              {content}
+            </ReactMarkdown>
+          )}
+          {media.length > 0 && (
+            <div className="not-prose mt-3 flex flex-col gap-3">
+              {media.map((item) => (
+                <MediaAttachment
+                  key={`${item.filename}-${item.url.slice(0, 32)}`}
+                  item={item}
+                />
+              ))}
+            </div>
+          )}
         </div>
         <Button
           variant="ghost"
@@ -104,5 +134,43 @@ export function AssistantMessage({
         </Button>
       </div>
     </div>
+  )
+}
+
+function MediaAttachment({ item }: { item: ChatMediaAttachment }) {
+  if (item.kind === "image") {
+    return (
+      <a href={item.url} download={item.filename} className="block">
+        <img
+          src={item.url}
+          alt={item.filename}
+          className="max-h-[70vh] max-w-full rounded-md border object-contain"
+        />
+      </a>
+    )
+  }
+
+  if (item.kind === "audio") {
+    return <audio controls src={item.url} className="w-full" />
+  }
+
+  if (item.kind === "video") {
+    return (
+      <video
+        controls
+        src={item.url}
+        className="max-h-[70vh] max-w-full rounded-md border"
+      />
+    )
+  }
+
+  return (
+    <a
+      href={item.url}
+      download={item.filename}
+      className="inline-flex w-fit items-center rounded-md border px-3 py-2 text-sm font-medium"
+    >
+      {item.filename}
+    </a>
   )
 }

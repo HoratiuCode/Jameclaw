@@ -1,4 +1,5 @@
 import { normalizeUnixTimestamp } from "@/features/chat/state"
+import type { ChatMediaAttachment } from "@/store/chat"
 import { updateChatStore } from "@/store/chat"
 
 export interface JameMessage {
@@ -59,6 +60,49 @@ export function handleJameMessage(
       break
     }
 
+    case "media.create": {
+      const data = (payload.data as string) || ""
+      if (!data) {
+        break
+      }
+      const contentType =
+        (payload.content_type as string) || "application/octet-stream"
+      const filename = (payload.filename as string) || "media"
+      const kind = normalizeMediaKind(payload.kind, contentType)
+      const caption = (payload.caption as string) || ""
+      const messageId =
+        (payload.message_id as string) || `jame-media-${Date.now()}`
+      const timestamp =
+        message.timestamp !== undefined &&
+        Number.isFinite(Number(message.timestamp))
+          ? normalizeUnixTimestamp(Number(message.timestamp))
+          : Date.now()
+      const url = data.startsWith("data:")
+        ? data
+        : `data:${contentType};base64,${data}`
+      const media: ChatMediaAttachment = {
+        url,
+        filename,
+        contentType,
+        kind,
+      }
+
+      updateChatStore((prev) => ({
+        messages: [
+          ...prev.messages,
+          {
+            id: messageId,
+            role: "assistant",
+            content: caption,
+            timestamp,
+            media: [media],
+          },
+        ],
+        isTyping: false,
+      }))
+      break
+    }
+
     case "typing.start":
       updateChatStore({ isTyping: true, errorMessage: null })
       break
@@ -84,4 +128,22 @@ export function handleJameMessage(
     default:
       console.log("Unknown jame message type:", message.type)
   }
+}
+
+function normalizeMediaKind(
+  value: unknown,
+  contentType: string,
+): ChatMediaAttachment["kind"] {
+  if (
+    value === "image" ||
+    value === "audio" ||
+    value === "video" ||
+    value === "file"
+  ) {
+    return value
+  }
+  if (contentType.startsWith("image/")) return "image"
+  if (contentType.startsWith("audio/")) return "audio"
+  if (contentType.startsWith("video/")) return "video"
+  return "file"
 }

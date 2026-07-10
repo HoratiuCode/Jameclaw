@@ -10,6 +10,14 @@ export interface ChatMessage {
   role: "user" | "assistant"
   content: string
   timestamp: number | string
+  media?: ChatMediaAttachment[]
+}
+
+export interface ChatMediaAttachment {
+  url: string
+  filename: string
+  contentType: string
+  kind: "image" | "audio" | "video" | "file"
 }
 
 export type ConnectionState =

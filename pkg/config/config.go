@@ -1314,6 +1314,7 @@ type ToolsConfig struct {
 	MacControl      MacControlToolsConfig `json:"mac_control"                                           envPrefix:"JAMECLAW_TOOLS_MAC_CONTROL_"`
 	Message         ToolConfig            `json:"message"                                                  envPrefix:"JAMECLAW_TOOLS_MESSAGE_"`
 	ReadFile        ReadFileToolConfig    `json:"read_file"                                                envPrefix:"JAMECLAW_TOOLS_READ_FILE_"`
+	Screenshot      ToolConfig            `json:"screenshot"                                               envPrefix:"JAMECLAW_TOOLS_SCREENSHOT_"`
 	SendFile        ToolConfig            `json:"send_file"                                                envPrefix:"JAMECLAW_TOOLS_SEND_FILE_"`
 	Spawn           ToolConfig            `json:"spawn"                                                    envPrefix:"JAMECLAW_TOOLS_SPAWN_"`
 	SpawnStatus     ToolConfig            `json:"spawn_status"                                             envPrefix:"JAMECLAW_TOOLS_SPAWN_STATUS_"`
@@ -2290,6 +2291,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.Message.Enabled
 	case "read_file":
 		return t.ReadFile.Enabled
+	case "screenshot":
+		return t.Screenshot.Enabled
 	case "spawn":
 		return t.Spawn.Enabled
 	case "spawn_status":

@@ -108,6 +108,12 @@ var toolCatalog = []toolCatalogEntry{
 		ConfigKey:   "send_file",
 	},
 	{
+		Name:        "screenshot",
+		Description: "Capture the visible desktop and send it to the active chat when requested.",
+		Category:    "communication",
+		ConfigKey:   "screenshot",
+	},
+	{
 		Name:        "find_skills",
 		Description: "Search external skill registries for installable skills.",
 		Category:    "skills",
@@ -326,6 +332,8 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		cfg.Tools.Message.Enabled = enabled
 	case "send_file":
 		cfg.Tools.SendFile.Enabled = enabled
+	case "screenshot":
+		cfg.Tools.Screenshot.Enabled = enabled
 	case "find_skills":
 		cfg.Tools.FindSkills.Enabled = enabled
 		if enabled {
