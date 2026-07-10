@@ -80,6 +80,8 @@ export function ChatPage() {
         : isGatewayRunning && connectionState === "connecting"
           ? "Connecting the Web Console to JameClaw..."
           : null
+  const hasActiveAssistantPlaceholder =
+    isTyping && messages[messages.length - 1]?.role === "assistant"
 
   const {
     sessions,
@@ -337,7 +339,7 @@ export function ChatPage() {
             </div>
           ))}
 
-          {isTyping && <TypingIndicator />}
+          {isTyping && !hasActiveAssistantPlaceholder && <TypingIndicator />}
         </div>
       </div>
 

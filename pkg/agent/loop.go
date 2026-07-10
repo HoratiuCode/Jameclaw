@@ -2843,6 +2843,7 @@ func (al *AgentLoop) emitReasoningStep(ts *turnState, step, summary string, deta
 	if al == nil || ts == nil {
 		return
 	}
+	al.updateTurnPlaceholder(context.Background(), ts, placeholderStatusForReasoningStep(step, summary, details))
 	al.emitEvent(
 		EventKindReasoningStep,
 		ts.eventMeta("runTurn", "turn.reasoning."+step),
@@ -2852,6 +2853,44 @@ func (al *AgentLoop) emitReasoningStep(ts *turnState, step, summary string, deta
 			Details: details,
 		},
 	)
+}
+
+func (al *AgentLoop) updateTurnPlaceholder(ctx context.Context, ts *turnState, content string) {
+	if al == nil || al.channelManager == nil || ts == nil {
+		return
+	}
+	channel := strings.TrimSpace(ts.channel)
+	chatID := strings.TrimSpace(ts.chatID)
+	content = strings.TrimSpace(content)
+	if channel == "" || chatID == "" || content == "" {
+		return
+	}
+	updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	al.channelManager.UpdatePlaceholder(updateCtx, channel, chatID, content)
+}
+
+func placeholderStatusForReasoningStep(step, summary string, details map[string]any) string {
+	switch step {
+	case "understand_request":
+		return "Reading your request..."
+	case "gather_context":
+		return "Loading conversation context..."
+	case "decide_action":
+		return "Preparing the next action..."
+	case "execute":
+		if tool, ok := details["tool"].(string); ok && strings.TrimSpace(tool) != "" {
+			return fmt.Sprintf("Running %s...", strings.TrimSpace(tool))
+		}
+		return "Running a tool..."
+	case "verify":
+		return "Verifying the result..."
+	default:
+		if trimmed := strings.TrimSpace(summary); trimmed != "" {
+			return trimmed
+		}
+		return "Working on it..."
+	}
 }
 
 type verificationCommand struct {

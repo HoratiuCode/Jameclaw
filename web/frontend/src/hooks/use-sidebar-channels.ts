@@ -97,6 +97,25 @@ function asRecord(value: unknown): Record<string, unknown> {
   return {}
 }
 
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : ""
+}
+
+function hasConfiguredValue(value: unknown): boolean {
+  const stringValue = asString(value)
+  if (stringValue === "") {
+    return false
+  }
+
+  const upperValue = stringValue.toUpperCase()
+  return !(
+    upperValue.startsWith("YOUR") ||
+    upperValue.includes("YOUR_") ||
+    upperValue.includes("YOUR-") ||
+    upperValue.includes("<YOUR")
+  )
+}
+
 function isChannelEnabled(
   channel: SupportedChannel,
   channelsConfig: Record<string, unknown>,
@@ -117,6 +136,76 @@ function isChannelEnabled(
   return true
 }
 
+function isChannelConfigured(
+  channel: SupportedChannel,
+  channelsConfig: Record<string, unknown>,
+): boolean {
+  const channelConfig = asRecord(channelsConfig[channel.config_key])
+
+  switch (channel.name) {
+    case "telegram":
+    case "discord":
+    case "wecom":
+    case "wecom_aibot":
+    case "jame":
+    case "weixin":
+      return hasConfiguredValue(channelConfig.token)
+    case "slack":
+      return hasConfiguredValue(channelConfig.bot_token)
+    case "feishu":
+    case "qq":
+      return (
+        hasConfiguredValue(channelConfig.app_id) &&
+        hasConfiguredValue(channelConfig.app_secret)
+      )
+    case "dingtalk":
+      return (
+        hasConfiguredValue(channelConfig.client_id) &&
+        hasConfiguredValue(channelConfig.client_secret)
+      )
+    case "line":
+      return hasConfiguredValue(channelConfig.channel_access_token)
+    case "onebot":
+      return hasConfiguredValue(channelConfig.ws_url)
+    case "wecom_app":
+      return (
+        hasConfiguredValue(channelConfig.corp_id) &&
+        hasConfiguredValue(channelConfig.corp_secret)
+      )
+    case "whatsapp":
+      return hasConfiguredValue(channelConfig.bridge_url)
+    case "whatsapp_native":
+      return channelConfig.use_native === true
+    case "jame_client":
+      return (
+        hasConfiguredValue(channelConfig.url) &&
+        hasConfiguredValue(channelConfig.token)
+      )
+    case "maixcam":
+      return hasConfiguredValue(channelConfig.host)
+    case "matrix":
+      return (
+        hasConfiguredValue(channelConfig.homeserver) &&
+        hasConfiguredValue(channelConfig.user_id) &&
+        hasConfiguredValue(channelConfig.access_token)
+      )
+    case "irc":
+      return hasConfiguredValue(channelConfig.server)
+    default:
+      return false
+  }
+}
+
+function isChannelActive(
+  channel: SupportedChannel,
+  channelsConfig: Record<string, unknown>,
+): boolean {
+  return (
+    isChannelEnabled(channel, channelsConfig) &&
+    isChannelConfigured(channel, channelsConfig)
+  )
+}
+
 export function buildChannelEnabledMap(
   channels: SupportedChannel[],
   appConfig: AppConfig,
@@ -124,7 +213,7 @@ export function buildChannelEnabledMap(
   const channelsConfig = asRecord(asRecord(appConfig).channels)
   const result: Record<string, boolean> = {}
   for (const channel of channels) {
-    result[channel.name] = isChannelEnabled(channel, channelsConfig)
+    result[channel.name] = isChannelActive(channel, channelsConfig)
   }
   return result
 }

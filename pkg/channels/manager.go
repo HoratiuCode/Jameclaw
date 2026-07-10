@@ -125,6 +125,37 @@ func (m *Manager) SendPlaceholder(ctx context.Context, channel, chatID string) b
 	return true
 }
 
+// UpdatePlaceholder edits the active placeholder for the given channel/chatID.
+// It keeps the placeholder registered so the final outbound response can replace it.
+func (m *Manager) UpdatePlaceholder(ctx context.Context, channel, chatID, content string) bool {
+	if content == "" {
+		return false
+	}
+
+	key := channel + ":" + chatID
+	v, loaded := m.placeholders.Load(key)
+	if !loaded {
+		return false
+	}
+	entry, ok := v.(placeholderEntry)
+	if !ok || entry.id == "" {
+		return false
+	}
+
+	m.mu.RLock()
+	ch, ok := m.channels[channel]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	editor, ok := ch.(MessageEditor)
+	if !ok {
+		return false
+	}
+
+	return editor.EditMessage(ctx, chatID, entry.id, content) == nil
+}
+
 // RecordTypingStop registers a typing stop function for later invocation.
 // Implements PlaceholderRecorder.
 func (m *Manager) RecordTypingStop(channel, chatID string, stop func()) {
