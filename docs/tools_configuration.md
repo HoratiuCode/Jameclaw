@@ -37,6 +37,24 @@ See [Sensitive Data Filtering](../sensitive_data_filtering.md) for full document
 | `filter_sensitive_data` | bool | `true` | Enable/disable filtering |
 | `filter_min_length` | int | `8` | Minimum content length to trigger filtering |
 
+## PDF Tool
+
+The `create_pdf` tool lets the agent create a simple PDF from text and send it back through the active chat channel. It uses the same outbound media pipeline as `send_file`, so Web Console, Telegram, Discord, Slack, and other media-capable channels receive the PDF as a file attachment.
+
+```json
+{
+  "tools": {
+    "create_pdf": {
+      "enabled": true
+    }
+  }
+}
+```
+
+| Config | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `true` | Enable/disable PDF creation and sending |
+
 ## Web Tools
 
 Web tools are used for web search and fetching.

@@ -1306,6 +1306,7 @@ type ToolsConfig struct {
 	MediaCleanup    MediaCleanupConfig    `json:"media_cleanup"`
 	MCP             MCPConfig             `json:"mcp"`
 	AppendFile      ToolConfig            `json:"append_file"                                              envPrefix:"JAMECLAW_TOOLS_APPEND_FILE_"`
+	CreatePDF       ToolConfig            `json:"create_pdf"                                               envPrefix:"JAMECLAW_TOOLS_CREATE_PDF_"`
 	EditFile        ToolConfig            `json:"edit_file"                                                envPrefix:"JAMECLAW_TOOLS_EDIT_FILE_"`
 	FindSkills      ToolConfig            `json:"find_skills"                                              envPrefix:"JAMECLAW_TOOLS_FIND_SKILLS_"`
 	I2C             ToolConfig            `json:"i2c"                                                      envPrefix:"JAMECLAW_TOOLS_I2C_"`
@@ -2275,6 +2276,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.MediaCleanup.Enabled
 	case "append_file":
 		return t.AppendFile.Enabled
+	case "create_pdf":
+		return t.CreatePDF.Enabled
 	case "edit_file":
 		return t.EditFile.Enabled
 	case "find_skills":

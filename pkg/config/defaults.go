@@ -496,6 +496,9 @@ func DefaultConfig() *Config {
 			AppendFile: ToolConfig{
 				Enabled: true,
 			},
+			CreatePDF: ToolConfig{
+				Enabled: true,
+			},
 			EditFile: ToolConfig{
 				Enabled: true,
 			},

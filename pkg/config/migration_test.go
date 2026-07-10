@@ -616,3 +616,15 @@ func TestConvertProvidersToModelList_LegacyModelWithProtocolPrefix(t *testing.T)
 		t.Errorf("Model = %q, want %q (should not duplicate prefix)", result[0].Model, "openrouter/auto")
 	}
 }
+
+func TestConfigV0MigrateKeepsCreatePDFDefaultEnabled(t *testing.T) {
+	cfg := &configV0{}
+
+	migrated, err := cfg.Migrate()
+	if err != nil {
+		t.Fatalf("Migrate() error: %v", err)
+	}
+	if !migrated.Tools.IsToolEnabled("create_pdf") {
+		t.Fatal("Migrate() disabled create_pdf; want default enabled")
+	}
+}

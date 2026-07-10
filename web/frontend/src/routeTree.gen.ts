@@ -21,6 +21,7 @@ import { Route as ExtensionRouteImport } from './routes/extension'
 import { Route as CronRouteImport } from './routes/cron'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as ConfigRouteImport } from './routes/config'
+import { Route as AutomationRouteImport } from './routes/automation'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AgentRouteImport } from './routes/agent'
@@ -92,6 +93,11 @@ const ConfigRoute = ConfigRouteImport.update({
   path: '/config',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AutomationRoute = AutomationRouteImport.update({
+  id: '/automation',
+  path: '/automation',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
   '/analytics': typeof AnalyticsRoute
+  '/automation': typeof AutomationRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/cron': typeof CronRoute
@@ -173,6 +180,7 @@ export interface FileRoutesByTo {
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
   '/analytics': typeof AnalyticsRoute
+  '/automation': typeof AutomationRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/cron': typeof CronRoute
@@ -198,6 +206,7 @@ export interface FileRoutesById {
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
   '/analytics': typeof AnalyticsRoute
+  '/automation': typeof AutomationRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/cron': typeof CronRoute
@@ -224,6 +233,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/agents'
     | '/analytics'
+    | '/automation'
     | '/config'
     | '/credentials'
     | '/cron'
@@ -248,6 +258,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/agents'
     | '/analytics'
+    | '/automation'
     | '/config'
     | '/credentials'
     | '/cron'
@@ -272,6 +283,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/agents'
     | '/analytics'
+    | '/automation'
     | '/config'
     | '/credentials'
     | '/cron'
@@ -297,6 +309,7 @@ export interface RootRouteChildren {
   AgentRoute: typeof AgentRouteWithChildren
   AgentsRoute: typeof AgentsRoute
   AnalyticsRoute: typeof AnalyticsRoute
+  AutomationRoute: typeof AutomationRoute
   ConfigRoute: typeof ConfigRouteWithChildren
   CredentialsRoute: typeof CredentialsRoute
   CronRoute: typeof CronRoute
@@ -395,6 +408,13 @@ declare module '@tanstack/react-router' {
       path: '/config'
       fullPath: '/config'
       preLoaderRoute: typeof ConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/automation': {
+      id: '/automation'
+      path: '/automation'
+      fullPath: '/automation'
+      preLoaderRoute: typeof AutomationRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/analytics': {
@@ -513,6 +533,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentRoute: AgentRouteWithChildren,
   AgentsRoute: AgentsRoute,
   AnalyticsRoute: AnalyticsRoute,
+  AutomationRoute: AutomationRoute,
   ConfigRoute: ConfigRouteWithChildren,
   CredentialsRoute: CredentialsRoute,
   CronRoute: CronRoute,

@@ -1261,7 +1261,7 @@ make test                                       # Full test suite
 | `pkg/channels/whatsapp/` | `"whatsapp"` | — (Bridge mode) |
 | `pkg/channels/whatsapp_native/` | `"whatsapp_native"` | — (Native whatsmeow mode) |
 | `pkg/channels/maixcam/` | `"maixcam"` | — |
-| `pkg/channels/jame/` | `"jame"` | TypingCapable, PlaceholderCapable, MessageEditor, WebhookHandler |
+| `pkg/channels/jame/` | `"jame"` | TypingCapable, PlaceholderCapable, MessageEditor, MediaSender, WebhookHandler |
 
 ### A.3 Interface Quick Reference
 

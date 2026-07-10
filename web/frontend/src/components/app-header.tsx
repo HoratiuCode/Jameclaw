@@ -1,6 +1,7 @@
 import {
   IconBook,
   IconBrain,
+  IconCalendarTime,
   IconLoader2,
   IconMenu2,
   IconMoon,
@@ -237,6 +238,13 @@ export function AppHeader() {
           className="mx-4 my-2 hidden md:block"
           orientation="vertical"
         />
+
+        <Button variant="ghost" size="sm" className="h-8 gap-2 px-2" asChild>
+          <Link to="/automation" aria-label="Automations">
+            <IconCalendarTime className="size-4.5" />
+            <span className="hidden xl:inline">Automations</span>
+          </Link>
+        </Button>
 
         {/* Docs Link */}
         <Button variant="ghost" size="icon" className="size-8" asChild>

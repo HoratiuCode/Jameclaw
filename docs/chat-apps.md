@@ -24,7 +24,7 @@ Talk to your jameclaw through Telegram, Discord, WhatsApp, Matrix, QQ, DingTalk,
 | **IRC**              | ⭐⭐ Medium        | Server + TLS configuration                            | [Docs](#irc)                                                                                                     |
 | **OneBot**           | ⭐⭐ Medium        | NapCat/Go-CQHTTP compatible, community ecosystem      | [Docs](channels/onebot/README.md)                                                                            |
 | **MaixCam**          | ⭐ Easy            | Hardware integration channel for Sipeed AI cameras    | [Docs](channels/maixcam/README.md)                                                                           |
-| **Jame**             | ⭐ Easy            | Native JameClaw protocol channel                      |                                                                                                                  |
+| **Jame**             | ⭐ Easy            | Native Web Console protocol with text, images, PDFs, audio, and files |                                                                                                                  |
 
 <a id="telegram"></a>
 <details>

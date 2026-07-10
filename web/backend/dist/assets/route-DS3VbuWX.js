@@ -1,0 +1,1 @@
+import{Y as e,j as a,a3 as n,Z as s}from"./index-83noCogx.js";function r(){return e({select:t=>t.location.pathname})==="/channels"?a.jsx(n,{to:"/channels/$name",params:{name:"telegram"}}):a.jsx(s,{})}export{r as component};

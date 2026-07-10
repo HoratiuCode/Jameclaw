@@ -125,6 +125,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             icon: IconMessageCircle,
             translateTitle: true,
           },
+          {
+            title: "Automations",
+            url: "/automation",
+            icon: IconCalendarTime,
+            translateTitle: false,
+          },
         ],
       },
       {
@@ -209,12 +215,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             title: "Analytics",
             url: "/analytics",
             icon: IconReportAnalytics,
-            translateTitle: false,
-          },
-          {
-            title: "Cron",
-            url: "/cron",
-            icon: IconCalendarTime,
             translateTitle: false,
           },
           {

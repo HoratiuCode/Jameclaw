@@ -479,6 +479,13 @@ func TestDefaultConfig_ExecAllowRemoteEnabled(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_CreatePDFToolEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Tools.IsToolEnabled("create_pdf") {
+		t.Fatal("DefaultConfig().Tools.CreatePDF should be enabled")
+	}
+}
+
 func TestDefaultConfig_FilterSensitiveDataEnabled(t *testing.T) {
 	cfg := DefaultConfig()
 	if !cfg.Tools.FilterSensitiveData {

@@ -157,6 +157,7 @@ func registerSharedTools(
 	provider providers.LLMProvider,
 ) {
 	allowReadPaths := buildAllowReadPatterns(cfg)
+	allowWritePaths := compilePatterns(cfg.Tools.AllowWritePaths)
 
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
@@ -262,6 +263,16 @@ func registerSharedTools(
 				allowReadPaths,
 			)
 			agent.Tools.Register(sendFileTool)
+		}
+		if cfg.Tools.IsToolEnabled("create_pdf") {
+			createPDFTool := tools.NewCreatePDFTool(
+				agent.Workspace,
+				cfg.Agents.Defaults.RestrictToWorkspace,
+				cfg.Agents.Defaults.GetMaxMediaSize(),
+				nil,
+				allowWritePaths,
+			)
+			agent.Tools.Register(createPDFTool)
 		}
 		if cfg.Tools.IsToolEnabled("screenshot") {
 			agent.Tools.Register(tools.NewScreenshotTool(
@@ -1075,6 +1086,11 @@ func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 	registry.ForEachTool("screenshot", func(t tools.Tool) {
 		if st, ok := t.(*tools.ScreenshotTool); ok {
 			st.SetMediaStore(s)
+		}
+	})
+	registry.ForEachTool("create_pdf", func(t tools.Tool) {
+		if pt, ok := t.(*tools.CreatePDFTool); ok {
+			pt.SetMediaStore(s)
 		}
 	})
 }
