@@ -20,6 +20,7 @@ import { TelegramForm } from "@/components/channels/channel-forms/telegram-form"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { CHANNELS_CONFIG_CHANGED_EVENT } from "@/hooks/use-sidebar-channels"
 import { gatewayAtom } from "@/store/gateway"
 
 interface ChannelConfigPageProps {
@@ -404,6 +405,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
           [channel.config_key]: savePayload,
         },
       })
+      window.dispatchEvent(new Event(CHANNELS_CONFIG_CHANGED_EVENT))
       toast.success(t("channels.page.saveSuccess"))
       await loadData()
     } catch (e) {

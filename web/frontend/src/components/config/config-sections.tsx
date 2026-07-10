@@ -2,15 +2,24 @@ import {
   IconCircleCheck,
   IconExternalLink,
   IconLoader2,
+  IconPlug,
   IconRefresh,
   IconVersions,
 } from "@tabler/icons-react"
+import { useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { useAtom } from "jotai"
 import * as React from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
+import {
+  type AppConfig,
+  type SupportedChannel,
+  getChannelsCatalog,
+} from "@/api/channels"
 import type { UpdateStatusResponse } from "@/api/update"
+import { getChannelDisplayName } from "@/components/channels/channel-display-name"
 import {
   type CoreConfigForm,
   DM_SCOPE_OPTIONS,
@@ -34,6 +43,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  CHANNEL_ICON_MAP,
+  CHANNEL_IMPORTANCE_INDEX,
+  buildChannelEnabledMap,
+} from "@/hooks/use-sidebar-channels"
 import {
   type Font,
   type FontSize,
@@ -92,6 +106,110 @@ function ConfigSectionCard({
         <div className="divide-border/70 divide-y">{children}</div>
       </CardContent>
     </Card>
+  )
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return {}
+}
+
+function sortChannels(
+  channels: SupportedChannel[],
+  enabledMap: Record<string, boolean>,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  return [...channels].sort((a, b) => {
+    const aEnabled = enabledMap[a.name] === true
+    const bEnabled = enabledMap[b.name] === true
+    if (aEnabled !== bEnabled) {
+      return aEnabled ? -1 : 1
+    }
+
+    const aImportance =
+      CHANNEL_IMPORTANCE_INDEX.get(a.name) ?? Number.MAX_SAFE_INTEGER
+    const bImportance =
+      CHANNEL_IMPORTANCE_INDEX.get(b.name) ?? Number.MAX_SAFE_INTEGER
+    if (aImportance !== bImportance) {
+      return aImportance - bImportance
+    }
+
+    return getChannelDisplayName(a, t).localeCompare(
+      getChannelDisplayName(b, t),
+    )
+  })
+}
+
+interface ChannelsSectionProps {
+  appConfig?: AppConfig
+}
+
+export function ChannelsSection({ appConfig }: ChannelsSectionProps) {
+  const { t } = useTranslation()
+  const {
+    data: catalog,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["channels", "catalog"],
+    queryFn: getChannelsCatalog,
+  })
+
+  const channels = catalog?.channels ?? []
+  const enabledMap = buildChannelEnabledMap(channels, asRecord(appConfig))
+  const sortedChannels = sortChannels(channels, enabledMap, t)
+
+  return (
+    <ConfigSectionCard
+      title={t("pages.config.sections.channels")}
+      description={t("pages.config.channels_description")}
+    >
+      {isLoading ? (
+        <div className="text-muted-foreground py-4 text-sm">
+          {t("labels.loading")}
+        </div>
+      ) : error ? (
+        <div className="text-destructive py-4 text-sm">
+          {t("channels.loadError")}
+        </div>
+      ) : (
+        <div className="divide-border/70 divide-y">
+          {sortedChannels.map((channel) => {
+            const enabled = enabledMap[channel.name] === true
+            const ChannelIcon = CHANNEL_ICON_MAP[channel.name] ?? IconPlug
+            return (
+              <div
+                key={channel.name}
+                className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
+                    <ChannelIcon className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {getChannelDisplayName(channel, t)}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      {enabled
+                        ? t("pages.config.channel_status_active")
+                        : t("pages.config.channel_status_inactive")}
+                    </p>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/channels/$name" params={{ name: channel.name }}>
+                    {t("pages.config.channel_configure")}
+                  </Link>
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </ConfigSectionCard>
   )
 }
 

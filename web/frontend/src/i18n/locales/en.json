@@ -451,6 +451,10 @@
       "monitor_usb": "Monitor USB",
       "monitor_usb_hint": "Watch USB plug/unplug events when devices are enabled.",
       "web_extension_description": "Keep the browser extension package and its installation notes in one place.",
+      "channels_description": "All supported channels are listed here. The sidebar only shows channels that are enabled.",
+      "channel_status_active": "Active in sidebar",
+      "channel_status_inactive": "Inactive",
+      "channel_configure": "Configure",
       "web_extension_model_size": "Model Size",
       "web_extension_model_size_hint": "Saved preference for the extension profile you want to keep handy.",
       "web_extension_package": "Package to Download",
@@ -492,6 +496,7 @@
       "sections": {
         "agent": "Agent",
         "web_extension": "Web Extension",
+        "channels": "Channels",
         "runtime": "Runtime",
         "exec": "Run Commands",
         "cron": "Cron Tasks",

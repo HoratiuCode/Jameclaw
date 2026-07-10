@@ -27,8 +27,9 @@ import {
 import { getChannelDisplayName } from "@/components/channels/channel-display-name"
 import { gatewayAtom } from "@/store/gateway"
 
-const DEFAULT_VISIBLE_CHANNELS = 4
-const CHANNEL_IMPORTANCE_ORDER = [
+export const CHANNELS_CONFIG_CHANGED_EVENT = "jameclaw:channels-config-changed"
+
+export const CHANNEL_IMPORTANCE_ORDER = [
   "discord",
   "feishu",
   "telegram",
@@ -47,7 +48,7 @@ const CHANNEL_IMPORTANCE_ORDER = [
   "whatsapp",
   "whatsapp_native",
 ]
-const CHANNEL_IMPORTANCE_INDEX = new Map(
+export const CHANNEL_IMPORTANCE_INDEX = new Map(
   CHANNEL_IMPORTANCE_ORDER.map((name, index) => [name, index]),
 )
 
@@ -64,7 +65,7 @@ function IconLark({ className }: { className?: string }) {
   })
 }
 
-const CHANNEL_ICON_MAP: Record<
+export const CHANNEL_ICON_MAP: Record<
   string,
   React.ComponentType<{ className?: string }>
 > = {
@@ -84,6 +85,8 @@ const CHANNEL_ICON_MAP: Record<
   maixcam: IconCamera,
   onebot: IconRobot,
   jame: IconBrandChrome,
+  jame_client: IconBrandChrome,
+  weixin: IconBrandWechat,
   irc: IconMessages,
 }
 
@@ -114,7 +117,7 @@ function isChannelEnabled(
   return true
 }
 
-function buildChannelEnabledMap(
+export function buildChannelEnabledMap(
   channels: SupportedChannel[],
   appConfig: AppConfig,
 ): Record<string, boolean> {
@@ -143,7 +146,6 @@ export function useSidebarChannels({ t }: UseSidebarChannelsOptions) {
   const [enabledMap, setEnabledMap] = React.useState<Record<string, boolean>>(
     {},
   )
-  const [showAllChannels, setShowAllChannels] = React.useState(false)
 
   const reloadChannels = React.useCallback((shouldApply?: () => boolean) => {
     Promise.all([
@@ -168,9 +170,19 @@ export function useSidebarChannels({ t }: UseSidebarChannelsOptions) {
 
   React.useEffect(() => {
     let active = true
+    const handleChannelsConfigChanged = () => reloadChannels(() => active)
+
     reloadChannels(() => active)
+    window.addEventListener(
+      CHANNELS_CONFIG_CHANGED_EVENT,
+      handleChannelsConfigChanged,
+    )
     return () => {
       active = false
+      window.removeEventListener(
+        CHANNELS_CONFIG_CHANGED_EVENT,
+        handleChannelsConfigChanged,
+      )
     }
   }, [reloadChannels])
 
@@ -207,10 +219,9 @@ export function useSidebarChannels({ t }: UseSidebarChannelsOptions) {
     return list
   }, [channels, enabledMap, t])
 
-  const hasMoreChannels = sortedChannels.length > DEFAULT_VISIBLE_CHANNELS
-  const visibleChannels = showAllChannels
-    ? sortedChannels
-    : sortedChannels.slice(0, DEFAULT_VISIBLE_CHANNELS)
+  const visibleChannels = sortedChannels.filter(
+    (channel) => enabledMap[channel.name] === true,
+  )
 
   const channelItems = React.useMemo<SidebarChannelNavItem[]>(
     () =>
@@ -223,14 +234,7 @@ export function useSidebarChannels({ t }: UseSidebarChannelsOptions) {
     [t, visibleChannels],
   )
 
-  const toggleShowAllChannels = React.useCallback(() => {
-    setShowAllChannels((prev) => !prev)
-  }, [])
-
   return {
     channelItems,
-    hasMoreChannels,
-    showAllChannels,
-    toggleShowAllChannels,
   }
 }

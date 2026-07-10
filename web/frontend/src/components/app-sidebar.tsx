@@ -4,8 +4,6 @@ import {
   IconBrain,
   IconCalendarTime,
   IconChartBar,
-  IconChevronsDown,
-  IconChevronsUp,
   IconPlug,
   IconKey,
   IconListDetails,
@@ -53,7 +51,6 @@ interface NavGroup {
   label: string
   defaultOpen: boolean
   items: NavItem[]
-  isChannelsGroup?: boolean
 }
 
 const fallbackVersion = "707I"
@@ -95,12 +92,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const routerState = useRouterState()
   const { t } = useTranslation()
   const currentPath = routerState.location.pathname
-  const {
-    channelItems,
-    hasMoreChannels,
-    showAllChannels,
-    toggleShowAllChannels,
-  } = useSidebarChannels({ t })
+  const { channelItems } = useSidebarChannels({ t })
   const { data: appStatus } = useQuery({
     queryKey: ["app-status"],
     queryFn: getAppStatus,
@@ -159,7 +151,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           icon: item.icon,
           translateTitle: false,
         })),
-        isChannelsGroup: true,
       },
       {
         ...baseNavGroups[2],
@@ -298,25 +289,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         </SidebarMenuItem>
                       )
                     })}
-                    {group.isChannelsGroup && hasMoreChannels && (
-                      <SidebarMenuItem key="channels-more-toggle">
-                        <SidebarMenuButton
-                          onClick={toggleShowAllChannels}
-                          className="text-muted-foreground hover:bg-muted/60 h-9 px-3"
-                        >
-                          {showAllChannels ? (
-                            <IconChevronsUp className="size-4 opacity-60" />
-                          ) : (
-                            <IconChevronsDown className="size-4 opacity-60" />
-                          )}
-                          <span className="opacity-80">
-                            {showAllChannels
-                              ? t("navigation.show_less_channels")
-                              : t("navigation.show_more_channels")}
-                          </span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    )}
                   </SidebarMenu>
                 </SidebarGroupContent>
               </CollapsibleContent>

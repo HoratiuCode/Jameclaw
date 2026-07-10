@@ -16,6 +16,7 @@ import {
 import type { UpdateStatusResponse } from "@/api/update"
 import {
   AgentDefaultsSection,
+  ChannelsSection,
   CronSection,
   DesignSection,
   DevicesSection,
@@ -348,6 +349,8 @@ export function ConfigPage() {
               <AgentDefaultsSection form={form} onFieldChange={updateField} />
 
               <WebExtensionSection form={form} onFieldChange={updateField} />
+
+              <ChannelsSection appConfig={data} />
 
               <DesignSection />
 

@@ -1,0 +1,1 @@
+import{j as o}from"./index-BkqlfQ29.js";import{D as t}from"./dashboard-page-DGeA4p0K.js";import"./page-header-BQBTvDQd.js";const p=()=>o.jsx(t,{title:"Profiles",kind:"profiles",empty:"No additional agent profiles are configured."});export{p as component};
