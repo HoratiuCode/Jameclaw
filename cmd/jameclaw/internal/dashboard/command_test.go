@@ -85,6 +85,9 @@ func TestResolveTargetUsesLauncherConfigAndAccessToken(t *testing.T) {
 func TestRunDashboardNoOpenCopiesAndDoesNotOpen(t *testing.T) {
 	port := 19002
 	out := setupDashboardTest(t, port)
+	if err := os.WriteFile(filepath.Join(os.Getenv(config.EnvHome), "launcher_access_token"), []byte("token-abc\n"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
 
 	var opened bool
 	var copied string
@@ -103,8 +106,12 @@ func TestRunDashboardNoOpenCopiesAndDoesNotOpen(t *testing.T) {
 	if opened {
 		t.Fatal("browser opener was called with --no-open")
 	}
-	if copied != "http://localhost:"+strconv.Itoa(port) {
+	wantURL := "http://localhost:" + strconv.Itoa(port) + "?access_token=token-abc"
+	if copied != wantURL {
 		t.Fatalf("copied = %q", copied)
+	}
+	if !strings.Contains(out.String(), "Dashboard URL: "+wantURL) {
+		t.Fatalf("output missing authenticated dashboard URL:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "SSH tunnel hint") {
 		t.Fatalf("output missing SSH hint:\n%s", out.String())

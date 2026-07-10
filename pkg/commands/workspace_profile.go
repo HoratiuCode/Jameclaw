@@ -12,7 +12,7 @@ import (
 
 const (
 	defaultAgentSignatureEmoji = "🦐"
-	agentNameLinePrefix        = "Your name is JameClaw"
+	defaultAgentDisplayName    = "JameClaw"
 	personalityHeading         = "## Personality"
 	styleSnapshotHeading       = "## Current Style Snapshot"
 )
@@ -41,19 +41,109 @@ func ReadAgentSignatureEmoji(workspace string) string {
 
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, agentNameLinePrefix) {
+		if !strings.HasPrefix(trimmed, "Your name is ") {
 			continue
 		}
-		signature := strings.TrimSpace(strings.TrimPrefix(trimmed, agentNameLinePrefix))
-		signature = strings.TrimSuffix(signature, ".")
-		signature = strings.TrimSpace(signature)
-		if signature == "" {
+		nameLine := strings.TrimSpace(strings.TrimPrefix(trimmed, "Your name is "))
+		nameLine = strings.TrimSuffix(nameLine, ".")
+		nameLine = strings.TrimSpace(nameLine)
+		fields := strings.Fields(nameLine)
+		if len(fields) == 0 {
 			return defaultAgentSignatureEmoji
 		}
-		return signature
+		return fields[len(fields)-1]
 	}
 
 	return defaultAgentSignatureEmoji
+}
+
+func ReadAgentDisplayName(workspace string) string {
+	data, err := os.ReadFile(filepath.Join(workspace, "AGENT.md"))
+	if err != nil {
+		return defaultAgentDisplayName
+	}
+
+	fields, body, _, err := splitMarkdownFrontmatter(string(data))
+	if err == nil {
+		if raw, ok := fields["display_name"]; ok {
+			if name := strings.TrimSpace(fmt.Sprint(raw)); name != "" {
+				return name
+			}
+		}
+	}
+
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "Your name is ") {
+			continue
+		}
+		nameLine := strings.TrimSpace(strings.TrimPrefix(trimmed, "Your name is "))
+		nameLine = strings.TrimSuffix(nameLine, ".")
+		nameLine = strings.TrimSpace(nameLine)
+		if nameLine == "" {
+			return defaultAgentDisplayName
+		}
+		fields := strings.Fields(nameLine)
+		if len(fields) > 1 {
+			return strings.Join(fields[:len(fields)-1], " ")
+		}
+		return nameLine
+	}
+
+	return defaultAgentDisplayName
+}
+
+func UpdateAgentDisplayName(workspace, name string) error {
+	path := filepath.Join(workspace, "AGENT.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = defaultAgentDisplayName
+	}
+	emoji := ReadAgentSignatureEmoji(workspace)
+
+	fields, body, hasFrontmatter, err := splitMarkdownFrontmatter(string(data))
+	if err != nil {
+		return err
+	}
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	fields["display_name"] = name
+
+	lines := strings.Split(body, "\n")
+	replaced := false
+	insertAfter := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "You are Jame, the default assistant for this workspace.") {
+			insertAfter = i
+		}
+		if strings.HasPrefix(trimmed, "Your name is ") {
+			lines[i] = fmt.Sprintf("Your name is %s %s.", name, emoji)
+			replaced = true
+			break
+		}
+	}
+
+	if !replaced {
+		replacement := fmt.Sprintf("Your name is %s %s.", name, emoji)
+		if insertAfter >= 0 {
+			lines = append(lines[:insertAfter+1], append([]string{replacement}, lines[insertAfter+1:]...)...)
+		} else {
+			lines = append([]string{replacement}, lines...)
+		}
+	}
+
+	rendered, err := renderMarkdownFrontmatter(fields, strings.Join(lines, "\n"), hasFrontmatter)
+	if err != nil {
+		return err
+	}
+	return fileutil.WriteFileAtomic(path, []byte(rendered), 0o644)
 }
 
 func UpdateAgentSignatureEmoji(workspace, emoji string) error {
@@ -76,6 +166,14 @@ func UpdateAgentSignatureEmoji(workspace, emoji string) error {
 		fields = map[string]any{}
 	}
 	fields["emoji"] = emoji
+	name := defaultAgentDisplayName
+	if raw, ok := fields["display_name"]; ok {
+		if value := strings.TrimSpace(fmt.Sprint(raw)); value != "" {
+			name = value
+		}
+	} else if value := ReadAgentDisplayName(workspace); value != "" {
+		name = value
+	}
 
 	lines := strings.Split(body, "\n")
 	replaced := false
@@ -85,15 +183,15 @@ func UpdateAgentSignatureEmoji(workspace, emoji string) error {
 		if strings.HasPrefix(trimmed, "You are Jame, the default assistant for this workspace.") {
 			insertAfter = i
 		}
-		if strings.HasPrefix(trimmed, agentNameLinePrefix) {
-			lines[i] = agentNameLinePrefix + " " + emoji + "."
+		if strings.HasPrefix(trimmed, "Your name is ") {
+			lines[i] = fmt.Sprintf("Your name is %s %s.", name, emoji)
 			replaced = true
 			break
 		}
 	}
 
 	if !replaced {
-		replacement := agentNameLinePrefix + " " + emoji + "."
+		replacement := fmt.Sprintf("Your name is %s %s.", name, emoji)
 		if insertAfter >= 0 {
 			lines = append(lines[:insertAfter+1], append([]string{replacement}, lines[insertAfter+1:]...)...)
 		} else {

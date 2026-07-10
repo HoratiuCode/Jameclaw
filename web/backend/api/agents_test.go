@@ -24,6 +24,7 @@ func TestHandleCreateAgent_AddsSubagentToParent(t *testing.T) {
 		"workspace": "/tmp/research",
 		"parent_id": "main",
 		"human": {
+			"agent_name": "Scout",
 			"persona": "Research partner",
 			"tone": "direct and warm",
 			"discussion_mode": "collaborative",
@@ -68,6 +69,9 @@ func TestHandleCreateAgent_AddsSubagentToParent(t *testing.T) {
 	}
 	if created.Human == nil {
 		t.Fatal("created.Human is nil")
+	}
+	if created.Human.AgentName != "Scout" {
+		t.Fatalf("created.Human.AgentName = %q, want %q", created.Human.AgentName, "Scout")
 	}
 	if created.Human.Persona != "Research partner" {
 		t.Fatalf("created.Human.Persona = %q, want %q", created.Human.Persona, "Research partner")

@@ -26,6 +26,7 @@ func toolResult(id string) providers.Message {
 
 func TestBuildSystemPromptIncludesHumanDiscussionConfig(t *testing.T) {
 	builder := NewContextBuilder(t.TempDir()).WithHumanConfig("Research Helper", &config.HumanConfig{
+		AgentName:      "Scout",
 		Persona:        "Research partner",
 		Tone:           "direct and warm",
 		DiscussionMode: "collaborative",
@@ -35,6 +36,7 @@ func TestBuildSystemPromptIncludesHumanDiscussionConfig(t *testing.T) {
 
 	prompt := builder.BuildSystemPrompt()
 	for _, want := range []string{
+		"You are Scout, a helpful AI assistant.",
 		"## Human Discussion Style",
 		"Persona: Research partner",
 		"Tone: direct and warm",

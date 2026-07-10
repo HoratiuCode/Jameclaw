@@ -83,6 +83,31 @@ I am JameClaw: calm, helpful, practical, and memory disciplined.
 
 	reply = ""
 	res = ex.Execute(context.Background(), Request{
+		Text: "/name Scout",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/name outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if !strings.Contains(reply, "Updated assistant name to Scout") {
+		t.Fatalf("/name reply=%q", reply)
+	}
+	rawAgent, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawAgent), "display_name: Scout") {
+		t.Fatalf("AGENT.md did not persist display name:\n%s", string(rawAgent))
+	}
+	if !strings.Contains(string(rawAgent), "Your name is Scout 🦐.") {
+		t.Fatalf("AGENT.md did not update name line:\n%s", string(rawAgent))
+	}
+
+	reply = ""
+	res = ex.Execute(context.Background(), Request{
 		Text: "/emoji 🤖",
 		Reply: func(text string) error {
 			reply = text
@@ -95,11 +120,11 @@ I am JameClaw: calm, helpful, practical, and memory disciplined.
 	if !strings.Contains(reply, "Updated signature emoji to 🤖") {
 		t.Fatalf("/emoji reply=%q", reply)
 	}
-	rawAgent, err := os.ReadFile(agentPath)
+	rawAgent, err = os.ReadFile(agentPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(rawAgent), "Your name is JameClaw 🤖.") {
+	if !strings.Contains(string(rawAgent), "Your name is Scout 🤖.") {
 		t.Fatalf("AGENT.md did not persist emoji:\n%s", string(rawAgent))
 	}
 

@@ -94,11 +94,20 @@ func (cb *ContextBuilder) getIdentity() string {
 	toolDiscovery := cb.getDiscoveryRule()
 	version := config.FormatVersion()
 	emoji := commands.ReadAgentSignatureEmoji(cb.workspace)
+	agentName := commands.ReadAgentDisplayName(cb.workspace)
+	if cb.agentName != "" && !strings.EqualFold(cb.agentName, "main") {
+		agentName = cb.agentName
+	}
+	if cb.human != nil {
+		if value := strings.TrimSpace(cb.human.AgentName); value != "" {
+			agentName = value
+		}
+	}
 
 	return fmt.Sprintf(
 		`# jameclaw %s (%s)
 
-You are jameclaw, a helpful AI assistant.
+You are %s, a helpful AI assistant.
 You are Your AI agent for fancy jobs.
 
 ## Workspace
@@ -135,7 +144,7 @@ Your workspace is at: %s
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.
 
 %s`,
-		emoji, version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
+		emoji, version, agentName, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
 }
 
 func (cb *ContextBuilder) getDiscoveryRule() string {
@@ -198,6 +207,9 @@ func (cb *ContextBuilder) buildHumanDiscussionContext() string {
 		persona = cb.agentName
 	}
 	if cb.human != nil {
+		if value := strings.TrimSpace(cb.human.AgentName); value != "" {
+			persona = value
+		}
 		if value := strings.TrimSpace(cb.human.Persona); value != "" {
 			persona = value
 		}

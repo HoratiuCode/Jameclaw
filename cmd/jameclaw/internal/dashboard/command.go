@@ -65,9 +65,9 @@ func runDashboard(ctx context.Context, opts dashboardOptions) error {
 		}
 	}
 
-	fmt.Fprintf(dashboardOutput, "Dashboard URL: %s\n", target.BaseURL)
+	fmt.Fprintf(dashboardOutput, "Dashboard URL: %s\n", target.AuthenticatedURL)
 	if target.AuthenticatedURL != target.BaseURL {
-		fmt.Fprintln(dashboardOutput, "Access token included in copied/browser URL.")
+		fmt.Fprintln(dashboardOutput, "Access token included in dashboard URL.")
 	}
 	if err := dashboardCopyText(target.AuthenticatedURL); err == nil {
 		fmt.Fprintln(dashboardOutput, "Copied dashboard URL to clipboard.")

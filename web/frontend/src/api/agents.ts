@@ -14,6 +14,7 @@ export interface AgentSummary {
 }
 
 export interface AgentHuman {
+  agent_name: string
   persona: string
   tone: string
   discussion_mode: string
@@ -93,6 +94,7 @@ export async function createAgent(body: {
 
 function normalizeHuman(value?: Partial<AgentHuman> | null): AgentHuman {
   return {
+    agent_name: value?.agent_name ?? "",
     persona: value?.persona ?? "",
     tone: value?.tone ?? "",
     discussion_mode: value?.discussion_mode ?? "",

@@ -295,6 +295,7 @@ type SubagentsConfig struct {
 }
 
 type HumanConfig struct {
+	AgentName      string `json:"agent_name,omitempty"`
 	Persona        string `json:"persona,omitempty"`
 	Tone           string `json:"tone,omitempty"`
 	DiscussionMode string `json:"discussion_mode,omitempty"`

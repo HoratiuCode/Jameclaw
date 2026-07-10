@@ -204,7 +204,7 @@ install: build
 	@echo "Installed binary to $(INSTALL_BIN_DIR)/$(BINARY_NAME)"
 	@echo "Installation complete!"
 
-## install-startup: Install the binaries used by `jameclaw startup`
+## install-startup: Install the binaries used by `jameclaw dashboard`
 install-startup: build build-launcher
 	@echo "Installing startup binaries..."
 	@mkdir -p $(INSTALL_BIN_DIR)
@@ -216,7 +216,7 @@ install-startup: build build-launcher
 	@mv -f $(INSTALL_BIN_DIR)/jameclaw-web$(INSTALL_TMP_SUFFIX) $(INSTALL_BIN_DIR)/jameclaw-web
 	@echo "Installed $(INSTALL_BIN_DIR)/jameclaw"
 	@echo "Installed $(INSTALL_BIN_DIR)/jameclaw-web"
-	@echo "Run \`jameclaw startup\` to open the updated Web Console."
+	@echo "Run \`jameclaw dashboard\` to open the updated Web Console."
 
 ## uninstall: Remove jameclaw from system
 uninstall:

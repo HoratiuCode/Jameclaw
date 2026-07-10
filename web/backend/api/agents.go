@@ -28,6 +28,7 @@ type agentSummary struct {
 }
 
 type human struct {
+	AgentName      string `json:"agent_name"`
 	Persona        string `json:"persona"`
 	Tone           string `json:"tone"`
 	DiscussionMode string `json:"discussion_mode"`
@@ -164,6 +165,7 @@ func summarizeHuman(value *config.HumanConfig) human {
 		return human{}
 	}
 	return human{
+		AgentName:      value.AgentName,
 		Persona:        value.Persona,
 		Tone:           value.Tone,
 		DiscussionMode: value.DiscussionMode,
@@ -246,6 +248,15 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		agent.Model = &config.AgentModelConfig{Primary: req.Model}
 	}
 	agent.Human = cleanHuman(req.Human)
+	if agent.Human == nil && req.Name != "" {
+		agent.Human = &config.HumanConfig{AgentName: req.Name}
+	} else if agent.Human != nil && agent.Human.AgentName == "" {
+		if req.Name != "" {
+			agent.Human.AgentName = req.Name
+		} else {
+			agent.Human.AgentName = req.ID
+		}
+	}
 	cfg.Agents.List = append(cfg.Agents.List, agent)
 
 	if err := allowSubagent(cfg, req.ParentID, req.ID); err != nil {
@@ -400,13 +411,14 @@ func cleanHuman(value *human) *config.HumanConfig {
 		return nil
 	}
 	cleaned := &config.HumanConfig{
+		AgentName:      strings.TrimSpace(value.AgentName),
 		Persona:        strings.TrimSpace(value.Persona),
 		Tone:           strings.TrimSpace(value.Tone),
 		DiscussionMode: strings.TrimSpace(value.DiscussionMode),
 		MemoryNotes:    strings.TrimSpace(value.MemoryNotes),
 		StatusStyle:    strings.TrimSpace(value.StatusStyle),
 	}
-	if cleaned.Persona == "" && cleaned.Tone == "" && cleaned.DiscussionMode == "" &&
+	if cleaned.AgentName == "" && cleaned.Persona == "" && cleaned.Tone == "" && cleaned.DiscussionMode == "" &&
 		cleaned.MemoryNotes == "" && cleaned.StatusStyle == "" {
 		return nil
 	}

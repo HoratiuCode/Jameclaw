@@ -1,5 +1,5 @@
 import { IconBrain, IconLoader2, IconPlus, IconRefresh, IconStar } from "@tabler/icons-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
@@ -176,11 +176,23 @@ function AgentPanels({
   const selectedSubagents = selected?.subagents ?? EMPTY_STRING_LIST
   const [model, setModel] = useState(selected?.model ?? "")
   const [fallbacksText, setFallbacksText] = useState(selectedFallbacks.join("\n"))
+  const [humanAgentName, setHumanAgentName] = useState(selected?.human.agent_name ?? "")
   const [humanPersona, setHumanPersona] = useState(selected?.human.persona ?? "")
   const [humanTone, setHumanTone] = useState(selected?.human.tone ?? "")
   const [humanMode, setHumanMode] = useState(selected?.human.discussion_mode ?? "")
   const [humanStatus, setHumanStatus] = useState(selected?.human.status_style ?? "")
   const [humanNotes, setHumanNotes] = useState(selected?.human.memory_notes ?? "")
+
+  useEffect(() => {
+    setModel(selected?.model ?? "")
+    setFallbacksText((selected?.model_fallbacks ?? EMPTY_STRING_LIST).join("\n"))
+    setHumanAgentName(selected?.human.agent_name ?? "")
+    setHumanPersona(selected?.human.persona ?? "")
+    setHumanTone(selected?.human.tone ?? "")
+    setHumanMode(selected?.human.discussion_mode ?? "")
+    setHumanStatus(selected?.human.status_style ?? "")
+    setHumanNotes(selected?.human.memory_notes ?? "")
+  }, [selected])
 
   if (!selected) {
     return (
@@ -269,6 +281,14 @@ function AgentPanels({
           <CardTitle>Human Discussion</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
+          <div>
+            <div className="text-muted-foreground mb-1 text-xs">Default name</div>
+            <Input
+              value={humanAgentName}
+              onChange={(event) => setHumanAgentName(event.target.value)}
+              placeholder={selected.name || "JameClaw"}
+            />
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <div className="text-muted-foreground mb-1 text-xs">Persona</div>
@@ -320,6 +340,7 @@ function AgentPanels({
             onClick={() =>
               onSave(selected, {
                 human: {
+                  agent_name: humanAgentName.trim(),
                   persona: humanPersona.trim(),
                   tone: humanTone.trim(),
                   discussion_mode: humanMode.trim(),
@@ -400,6 +421,7 @@ function CreateSubagentForm({
       workspace: workspace.trim(),
       parent_id: parent.id,
       human: {
+        agent_name: name.trim() || cleanID,
         persona: persona.trim(),
         tone: tone.trim(),
         discussion_mode: "collaborative",
