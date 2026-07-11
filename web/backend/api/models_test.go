@@ -194,6 +194,82 @@ func TestHandleAddModelFromCatalogCreatesDefaultModel(t *testing.T) {
 	}
 }
 
+func TestHandleSetDefaultModelSupportsImageAndVoiceRoles(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg := config.DefaultConfig()
+	cfg.ModelList = []*config.ModelConfig{
+		{ModelName: "chat-model", Model: "openai/gpt-5.4"},
+		{ModelName: "image-model", Model: "openai/gpt-image-1"},
+		{ModelName: "voice-model", Model: "openai/gpt-4o-transcribe"},
+	}
+	cfg.Agents.Defaults.ModelName = "chat-model"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	for _, body := range []string{
+		`{"model_name":"image-model","role":"image"}`,
+		`{"model_name":"voice-model","role":"voice"}`,
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/models/default", strings.NewReader(body))
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if got := saved.Agents.Defaults.ImageModel; got != "image-model" {
+		t.Fatalf("ImageModel = %q, want image-model", got)
+	}
+	if got := saved.Voice.ModelName; got != "voice-model" {
+		t.Fatalf("Voice.ModelName = %q, want voice-model", got)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp struct {
+		DefaultModel      string          `json:"default_model"`
+		DefaultImageModel string          `json:"default_image_model"`
+		DefaultVoiceModel string          `json:"default_voice_model"`
+		Models            []modelResponse `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.DefaultModel != "chat-model" || resp.DefaultImageModel != "image-model" || resp.DefaultVoiceModel != "voice-model" {
+		t.Fatalf("defaults = %#v", resp)
+	}
+	flags := map[string]modelResponse{}
+	for _, model := range resp.Models {
+		flags[model.ModelName] = model
+	}
+	if !flags["chat-model"].IsDefault {
+		t.Fatal("chat-model IsDefault = false, want true")
+	}
+	if !flags["image-model"].IsImage {
+		t.Fatal("image-model IsImage = false, want true")
+	}
+	if !flags["voice-model"].IsVoice {
+		t.Fatal("voice-model IsVoice = false, want true")
+	}
+}
+
 func TestHandleListModels_ConfiguredStatusForOAuthModelWithCredential(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

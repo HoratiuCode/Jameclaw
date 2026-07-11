@@ -60,6 +60,8 @@ type modelResponse struct {
 	// Meta
 	Configured bool `json:"configured"`
 	IsDefault  bool `json:"is_default"`
+	IsImage    bool `json:"is_image_default"`
+	IsVoice    bool `json:"is_voice_default"`
 }
 
 // handleListModels returns all model_list entries with masked API keys.
@@ -73,6 +75,8 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defaultModel := cfg.Agents.Defaults.GetModelName()
+	imageModel := cfg.Agents.Defaults.ImageModel
+	voiceModel := cfg.Voice.ModelName
 	configured := make([]bool, len(cfg.ModelList))
 
 	var wg sync.WaitGroup
@@ -104,14 +108,18 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			ExtraBody:      m.ExtraBody,
 			Configured:     configured[i],
 			IsDefault:      m.ModelName == defaultModel,
+			IsImage:        m.ModelName == imageModel,
+			IsVoice:        m.ModelName == voiceModel,
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"models":        models,
-		"total":         len(models),
-		"default_model": defaultModel,
+		"models":              models,
+		"total":               len(models),
+		"default_model":       defaultModel,
+		"default_image_model": imageModel,
+		"default_voice_model": voiceModel,
 	})
 }
 
@@ -375,6 +383,12 @@ func (h *Handler) handleDeleteModel(w http.ResponseWriter, r *http.Request) {
 	if cfg.Agents.Defaults.ModelName == deletedModelName {
 		cfg.Agents.Defaults.ModelName = ""
 	}
+	if cfg.Agents.Defaults.ImageModel == deletedModelName {
+		cfg.Agents.Defaults.ImageModel = ""
+	}
+	if cfg.Voice.ModelName == deletedModelName {
+		cfg.Voice.ModelName = ""
+	}
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
@@ -385,7 +399,7 @@ func (h *Handler) handleDeleteModel(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// handleSetDefaultModel sets the default model for all agents.
+// handleSetDefaultModel sets the default model for a model role.
 //
 //	POST /api/models/default
 func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) {
@@ -398,6 +412,7 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 
 	var req struct {
 		ModelName string `json:"model_name"`
+		Role      string `json:"role"`
 	}
 	if err = json.Unmarshal(body, &req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -406,6 +421,13 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 
 	if req.ModelName == "" {
 		http.Error(w, "model_name is required", http.StatusBadRequest)
+		return
+	}
+	if req.Role == "" {
+		req.Role = "chat"
+	}
+	if req.Role != "chat" && req.Role != "image" && req.Role != "voice" {
+		http.Error(w, "role must be one of: chat, image, voice", http.StatusBadRequest)
 		return
 	}
 
@@ -428,7 +450,14 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cfg.Agents.Defaults.ModelName = req.ModelName
+	switch req.Role {
+	case "chat":
+		cfg.Agents.Defaults.ModelName = req.ModelName
+	case "image":
+		cfg.Agents.Defaults.ImageModel = req.ModelName
+	case "voice":
+		cfg.Voice.ModelName = req.ModelName
+	}
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
@@ -436,9 +465,11 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":        "ok",
-		"default_model": req.ModelName,
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":              "ok",
+		"default_model":       cfg.Agents.Defaults.GetModelName(),
+		"default_image_model": cfg.Agents.Defaults.ImageModel,
+		"default_voice_model": cfg.Voice.ModelName,
 	})
 }
 

@@ -1,9 +1,10 @@
-import { IconLoader2, IconPlus, IconStar } from "@tabler/icons-react"
+import { IconLoader2, IconPlus } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
   type ModelInfo,
+  type ModelRole,
   type ProviderCatalogEntry,
   getModelCatalog,
   getModels,
@@ -38,9 +39,10 @@ export function ModelsPage() {
   const [deletingModel, setDeletingModel] = useState<ModelInfo | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [providerAddOpen, setProviderAddOpen] = useState(false)
-  const [settingDefaultIndex, setSettingDefaultIndex] = useState<number | null>(
-    null,
-  )
+  const [settingDefault, setSettingDefault] = useState<{
+    index: number
+    role: ModelRole
+  } | null>(null)
 
   const fetchModels = useCallback(async () => {
     try {
@@ -49,8 +51,15 @@ export function ModelsPage() {
         getModelCatalog(),
       ])
       const sorted = [...data.models].sort((a, b) => {
-        if (a.is_default && !b.is_default) return -1
-        if (!a.is_default && b.is_default) return 1
+        const aRoleCount =
+          Number(a.is_default) +
+          Number(a.is_image_default) +
+          Number(a.is_voice_default)
+        const bRoleCount =
+          Number(b.is_default) +
+          Number(b.is_image_default) +
+          Number(b.is_voice_default)
+        if (aRoleCount !== bRoleCount) return bRoleCount - aRoleCount
         if (a.configured && !b.configured) return -1
         if (!a.configured && b.configured) return 1
         return a.model_name.localeCompare(b.model_name)
@@ -69,17 +78,23 @@ export function ModelsPage() {
     fetchModels()
   }, [fetchModels])
 
-  const handleSetDefault = async (model: ModelInfo) => {
-    if (model.is_default) return
+  const handleSetDefault = async (model: ModelInfo, role: ModelRole) => {
+    if (
+      (role === "chat" && model.is_default) ||
+      (role === "image" && model.is_image_default) ||
+      (role === "voice" && model.is_voice_default)
+    ) {
+      return
+    }
 
-    setSettingDefaultIndex(model.index)
+    setSettingDefault({ index: model.index, role })
     try {
-      await setDefaultModel(model.model_name)
+      await setDefaultModel(model.model_name, role)
       await fetchModels()
     } catch {
       // ignore
     } finally {
-      setSettingDefaultIndex(null)
+      setSettingDefault(null)
     }
   }
 
@@ -111,7 +126,12 @@ export function ModelsPage() {
         key,
         label: group.label,
         models: group.models,
-        hasDefault: group.models.some((model) => model.is_default),
+        hasDefault: group.models.some(
+          (model) =>
+            model.is_default ||
+            model.is_image_default ||
+            model.is_voice_default,
+        ),
         configuredCount,
       }
     })
@@ -139,6 +159,8 @@ export function ModelsPage() {
     })
 
   const defaultModel = models.find((model) => model.is_default)
+  const defaultImageModel = models.find((model) => model.is_image_default)
+  const defaultVoiceModel = models.find((model) => model.is_voice_default)
 
   return (
     <div className="flex h-full flex-col">
@@ -157,11 +179,9 @@ export function ModelsPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
         <div className="pt-2">
-          {!defaultModel && (
+          {(!defaultModel || !defaultImageModel || !defaultVoiceModel) && (
             <div className="text-muted-foreground flex items-center gap-1.5 text-sm">
               <span>{t("models.noDefaultHintPrefix")}</span>
-              <IconStar className="size-3.5 shrink-0" />
-              <span>{t("models.noDefaultHintSuffix")}</span>
             </div>
           )}
           <p className="text-muted-foreground mt-1 text-sm">
@@ -192,7 +212,7 @@ export function ModelsPage() {
                 onEdit={setEditingModel}
                 onSetDefault={handleSetDefault}
                 onDelete={setDeletingModel}
-                settingDefaultIndex={settingDefaultIndex}
+                settingDefault={settingDefault}
               />
             ))}
           </div>

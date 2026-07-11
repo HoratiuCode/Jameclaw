@@ -2,21 +2,24 @@ import {
   IconEdit,
   IconKey,
   IconLoader2,
+  IconMessageCircle,
+  IconMicrophone,
+  IconPhoto,
   IconStar,
   IconStarFilled,
   IconTrash,
 } from "@tabler/icons-react"
 import { useTranslation } from "react-i18next"
 
-import type { ModelInfo } from "@/api/models"
+import type { ModelInfo, ModelRole } from "@/api/models"
 import { Button } from "@/components/ui/button"
 
 interface ModelCardProps {
   model: ModelInfo
   onEdit: (model: ModelInfo) => void
-  onSetDefault: (model: ModelInfo) => void
+  onSetDefault: (model: ModelInfo, role: ModelRole) => void
   onDelete: (model: ModelInfo) => void
-  settingDefault: boolean
+  settingDefaultRole: ModelRole | null
 }
 
 export function ModelCard({
@@ -24,11 +27,43 @@ export function ModelCard({
   onEdit,
   onSetDefault,
   onDelete,
-  settingDefault,
+  settingDefaultRole,
 }: ModelCardProps) {
   const { t } = useTranslation()
   const isOAuth = model.auth_method === "oauth"
-  const canSetDefault = model.configured && !model.is_default
+  const canSetDefault = model.configured
+  const defaultRoles: Array<{ role: ModelRole; label: string }> = [
+    model.is_default && { role: "chat", label: t("models.badge.chat") },
+    model.is_image_default && { role: "image", label: t("models.badge.image") },
+    model.is_voice_default && { role: "voice", label: t("models.badge.voice") },
+  ].filter(Boolean) as Array<{ role: ModelRole; label: string }>
+  const protectedDefault =
+    model.is_default || model.is_image_default || model.is_voice_default
+  const roleActions: Array<{
+    role: ModelRole
+    active: boolean
+    title: string
+    icon: typeof IconMessageCircle
+  }> = [
+    {
+      role: "chat",
+      active: model.is_default,
+      title: t("models.action.setChatDefault"),
+      icon: IconMessageCircle,
+    },
+    {
+      role: "image",
+      active: model.is_image_default,
+      title: t("models.action.setImageDefault"),
+      icon: IconPhoto,
+    },
+    {
+      role: "voice",
+      active: model.is_voice_default,
+      title: t("models.action.setVoiceDefault"),
+      icon: IconMicrophone,
+    },
+  ]
 
   return (
     <div
@@ -59,36 +94,38 @@ export function ModelCard({
           <span className="text-foreground truncate text-sm font-semibold">
             {model.model_name}
           </span>
-          {model.is_default && (
-            <span className="bg-primary/10 text-primary shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none font-medium">
-              {t("models.badge.default")}
+          {defaultRoles.map((role) => (
+            <span
+              key={role.role}
+              className="bg-primary/10 text-primary shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none font-medium"
+            >
+              {role.label}
             </span>
-          )}
+          ))}
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          {model.is_default ? (
-            <span
-              className="text-primary p-1"
-              title={t("models.badge.default")}
-            >
-              <IconStarFilled className="size-3.5" />
-            </span>
-          ) : (
+          {roleActions.map(({ role, active, title, icon: Icon }) => (
             <Button
+              key={role}
               variant="ghost"
               size="icon-sm"
-              onClick={() => onSetDefault(model)}
-              disabled={settingDefault || !canSetDefault}
-              title={t("models.action.setDefault")}
+              onClick={() => onSetDefault(model, role)}
+              disabled={settingDefaultRole !== null || !canSetDefault || active}
+              title={title}
+              className={active ? "text-primary" : undefined}
             >
-              {settingDefault ? (
+              {settingDefaultRole === role ? (
                 <IconLoader2 className="size-3.5 animate-spin" />
-              ) : (
+              ) : active && role === "chat" ? (
+                <IconStarFilled className="size-3.5" />
+              ) : role === "chat" ? (
                 <IconStar className="size-3.5" />
+              ) : (
+                <Icon className="size-3.5" />
               )}
             </Button>
-          )}
+          ))}
 
           <Button
             variant="ghost"
@@ -103,7 +140,7 @@ export function ModelCard({
             variant="ghost"
             size="icon-sm"
             onClick={() => onDelete(model)}
-            disabled={model.is_default}
+            disabled={protectedDefault}
             title={t("models.action.delete")}
             className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
           >

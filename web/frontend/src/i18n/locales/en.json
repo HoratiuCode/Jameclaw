@@ -150,20 +150,26 @@
     }
   },
   "models": {
-    "description": "Configure API keys for AI providers. Only configured models are available for chat.",
+    "description": "Configure model endpoints for chat, image generation, and voice transcription.",
     "loadError": "Failed to load models",
-    "noDefaultHintPrefix": "No default model set yet. Click",
-    "noDefaultHintSuffix": "to set one.",
+    "noDefaultHintPrefix": "Set defaults for chat, image, and voice with the role buttons on each model.",
+    "noDefaultHintSuffix": "",
     "status": {
       "configured": "Configured",
       "unconfigured": "Not configured"
     },
     "badge": {
-      "default": "Default"
+      "default": "Default",
+      "chat": "Chat",
+      "image": "Image",
+      "voice": "Voice"
     },
     "action": {
       "edit": "Edit API key",
       "setDefault": "Set as default",
+      "setChatDefault": "Use for chat",
+      "setImageDefault": "Use for image generation",
+      "setVoiceDefault": "Use for voice chat",
       "delete": "Delete model"
     },
     "defaultOnSave": {

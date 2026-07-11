@@ -21,6 +21,8 @@ export interface ModelInfo {
   // Meta
   configured: boolean
   is_default: boolean
+  is_image_default: boolean
+  is_voice_default: boolean
 }
 
 export interface ModelMutationPayload extends Partial<ModelInfo> {
@@ -69,12 +71,16 @@ interface ModelsListResponse {
   models: ModelInfo[]
   total: number
   default_model: string
+  default_image_model: string
+  default_voice_model: string
 }
 
 interface ModelActionResponse {
   status: string
   index?: number
   default_model?: string
+  default_image_model?: string
+  default_voice_model?: string
 }
 
 interface ModelCatalogResponse {
@@ -89,6 +95,8 @@ export interface AddModelFromCatalogPayload {
   api_key?: string
   set_default?: boolean
 }
+
+export type ModelRole = "chat" | "image" | "voice"
 
 const BASE_URL = ""
 
@@ -147,11 +155,12 @@ export async function deleteModel(index: number): Promise<ModelActionResponse> {
 
 export async function setDefaultModel(
   modelName: string,
+  role: ModelRole = "chat",
 ): Promise<ModelActionResponse> {
   const response = await request<ModelActionResponse>("/api/models/default", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model_name: modelName }),
+    body: JSON.stringify({ model_name: modelName, role }),
   })
 
   await refreshGatewayState()

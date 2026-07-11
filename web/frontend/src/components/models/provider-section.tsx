@@ -1,7 +1,7 @@
 import { IconChevronDown } from "@tabler/icons-react"
 import { useState } from "react"
 
-import type { ModelInfo } from "@/api/models"
+import type { ModelInfo, ModelRole } from "@/api/models"
 
 import { ModelCard } from "./model-card"
 import { ProviderIcon } from "./provider-icon"
@@ -11,9 +11,14 @@ interface ProviderSectionProps {
   providerKey: string
   models: ModelInfo[]
   onEdit: (model: ModelInfo) => void
-  onSetDefault: (model: ModelInfo) => void
+  onSetDefault: (model: ModelInfo, role: ModelRole) => void
   onDelete: (model: ModelInfo) => void
-  settingDefaultIndex: number | null
+  settingDefault:
+    | {
+        index: number
+        role: ModelRole
+      }
+    | null
 }
 
 export function ProviderSection({
@@ -23,7 +28,7 @@ export function ProviderSection({
   onEdit,
   onSetDefault,
   onDelete,
-  settingDefaultIndex,
+  settingDefault,
 }: ProviderSectionProps) {
   const [open, setOpen] = useState(true)
 
@@ -62,7 +67,9 @@ export function ProviderSection({
               onEdit={onEdit}
               onSetDefault={onSetDefault}
               onDelete={onDelete}
-              settingDefault={settingDefaultIndex === model.index}
+              settingDefaultRole={
+                settingDefault?.index === model.index ? settingDefault.role : null
+              }
             />
           ))}
         </div>
