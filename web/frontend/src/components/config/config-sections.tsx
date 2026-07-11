@@ -789,14 +789,16 @@ export function SystemSection({
       ? t("pages.config.system_update_check_failed")
       : updateStatus?.update_available
         ? t("pages.config.system_update_available")
-        : updateStatus
+        : updateStatus && latestVersionLabel
           ? t("pages.config.system_update_current")
           : t("pages.config.system_update_unknown")
   const updateStateClass = updateStatus?.check_error
     ? "text-destructive"
     : updateStatus?.update_available
       ? "text-amber-600 dark:text-amber-300"
-      : "text-emerald-600 dark:text-emerald-400"
+      : latestVersionLabel
+        ? "text-emerald-600 dark:text-emerald-400"
+        : "text-muted-foreground"
 
   return (
     <ConfigSectionCard title={t("pages.config.sections.system")}>

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,13 +18,16 @@ import (
 )
 
 const (
-	githubLatestReleaseURL = "https://api.github.com/repos/sipeed/jameclaw/releases/latest"
-	githubReleasesPageURL  = "https://github.com/sipeed/jameclaw/releases/latest"
+	githubLatestReleaseURL = "https://api.github.com/repos/HoratiuCode/Jameclaw/releases/latest"
+	githubReleasesPageURL  = "https://github.com/HoratiuCode/Jameclaw/releases/latest"
 	updateStateFile        = "update_state.json"
 	updateCheckTimeout     = 5 * time.Second
 )
 
 var versionPartPattern = regexp.MustCompile(`\d+`)
+var githubReleaseHTTPClient = http.DefaultClient
+
+var errNoPublishedGitHubRelease = errors.New("no published GitHub releases found")
 
 type updateStatusResponse struct {
 	CurrentVersion   string `json:"current_version"`
@@ -115,6 +119,9 @@ func (h *Handler) getUpdateStatus(ctx context.Context) updateStatusResponse {
 
 	release, err := fetchLatestRelease(ctx)
 	if err != nil {
+		if errors.Is(err, errNoPublishedGitHubRelease) {
+			return status
+		}
 		status.CheckError = err.Error()
 		return status
 	}
@@ -149,12 +156,15 @@ func fetchLatestRelease(ctx context.Context) (githubReleaseResponse, error) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", fmt.Sprintf("jameclaw/%s", config.GetVersion()))
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := githubReleaseHTTPClient.Do(req)
 	if err != nil {
 		return githubReleaseResponse{}, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return githubReleaseResponse{}, errNoPublishedGitHubRelease
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return githubReleaseResponse{}, fmt.Errorf("GitHub release check returned HTTP %d", resp.StatusCode)
 	}
