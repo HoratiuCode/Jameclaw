@@ -81,11 +81,15 @@ func isLocalExtensionRequest(r *http.Request) bool {
 	}
 
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if !strings.HasPrefix(origin, "chrome-extension://") {
+	if !isAllowedLocalExtensionOrigin(origin) {
 		return false
 	}
 
 	return isLoopbackRemote(r)
+}
+
+func isAllowedLocalExtensionOrigin(origin string) bool {
+	return origin == "" || origin == "null" || strings.HasPrefix(origin, "chrome-extension://")
 }
 
 func isLoopbackRemote(r *http.Request) bool {

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "JameClaw Companion",
   "description": "Compact Chrome extension for the local JameClaw assistant.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "permissions": [
     "activeTab",
     "storage",

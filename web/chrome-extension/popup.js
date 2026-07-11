@@ -39,6 +39,13 @@ function setStatus(message) {
   statusEl.textContent = message || ""
 }
 
+function errorMessage(error) {
+  if (error instanceof Error) {
+    return error.message
+  }
+  return String(error || "Unknown error")
+}
+
 function setComposerEnabled(enabled) {
   inputEl.disabled = !enabled
   sendEl.disabled = !enabled
@@ -85,14 +92,14 @@ function getOrCreateSessionId() {
   })
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(reason = "") {
   if (!lastBootstrap || reconnectTimer !== null) {
     return
   }
 
   const delay = Math.min(250 * 2 ** reconnectAttempts, MAX_RETRY_DELAY_MS)
   reconnectAttempts += 1
-  setStatus("Reconnecting…")
+  setStatus(reason ? `${reason} Retrying WebSocket…` : "Retrying WebSocket…")
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     if (!lastBootstrap) {
@@ -102,14 +109,14 @@ function scheduleReconnect() {
   }, delay)
 }
 
-function scheduleBootstrapRetry() {
+function scheduleBootstrapRetry(reason = "") {
   if (bootstrapRetryTimer !== null) {
     return
   }
 
   const delay = Math.min(250 * 2 ** bootstrapRetryAttempts, MAX_RETRY_DELAY_MS)
   bootstrapRetryAttempts += 1
-  setStatus("Connecting…")
+  setStatus(reason ? `${reason} Retrying bootstrap…` : "Retrying bootstrap…")
   bootstrapRetryTimer = setTimeout(() => {
     bootstrapRetryTimer = null
     void bootstrap()
@@ -209,6 +216,7 @@ function connectWebSocket(wsUrl, token) {
   clearReconnectTimer()
   const separator = wsUrl.includes("?") ? "&" : "?"
   const url = `${wsUrl}${separator}token=${encodeURIComponent(token)}&session_id=${encodeURIComponent(sessionId)}`
+  setStatus(`Opening WebSocket ${new URL(wsUrl).host}…`)
   socket = new WebSocket(url, [`token.${token}`])
   const activeSocket = socket
   const timeoutId = window.setTimeout(() => {
@@ -229,16 +237,14 @@ function connectWebSocket(wsUrl, token) {
 
   socket.addEventListener("close", () => {
     window.clearTimeout(timeoutId)
-    setStatus("Connection closed.")
     setComposerEnabled(false)
-    scheduleReconnect()
+    scheduleReconnect("WebSocket closed.")
   })
 
   socket.addEventListener("error", () => {
     window.clearTimeout(timeoutId)
-    setStatus("Could not connect to local JameClaw.")
     setComposerEnabled(false)
-    scheduleReconnect()
+    scheduleReconnect("Could not connect to local JameClaw WebSocket.")
   })
 
   socket.addEventListener("message", (event) => {
@@ -295,6 +301,7 @@ async function fetchBootstrap(url) {
   const timeoutId = window.setTimeout(() => controller.abort(), BOOTSTRAP_TIMEOUT_MS)
 
   try {
+    setStatus(`Bootstrap ${new URL(url).host}…`)
     const response = await fetch(url, {
       method: "GET",
       headers: { Accept: "application/json" },
@@ -338,16 +345,11 @@ async function bootstrap() {
 
     connectWebSocket(data.ws_url, data.token)
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      setStatus("Connecting…")
-    } else {
-      setStatus(
-        error instanceof Error
-          ? error.message
-          : "Could not reach local JameClaw on 127.0.0.1:18800.",
-      )
-    }
-    scheduleBootstrapRetry()
+    const message =
+      error instanceof Error && error.name === "AbortError"
+        ? "Bootstrap timed out"
+        : errorMessage(error) || "Could not reach local JameClaw on 127.0.0.1:18800."
+    scheduleBootstrapRetry(message)
   }
 }
 

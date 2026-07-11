@@ -97,6 +97,22 @@ func TestLocalSessionAuth_AllowsLocalExtensionBootstrap(t *testing.T) {
 	}
 }
 
+func TestLocalSessionAuth_AllowsLocalExtensionBootstrapWithOpaqueOrigin(t *testing.T) {
+	h := LocalSessionAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/extension/bootstrap", nil)
+	req.RemoteAddr = "127.0.0.1:45678"
+	req.Header.Set("Origin", "null")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
 func TestLocalSessionAuth_AllowsLocalJameWebSocketUpgrade(t *testing.T) {
 	h := LocalSessionAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

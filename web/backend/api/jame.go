@@ -289,11 +289,13 @@ func (h *Handler) ensureExtensionJameChannel(callerOrigin string) (bool, error) 
 
 func setExtensionCORSHeaders(w http.ResponseWriter, r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if !strings.HasPrefix(origin, "chrome-extension://") {
+	if !(origin == "" || origin == "null" || strings.HasPrefix(origin, "chrome-extension://")) {
 		return false
 	}
 
-	w.Header().Set("Access-Control-Allow-Origin", origin)
+	if strings.HasPrefix(origin, "chrome-extension://") || origin == "null" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Set("Vary", "Origin")

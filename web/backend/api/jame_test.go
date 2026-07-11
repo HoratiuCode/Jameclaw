@@ -319,6 +319,25 @@ func TestEnsureExtensionJameChannelSetsStableGatewayOrigin(t *testing.T) {
 	}
 }
 
+func TestHandleExtensionBootstrapAllowsOpaqueOrigin(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	h := NewHandler(configPath)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extension/bootstrap", nil)
+	req.Host = "localhost:18800"
+	req.Header.Set("Origin", "null")
+	rec := httptest.NewRecorder()
+
+	h.handleExtensionBootstrap(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "null" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, "null")
+	}
+}
+
 func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
