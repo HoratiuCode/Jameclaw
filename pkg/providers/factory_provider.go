@@ -156,7 +156,7 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		}
 		return provider, modelID, nil
 
-	case "litellm", "openrouter", "groq", "zhipu", "gemini", "nvidia",
+	case "litellm", "openrouter", "groq", "xai", "zhipu", "gemini", "nvidia",
 		"ollama", "moonshot", "shengsuanyun", "deepseek", "cerebras",
 		"vivgrid", "volcengine", "vllm", "qwen", "qwen-intl", "qwen-international", "dashscope-intl",
 		"qwen-us", "dashscope-us", "mistral", "avian", "longcat", "modelscope", "novita",
@@ -311,6 +311,8 @@ func getDefaultAPIBase(protocol string) string {
 		return "https://api.novita.ai/openai"
 	case "groq":
 		return "https://api.groq.com/openai/v1"
+	case "xai":
+		return "https://api.x.ai/v1"
 	case "zhipu":
 		return "https://open.bigmodel.cn/api/paas/v4"
 	case "gemini":

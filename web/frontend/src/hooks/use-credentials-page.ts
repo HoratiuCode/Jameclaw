@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import { type ModelInfo, getModels, updateModel } from "@/api/models"
+import { getAppConfig, patchAppConfig } from "@/api/channels"
+import {
+  type ModelInfo,
+  addModel,
+  getModels,
+  setDefaultModel,
+  updateModel,
+} from "@/api/models"
 import {
   type OAuthFlowState,
   type OAuthProvider,
@@ -14,18 +21,94 @@ import {
 } from "@/api/oauth"
 
 type FlowWatchMode = "" | "status" | "poll"
-type CredentialProvider = OAuthProvider | "openrouter"
+type CredentialProvider =
+  | OAuthProvider
+  | "openrouter"
+  | "grok-image"
+  | "gemini-image"
+  | "elevenlabs"
+  | "retell"
+
+type ModalCredentialProvider =
+  | "grok-image"
+  | "gemini-image"
+  | "elevenlabs"
+  | "retell"
+
+interface ModalCredentialDefinition {
+  id: ModalCredentialProvider
+  section: "image" | "voice"
+  name: string
+  description: string
+  modelName?: string
+  model?: string
+  apiBase?: string
+  configPath?: ["voice", "elevenlabs_api_key" | "retell_api_key"]
+}
+
+export const modalCredentialDefinitions: ModalCredentialDefinition[] = [
+  {
+    id: "grok-image",
+    section: "image",
+    name: "Grok",
+    description: "xAI Grok image model credentials.",
+    modelName: "grok-image",
+    model: "xai/grok-2-image",
+    apiBase: "https://api.x.ai/v1",
+  },
+  {
+    id: "gemini-image",
+    section: "image",
+    name: "Gemini",
+    description: "Google Gemini image generation credentials.",
+    modelName: "gemini-image",
+    model: "gemini/gemini-2.0-flash-preview-image-generation",
+    apiBase: "https://generativelanguage.googleapis.com/v1beta",
+  },
+  {
+    id: "elevenlabs",
+    section: "voice",
+    name: "ElevenLabs",
+    description: "ElevenLabs voice transcription credentials.",
+    configPath: ["voice", "elevenlabs_api_key"],
+  },
+  {
+    id: "retell",
+    section: "voice",
+    name: "Retell",
+    description: "Retell voice agent credentials.",
+    configPath: ["voice", "retell_api_key"],
+  },
+]
 
 function getProviderLabel(provider: CredentialProvider | ""): string {
   if (provider === "openai") return "OpenAI"
   if (provider === "anthropic") return "Anthropic"
   if (provider === "openrouter") return "OpenRouter"
+  if (provider === "grok-image") return "Grok"
+  if (provider === "gemini-image") return "Gemini"
+  if (provider === "elevenlabs") return "ElevenLabs"
+  if (provider === "retell") return "Retell"
   if (provider === "google-antigravity") return "Google Antigravity"
   return ""
 }
 
 function isOpenRouterModel(model: ModelInfo): boolean {
   return model.model.toLowerCase().startsWith("openrouter/")
+}
+
+function getNestedString(
+  root: Record<string, unknown>,
+  path: readonly string[],
+): string {
+  let current: unknown = root
+  for (const key of path) {
+    if (!current || typeof current !== "object") {
+      return ""
+    }
+    current = (current as Record<string, unknown>)[key]
+  }
+  return typeof current === "string" ? current : ""
 }
 
 function buildModelUpdatePayload(
@@ -54,6 +137,7 @@ export function useCredentialsPage() {
   const { t } = useTranslation()
   const [providers, setProviders] = useState<OAuthProviderStatus[]>([])
   const [models, setModels] = useState<ModelInfo[]>([])
+  const [appConfig, setAppConfig] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -68,6 +152,7 @@ export function useCredentialsPage() {
   const [openAIToken, setOpenAIToken] = useState("")
   const [anthropicToken, setAnthropicToken] = useState("")
   const [openRouterToken, setOpenRouterToken] = useState("")
+  const [modalTokens, setModalTokens] = useState<Record<string, string>>({})
 
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false)
   const [logoutConfirmProvider, setLogoutConfirmProvider] =
@@ -78,12 +163,14 @@ export function useCredentialsPage() {
 
   const loadProviders = useCallback(async () => {
     try {
-      const [oauthData, modelsData] = await Promise.all([
+      const [oauthData, modelsData, configData] = await Promise.all([
         getOAuthProviders(),
         getModels(),
+        getAppConfig(),
       ])
       setProviders(oauthData.providers)
       setModels(modelsData.models)
+      setAppConfig(configData)
       setError("")
     } catch (err) {
       setError(
@@ -218,6 +305,71 @@ export function useCredentialsPage() {
       ? "connected"
       : "not_logged_in"
   }, [openrouterModels])
+
+  const modalCredentialStatuses = useMemo(() => {
+    const statuses: Record<
+      ModalCredentialProvider,
+      {
+        status: OAuthProviderStatus["status"]
+        savedTokenMask: string
+        modelCount: number
+      }
+    > = {
+      "grok-image": {
+        status: "not_logged_in",
+        savedTokenMask: "",
+        modelCount: 0,
+      },
+      "gemini-image": {
+        status: "not_logged_in",
+        savedTokenMask: "",
+        modelCount: 0,
+      },
+      elevenlabs: {
+        status: "not_logged_in",
+        savedTokenMask: "",
+        modelCount: 0,
+      },
+      retell: {
+        status: "not_logged_in",
+        savedTokenMask: "",
+        modelCount: 0,
+      },
+    }
+
+    for (const definition of modalCredentialDefinitions) {
+      if (definition.modelName) {
+        const matchingModels = models.filter(
+          (model) => model.model_name === definition.modelName,
+        )
+        const savedTokenMask =
+          matchingModels.find((model) => model.api_key)?.api_key?.trim() ?? ""
+        statuses[definition.id] = {
+          status:
+            matchingModels.some(
+              (model) => model.configured || model.api_key.trim() !== "",
+            ) || savedTokenMask
+              ? "connected"
+              : "not_logged_in",
+          savedTokenMask,
+          modelCount: matchingModels.length,
+        }
+        continue
+      }
+
+      if (definition.configPath) {
+        const hasSavedToken =
+          getNestedString(appConfig, definition.configPath).trim() !== ""
+        statuses[definition.id] = {
+          status: hasSavedToken ? "connected" : "not_logged_in",
+          savedTokenMask: hasSavedToken ? "••••••••" : "",
+          modelCount: 0,
+        }
+      }
+    }
+
+    return statuses
+  }, [appConfig, models])
 
   const bumpActionToken = useCallback(() => {
     actionTokenRef.current += 1
@@ -393,6 +545,70 @@ export function useCredentialsPage() {
     }
   }, [loadProviders, openRouterToken, openrouterModels, t])
 
+  const setModalToken = useCallback(
+    (provider: ModalCredentialProvider, value: string) => {
+      setModalTokens((prev) => ({ ...prev, [provider]: value }))
+    },
+    [],
+  )
+
+  const saveModalCredential = useCallback(
+    async (definition: ModalCredentialDefinition) => {
+      const token = modalTokens[definition.id]?.trim() ?? ""
+      if (!token) {
+        return
+      }
+
+      setActiveAction(`${definition.id}:token`)
+      setError("")
+
+      try {
+        if (definition.modelName && definition.model && definition.apiBase) {
+          const existing = models.find(
+            (model) => model.model_name === definition.modelName,
+          )
+          if (existing) {
+            await updateModel(
+              existing.index,
+              buildModelUpdatePayload(existing, {
+                api_key: token,
+                api_base: definition.apiBase,
+                model: definition.model,
+              }),
+            )
+          } else {
+            await addModel({
+              model_name: definition.modelName,
+              model: definition.model,
+              api_base: definition.apiBase,
+              api_key: token,
+              request_timeout: 60,
+            })
+          }
+          await setDefaultModel(definition.modelName, "image")
+        } else if (definition.configPath) {
+          await patchAppConfig({
+            [definition.configPath[0]]: {
+              [definition.configPath[1]]: token,
+            },
+          })
+        }
+
+        setModalTokens((prev) => ({ ...prev, [definition.id]: "" }))
+        await loadProviders()
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : t("credentials.errors.loginFailed"),
+        )
+      } finally {
+        setActiveAction("")
+      }
+    },
+    [loadProviders, modalTokens, models, t],
+  )
+
   const doLogout = useCallback(
     async (provider: CredentialProvider) => {
       const actionID = `${provider}:logout`
@@ -416,6 +632,41 @@ export function useCredentialsPage() {
             ),
           )
           setOpenRouterToken("")
+        } else if (provider === "grok-image" || provider === "gemini-image") {
+          const definition = modalCredentialDefinitions.find(
+            (item) => item.id === provider,
+          )
+          if (!definition?.modelName) {
+            throw new Error(t("credentials.errors.logoutFailed"))
+          }
+          const matchingModels = models.filter(
+            (model) => model.model_name === definition.modelName,
+          )
+          await Promise.all(
+            matchingModels.map((model) =>
+              updateModel(
+                model.index,
+                buildModelUpdatePayload(model, {
+                  api_key: undefined,
+                  clear_api_key: true,
+                }),
+              ),
+            ),
+          )
+          setModalTokens((prev) => ({ ...prev, [provider]: "" }))
+        } else if (provider === "elevenlabs" || provider === "retell") {
+          const definition = modalCredentialDefinitions.find(
+            (item) => item.id === provider,
+          )
+          if (!definition?.configPath) {
+            throw new Error(t("credentials.errors.logoutFailed"))
+          }
+          await patchAppConfig({
+            [definition.configPath[0]]: {
+              [definition.configPath[1]]: "",
+            },
+          })
+          setModalTokens((prev) => ({ ...prev, [provider]: "" }))
         } else {
           await logoutOAuth(provider)
         }
@@ -430,7 +681,7 @@ export function useCredentialsPage() {
         setActiveAction("")
       }
     },
-    [loadProviders, openrouterModels, t],
+    [loadProviders, models, openrouterModels, t],
   )
 
   const askLogout = useCallback((provider: CredentialProvider) => {
@@ -517,11 +768,13 @@ export function useCredentialsPage() {
     openAIToken,
     anthropicToken,
     openRouterToken,
+    modalTokens,
     openaiStatus,
     anthropicStatus,
     openrouterStatus,
     openrouterModelCount: openrouterModels.length,
     openrouterMaskedToken,
+    modalCredentialStatuses,
     logoutDialogOpen,
     logoutConfirmProvider,
     logoutProviderLabel,
@@ -530,11 +783,13 @@ export function useCredentialsPage() {
     setOpenAIToken,
     setAnthropicToken,
     setOpenRouterToken,
+    setModalToken,
     startBrowserOAuth,
     startOpenAIDeviceCode,
     stopLoading,
     saveToken,
     saveOpenRouterToken,
+    saveModalCredential,
     askLogout,
     handleConfirmLogout,
     handleLogoutDialogOpenChange,

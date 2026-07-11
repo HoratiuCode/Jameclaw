@@ -278,6 +278,47 @@ func TestHandleJameSetup_Response(t *testing.T) {
 	}
 }
 
+func TestBuildExtensionWsURLPrefersIPv4Loopback(t *testing.T) {
+	h := NewHandler(filepath.Join(t.TempDir(), "config.json"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extension/bootstrap", nil)
+	req.Host = "localhost:18800"
+
+	got := h.buildExtensionWsURL(req)
+	want := "ws://127.0.0.1:18800/extension/ws"
+	if got != want {
+		t.Fatalf("buildExtensionWsURL() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureExtensionJameChannelSetsStableGatewayOrigin(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	h := NewHandler(configPath)
+
+	changed, err := h.ensureExtensionJameChannel("chrome-extension://abc")
+	if err != nil {
+		t.Fatalf("ensureExtensionJameChannel() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("ensureExtensionJameChannel() should report changed on a fresh config")
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if !cfg.Channels.Jame.AllowTokenQuery {
+		t.Fatal("extension setup should enable allow_token_query")
+	}
+	if !containsOrigin(cfg.Channels.Jame.AllowOrigins, extensionGatewayOrigin) {
+		t.Fatalf("allow_origins = %v, want stable extension gateway origin", cfg.Channels.Jame.AllowOrigins)
+	}
+	if !containsOrigin(cfg.Channels.Jame.AllowOrigins, "chrome-extension://abc") {
+		t.Fatalf("allow_origins = %v, want caller origin preserved", cfg.Channels.Jame.AllowOrigins)
+	}
+}
+
 func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)

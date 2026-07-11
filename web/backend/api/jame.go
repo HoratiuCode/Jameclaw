@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/sipeed/jameclaw/pkg/config"
 )
+
+const extensionGatewayOrigin = "jameclaw-extension://local"
 
 // registerJameRoutes binds Jame Channel management endpoints to the ServeMux.
 func (h *Handler) registerJameRoutes(mux *http.ServeMux) {
@@ -47,6 +50,7 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 		if strings.HasPrefix(proxyReq.URL.Path, "/extension/ws") {
 			proxyReq.URL.Path = "/jame/ws"
 			proxyReq.URL.RawPath = "/jame/ws"
+			proxyReq.Header.Set("Origin", extensionGatewayOrigin)
 		}
 		proxy.ServeHTTP(w, proxyReq)
 	}
@@ -221,9 +225,13 @@ func (h *Handler) handleExtensionBootstrap(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) buildExtensionWsURL(r *http.Request) string {
-	host := r.Host
-	if strings.TrimSpace(host) == "" {
-		host = fmt.Sprintf("localhost:%d", h.serverPort)
+	host := strings.TrimSpace(r.Host)
+	if host == "" {
+		host = fmt.Sprintf("127.0.0.1:%d", h.serverPort)
+	} else if hostOnly, port, err := net.SplitHostPort(host); err == nil && strings.EqualFold(hostOnly, "localhost") {
+		host = net.JoinHostPort("127.0.0.1", port)
+	} else if strings.EqualFold(host, "localhost") {
+		host = "127.0.0.1"
 	}
 	return "ws://" + host + "/extension/ws"
 }
@@ -257,6 +265,11 @@ func (h *Handler) ensureExtensionJameChannel(callerOrigin string) (bool, error) 
 
 	if !cfg.Channels.Jame.AllowTokenQuery {
 		cfg.Channels.Jame.AllowTokenQuery = true
+		changed = true
+	}
+
+	if !containsOrigin(cfg.Channels.Jame.AllowOrigins, extensionGatewayOrigin) {
+		cfg.Channels.Jame.AllowOrigins = append(cfg.Channels.Jame.AllowOrigins, extensionGatewayOrigin)
 		changed = true
 	}
 

@@ -95,6 +95,11 @@
         "description": "Stores one API key and applies it to every OpenRouter model preset."
       }
     },
+    "sections": {
+      "chat": "Chat",
+      "image": "Image Generation",
+      "voice": "Voice"
+    },
     "status": {
       "connected": "Connected",
       "needsRefresh": "Needs refresh",
@@ -106,7 +111,8 @@
       "deviceCode": "Device Code",
       "stopLoading": "Stop Loading",
       "saveToken": "Save",
-      "logout": "Logout"
+      "logout": "Logout",
+      "configure": "Configure"
     },
     "logoutDialog": {
       "title": "Logout provider?",
@@ -115,13 +121,16 @@
     "fields": {
       "openaiToken": "OpenAI token",
       "anthropicToken": "Anthropic token",
-      "openrouterToken": "OpenRouter API key"
+      "openrouterToken": "OpenRouter API key",
+      "apiToken": "API key"
     },
     "labels": {
       "account": "Account",
       "email": "Email",
       "project": "Project",
-      "modelCount": "Models"
+      "modelCount": "Models",
+      "credentialSaved": "A credential is saved for this provider.",
+      "configureInModal": "Open the configuration modal to add an API key."
     },
     "errors": {
       "loadFailed": "Failed to load credentials",

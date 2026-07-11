@@ -13,7 +13,10 @@ function setDockEnabled(enabled, sendResponse) {
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const tab = tabs[0]
       if (!tab?.id) {
-        sendResponse({ ok: true, enabled })
+        sendResponse({
+          ok: false,
+          error: "No active tab is available.",
+        })
         return
       }
 
@@ -26,9 +29,10 @@ function setDockEnabled(enabled, sendResponse) {
         () => {
           if (chrome.runtime.lastError) {
             sendResponse({
-              ok: true,
-              enabled,
-              warning: chrome.runtime.lastError.message,
+              ok: false,
+              error:
+                chrome.runtime.lastError.message ||
+                "Could not update the dock on the active tab.",
             })
             return
           }
@@ -60,7 +64,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           if (chrome.runtime.lastError) {
             sendResponse({
               ok: false,
-              error: chrome.runtime.lastError.message,
+              error:
+                chrome.runtime.lastError.message ||
+                "Could not read the active page context.",
             })
             return
           }

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "JameClaw Companion",
   "description": "Compact Chrome extension for the local JameClaw assistant.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "permissions": [
     "activeTab",
     "storage",
@@ -17,8 +17,13 @@
   "host_permissions": [
     "http://localhost:18800/*",
     "http://127.0.0.1:18800/*",
+    "ws://localhost:18800/*",
+    "ws://127.0.0.1:18800/*",
     "<all_urls>"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:18800 http://127.0.0.1:18800 ws://localhost:18800 ws://127.0.0.1:18800"
+  },
   "background": {
     "service_worker": "background.js"
   },

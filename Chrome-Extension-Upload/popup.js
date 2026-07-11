@@ -1,5 +1,9 @@
-const BOOTSTRAP_URL = "http://localhost:18800/api/extension/bootstrap"
+const BOOTSTRAP_URLS = [
+  "http://127.0.0.1:18800/api/extension/bootstrap",
+  "http://localhost:18800/api/extension/bootstrap",
+]
 const BOOTSTRAP_TIMEOUT_MS = 1500
+const WEBSOCKET_TIMEOUT_MS = 5000
 const MAX_RETRY_DELAY_MS = 2000
 const SESSION_ID_KEY = "jameclaw-extension-session-id"
 
@@ -9,6 +13,7 @@ const composerEl = document.getElementById("composer")
 const inputEl = document.getElementById("input")
 const sendEl = document.getElementById("send")
 const refreshContextEl = document.getElementById("refresh-context")
+const titleEl = document.querySelector(".title")
 const isDock = document.body.classList.contains("dock")
 
 let socket = null
@@ -20,6 +25,11 @@ let reconnectAttempts = 0
 let bootstrapRetryAttempts = 0
 let lastBootstrap = null
 let sessionId = null
+
+const extensionVersion = chrome.runtime?.getManifest?.().version
+if (titleEl && extensionVersion) {
+  titleEl.textContent = `JameClaw Chat v${extensionVersion}`
+}
 
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight
@@ -199,9 +209,17 @@ function connectWebSocket(wsUrl, token) {
   clearReconnectTimer()
   const separator = wsUrl.includes("?") ? "&" : "?"
   const url = `${wsUrl}${separator}token=${encodeURIComponent(token)}&session_id=${encodeURIComponent(sessionId)}`
-  socket = new WebSocket(url)
+  socket = new WebSocket(url, [`token.${token}`])
+  const activeSocket = socket
+  const timeoutId = window.setTimeout(() => {
+    if (activeSocket.readyState === WebSocket.CONNECTING) {
+      setStatus("WebSocket timed out. Retrying…")
+      activeSocket.close()
+    }
+  }, WEBSOCKET_TIMEOUT_MS)
 
   socket.addEventListener("open", () => {
+    window.clearTimeout(timeoutId)
     reconnectAttempts = 0
     bootstrapRetryAttempts = 0
     clearBootstrapRetryTimer()
@@ -210,12 +228,14 @@ function connectWebSocket(wsUrl, token) {
   })
 
   socket.addEventListener("close", () => {
+    window.clearTimeout(timeoutId)
     setStatus("Connection closed.")
     setComposerEnabled(false)
     scheduleReconnect()
   })
 
   socket.addEventListener("error", () => {
+    window.clearTimeout(timeoutId)
     setStatus("Could not connect to local JameClaw.")
     setComposerEnabled(false)
     scheduleReconnect()
@@ -270,19 +290,12 @@ function connectWebSocket(wsUrl, token) {
   })
 }
 
-async function bootstrap() {
-  sessionId = await getOrCreateSessionId()
-  ensureEmptyState()
-  setComposerEnabled(false)
-  setStatus("Connecting…")
-  requestPageContext()
-  clearBootstrapRetryTimer()
-
+async function fetchBootstrap(url) {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), BOOTSTRAP_TIMEOUT_MS)
 
   try {
-    const response = await fetch(BOOTSTRAP_URL, {
+    const response = await fetch(url, {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: controller.signal,
@@ -292,9 +305,35 @@ async function bootstrap() {
       throw new Error(`Bootstrap failed: ${response.status}`)
     }
 
-    const data = await response.json()
+    return await response.json()
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+async function bootstrap() {
+  sessionId = await getOrCreateSessionId()
+  ensureEmptyState()
+  setComposerEnabled(false)
+  setStatus("Connecting…")
+  requestPageContext()
+  clearBootstrapRetryTimer()
+
+  try {
+    let data = null
+    let lastError = null
+
+    for (const url of BOOTSTRAP_URLS) {
+      try {
+        data = await fetchBootstrap(url)
+        break
+      } catch (error) {
+        lastError = error
+      }
+    }
+
     if (!data?.token || !data?.ws_url) {
-      throw new Error("Missing JameClaw token or websocket URL.")
+      throw lastError || new Error("Missing JameClaw token or websocket URL.")
     }
 
     connectWebSocket(data.ws_url, data.token)
@@ -305,12 +344,10 @@ async function bootstrap() {
       setStatus(
         error instanceof Error
           ? error.message
-          : "Could not reach local JameClaw on localhost:18800.",
+          : "Could not reach local JameClaw on 127.0.0.1:18800.",
       )
     }
     scheduleBootstrapRetry()
-  } finally {
-    window.clearTimeout(timeoutId)
   }
 }
 

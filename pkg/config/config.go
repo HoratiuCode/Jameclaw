@@ -991,6 +991,7 @@ type VoiceConfig struct {
 	ModelName         string `json:"model_name,omitempty"         env:"JAMECLAW_VOICE_MODEL_NAME"`
 	EchoTranscription bool   `json:"echo_transcription"           env:"JAMECLAW_VOICE_ECHO_TRANSCRIPTION"`
 	ElevenLabsAPIKey  string `json:"elevenlabs_api_key,omitempty" env:"JAMECLAW_VOICE_ELEVENLABS_API_KEY"`
+	RetellAPIKey      string `json:"retell_api_key,omitempty"     env:"JAMECLAW_VOICE_RETELL_API_KEY"`
 }
 
 // ModelConfig represents a model-centric provider configuration.

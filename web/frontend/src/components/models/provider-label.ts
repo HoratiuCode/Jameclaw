@@ -6,6 +6,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   qwen: "Qwen",
   moonshot: "Moonshot",
   groq: "Groq",
+  xai: "xAI Grok",
   openrouter: "OpenRouter",
   nous: "Nous",
   nvidia: "NVIDIA",
