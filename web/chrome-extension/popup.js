@@ -386,37 +386,22 @@ inputEl.addEventListener("keydown", (event) => {
 
 refreshContextEl.addEventListener("click", () => {
   if (isDock) {
-    chrome.runtime.sendMessage(
-      { type: "jameclaw-extension-set-dock-state", enabled: false },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          setStatus(
-            chrome.runtime.lastError.message || "Could not close dock.",
-          )
-          return
-        }
-
-        if (!response?.ok) {
-          setStatus(response?.error || "Could not close dock.")
-          return
-        }
-      },
-    )
+    window.close()
     return
   }
 
   chrome.runtime.sendMessage(
-    { type: "jameclaw-extension-set-dock-state", enabled: true },
+    { type: "jameclaw-extension-open-panel-window" },
     (response) => {
       if (chrome.runtime.lastError) {
         setStatus(
-          chrome.runtime.lastError.message || "Could not open dock.",
+          chrome.runtime.lastError.message || "Could not open JameClaw window.",
         )
         return
       }
 
       if (!response?.ok) {
-        setStatus(response?.error || "Could not open dock.")
+        setStatus(response?.error || "Could not open JameClaw window.")
         return
       }
       window.close()
@@ -424,6 +409,6 @@ refreshContextEl.addEventListener("click", () => {
   )
 })
 
-refreshContextEl.textContent = isDock ? "Undock" : "Dock"
+refreshContextEl.textContent = isDock ? "Close" : "Pop out"
 
 void bootstrap()

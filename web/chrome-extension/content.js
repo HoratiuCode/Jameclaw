@@ -3,6 +3,7 @@ const SELECTION_LIMIT = 3000
 const DOCK_STORAGE_KEY = "jameclaw-extension-dock-enabled"
 const DOCK_ROOT_ID = "jameclaw-dock-root"
 const DOCK_IFRAME_ID = "jameclaw-dock-iframe"
+const DOCK_CLOSE_ID = "jameclaw-dock-close"
 const DOCK_URL = chrome.runtime.getURL("sidepanel.html?mode=dock")
 const DOCK_WIDTH = 420
 const DOCK_HEIGHT = 620
@@ -82,7 +83,39 @@ function ensureDockPanel() {
     "background: transparent",
   ].join(";")
 
+  const close = document.createElement("button")
+  close.id = DOCK_CLOSE_ID
+  close.type = "button"
+  close.setAttribute("aria-label", "Close JameClaw Dock")
+  close.textContent = "x"
+  close.style.cssText = [
+    "all: initial",
+    "position: absolute",
+    "right: 8px",
+    "top: 8px",
+    "width: 28px",
+    "height: 28px",
+    "z-index: 2147483647",
+    "display: grid",
+    "place-items: center",
+    "border-radius: 999px",
+    "background: rgba(15, 15, 15, 0.72)",
+    "border: 1px solid rgba(255, 255, 255, 0.18)",
+    "box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28)",
+    "color: #fff",
+    "font: 20px/1 Arial, sans-serif",
+    "cursor: pointer",
+    "pointer-events: auto",
+  ].join(";")
+  close.addEventListener("click", () => {
+    if (chrome.storage?.local) {
+      chrome.storage.local.set({ [DOCK_STORAGE_KEY]: false })
+    }
+    removeDockPanel()
+  })
+
   root.appendChild(frame)
+  root.appendChild(close)
 
   const parent = document.body || document.documentElement
   parent.appendChild(root)
@@ -96,25 +129,19 @@ function removeDockPanel() {
 }
 
 function setDockEnabled(enabled) {
-  if (enabled) {
-    ensureDockPanel()
-  } else {
-    removeDockPanel()
+  if (enabled && chrome.storage?.local) {
+    chrome.storage.local.set({ [DOCK_STORAGE_KEY]: false })
   }
+  removeDockPanel()
 }
 
 function syncDockFromStorage() {
+  removeDockPanel()
   if (!chrome.storage?.local) {
     return
   }
 
-  chrome.storage.local.get([DOCK_STORAGE_KEY], (result) => {
-    if (chrome.runtime.lastError) {
-      return
-    }
-
-    setDockEnabled(Boolean(result?.[DOCK_STORAGE_KEY]))
-  })
+  chrome.storage.local.set({ [DOCK_STORAGE_KEY]: false })
 }
 
 document.addEventListener("mouseup", rememberSelection, true)
