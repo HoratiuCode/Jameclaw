@@ -1,17 +1,21 @@
 import {
   IconArrowUp,
+  IconCalendarTime,
   IconFile,
   IconFolder,
   IconMicrophone,
   IconPaperclip,
   IconPlayerStopFilled,
+  IconTools,
 } from "@tabler/icons-react"
 import type { KeyboardEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
 
+import { getAutomations, type AutomationItem } from "@/api/automation"
 import { type LocalFileSearchItem, searchLocalFiles } from "@/api/files"
+import { getTools, type ToolSupportItem } from "@/api/tools"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -27,6 +31,42 @@ interface ChatComposerProps {
   isRecording?: boolean
   canRecord?: boolean
   isUploading?: boolean
+}
+
+type MentionItem =
+  | {
+      id: string
+      type: "file"
+      title: string
+      subtitle: string
+      insertText: string
+      file: LocalFileSearchItem
+    }
+  | {
+      id: string
+      type: "tool"
+      title: string
+      subtitle: string
+      insertText: string
+      tool: ToolSupportItem
+    }
+  | {
+      id: string
+      type: "automation"
+      title: string
+      subtitle: string
+      insertText: string
+      automation: AutomationItem
+    }
+
+function quoteMention(value: string) {
+  return `"${value.replaceAll('"', '\\"')}"`
+}
+
+function matchesMentionQuery(query: string, values: string[]) {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return true
+  return values.some((value) => value.toLowerCase().includes(normalized))
 }
 
 export function ChatComposer({
@@ -46,10 +86,10 @@ export function ChatComposer({
   const canInput = isConnected && hasDefaultModel
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [caretPosition, setCaretPosition] = useState(0)
-  const [fileMatches, setFileMatches] = useState<LocalFileSearchItem[]>([])
-  const [isFileMenuOpen, setIsFileMenuOpen] = useState(false)
-  const [selectedFileIndex, setSelectedFileIndex] = useState(0)
-  const [fileSearchError, setFileSearchError] = useState(false)
+  const [mentionItems, setMentionItems] = useState<MentionItem[]>([])
+  const [isMentionMenuOpen, setIsMentionMenuOpen] = useState(false)
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
+  const [mentionSearchError, setMentionSearchError] = useState(false)
 
   const activeMention = useMemo(() => {
     const beforeCaret = input.slice(0, caretPosition)
@@ -64,29 +104,97 @@ export function ChatComposer({
 
   useEffect(() => {
     if (!canInput || !activeMention) {
-      setIsFileMenuOpen(false)
-      setFileMatches([])
-      setSelectedFileIndex(0)
-      setFileSearchError(false)
+      setIsMentionMenuOpen(false)
+      setMentionItems([])
+      setSelectedMentionIndex(0)
+      setMentionSearchError(false)
       return
     }
 
     let cancelled = false
     const timeoutId = window.setTimeout(() => {
-      searchLocalFiles(activeMention.query)
-        .then((items) => {
+      Promise.allSettled([
+        searchLocalFiles(activeMention.query, 8),
+        getTools(),
+        getAutomations(),
+      ])
+        .then(([filesResult, toolsResult, automationsResult]) => {
           if (cancelled) return
-          setFileMatches(items)
-          setIsFileMenuOpen(true)
-          setSelectedFileIndex(0)
-          setFileSearchError(false)
+          const nextItems: MentionItem[] = []
+
+          if (filesResult.status === "fulfilled") {
+            nextItems.push(
+              ...filesResult.value.map((file) => ({
+                id: `file:${file.path}`,
+                type: "file" as const,
+                title: file.name,
+                subtitle: file.directory,
+                insertText: `@${quoteMention(file.path)} `,
+                file,
+              })),
+            )
+          }
+
+          if (toolsResult.status === "fulfilled") {
+            nextItems.push(
+              ...toolsResult.value.tools
+                .filter((tool) => tool.status === "enabled")
+                .filter((tool) =>
+                  matchesMentionQuery(activeMention.query, [
+                    tool.name,
+                    tool.description,
+                    tool.category,
+                  ]),
+                )
+                .slice(0, 8)
+                .map((tool) => ({
+                  id: `tool:${tool.name}`,
+                  type: "tool" as const,
+                  title: tool.name,
+                  subtitle: `${tool.category} tool - ${tool.description}`,
+                  insertText: `@tool:${tool.name} `,
+                  tool,
+                })),
+            )
+          }
+
+          if (automationsResult.status === "fulfilled") {
+            nextItems.push(
+              ...automationsResult.value
+                .filter((automation) =>
+                  matchesMentionQuery(activeMention.query, [
+                    automation.name,
+                    automation.prompt,
+                    automation.status,
+                  ]),
+                )
+                .slice(0, 6)
+                .map((automation) => ({
+                  id: `automation:${automation.id}`,
+                  type: "automation" as const,
+                  title: automation.name,
+                  subtitle: `${automation.status} - ${automation.schedule}`,
+                  insertText: `@automation:${quoteMention(automation.name)} `,
+                  automation,
+                })),
+            )
+          }
+
+          setMentionItems(nextItems)
+          setIsMentionMenuOpen(true)
+          setSelectedMentionIndex(0)
+          setMentionSearchError(
+            filesResult.status === "rejected" &&
+              toolsResult.status === "rejected" &&
+              automationsResult.status === "rejected",
+          )
         })
         .catch(() => {
           if (cancelled) return
-          setFileMatches([])
-          setIsFileMenuOpen(true)
-          setSelectedFileIndex(0)
-          setFileSearchError(true)
+          setMentionItems([])
+          setIsMentionMenuOpen(true)
+          setSelectedMentionIndex(0)
+          setMentionSearchError(true)
         })
     }, 120)
 
@@ -100,16 +208,16 @@ export function ChatComposer({
     setCaretPosition(textareaRef.current?.selectionStart ?? input.length)
   }
 
-  const insertFileMention = (file: LocalFileSearchItem) => {
+  const insertMention = (item: MentionItem) => {
     if (!activeMention) return
-    const mention = `@"${file.path.replaceAll('"', '\\"')}" `
+    const mention = item.insertText
     const nextInput =
       input.slice(0, activeMention.start) + mention + input.slice(activeMention.end)
     const nextCaret = activeMention.start + mention.length
     onInputChange(nextInput)
-    setIsFileMenuOpen(false)
-    setFileMatches([])
-    setSelectedFileIndex(0)
+    setIsMentionMenuOpen(false)
+    setMentionItems([])
+    setSelectedMentionIndex(0)
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus()
       textareaRef.current?.setSelectionRange(nextCaret, nextCaret)
@@ -119,31 +227,31 @@ export function ChatComposer({
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing) return
-    if (isFileMenuOpen && activeMention) {
+    if (isMentionMenuOpen && activeMention) {
       if (e.key === "ArrowDown") {
         e.preventDefault()
-        setSelectedFileIndex((index) =>
-          fileMatches.length === 0 ? 0 : (index + 1) % fileMatches.length,
+        setSelectedMentionIndex((index) =>
+          mentionItems.length === 0 ? 0 : (index + 1) % mentionItems.length,
         )
         return
       }
       if (e.key === "ArrowUp") {
         e.preventDefault()
-        setSelectedFileIndex((index) =>
-          fileMatches.length === 0
+        setSelectedMentionIndex((index) =>
+          mentionItems.length === 0
             ? 0
-            : (index - 1 + fileMatches.length) % fileMatches.length,
+            : (index - 1 + mentionItems.length) % mentionItems.length,
         )
         return
       }
       if (e.key === "Escape") {
         e.preventDefault()
-        setIsFileMenuOpen(false)
+        setIsMentionMenuOpen(false)
         return
       }
-      if (e.key === "Enter" && fileMatches[selectedFileIndex]) {
+      if (e.key === "Enter" && mentionItems[selectedMentionIndex]) {
         e.preventDefault()
-        insertFileMention(fileMatches[selectedFileIndex])
+        insertMention(mentionItems[selectedMentionIndex])
         return
       }
     }
@@ -156,49 +264,59 @@ export function ChatComposer({
   return (
     <div className="bg-background shrink-0 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8 md:pb-8 lg:px-24 xl:px-48">
       <div className="bg-card border-border/80 relative mx-auto flex max-w-[1000px] flex-col rounded-2xl border p-3 shadow-md">
-        {isFileMenuOpen && activeMention && (
+        {isMentionMenuOpen && activeMention && (
           <div className="bg-popover border-border absolute right-3 bottom-[calc(100%+0.5rem)] left-3 z-20 overflow-hidden rounded-lg border shadow-lg">
             <div className="border-border bg-muted/50 flex items-center justify-between border-b px-3 py-2 text-xs">
-              <span className="text-muted-foreground">Local files</span>
+              <span className="text-muted-foreground">Call with @</span>
               <span className="text-muted-foreground font-mono">
                 @{activeMention.query}
               </span>
             </div>
-            {fileSearchError ? (
+            {mentionSearchError ? (
               <div className="text-muted-foreground px-3 py-3 text-sm">
-                Could not search files.
+                Could not load callable items.
               </div>
-            ) : fileMatches.length === 0 ? (
+            ) : mentionItems.length === 0 ? (
               <div className="text-muted-foreground px-3 py-3 text-sm">
-                No matching files found.
+                No matching files, tools, or automations found.
               </div>
             ) : (
               <div className="max-h-72 overflow-y-auto py-1">
-                {fileMatches.map((file, index) => {
-                  const Icon = file.kind === "folder" ? IconFolder : IconFile
+                {mentionItems.map((item, index) => {
+                  const Icon =
+                    item.type === "tool"
+                      ? IconTools
+                      : item.type === "automation"
+                        ? IconCalendarTime
+                        : item.file.kind === "folder"
+                          ? IconFolder
+                          : IconFile
                   return (
                     <button
-                      key={file.path}
+                      key={item.id}
                       type="button"
                       className={cn(
                         "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
-                        index === selectedFileIndex
+                        index === selectedMentionIndex
                           ? "bg-accent text-accent-foreground"
                           : "hover:bg-accent/70",
                       )}
                       onMouseDown={(event) => {
                         event.preventDefault()
-                        insertFileMention(file)
+                        insertMention(item)
                       }}
                     >
                       <Icon className="text-muted-foreground size-4 shrink-0" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium">
-                          {file.name}
+                          {item.title}
                         </span>
                         <span className="text-muted-foreground block truncate text-xs">
-                          {file.directory}
+                          {item.subtitle}
                         </span>
+                      </span>
+                      <span className="text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase">
+                        {item.type}
                       </span>
                     </button>
                   )
@@ -235,7 +353,7 @@ export function ChatComposer({
             )}
             {!disabledReason && (
               <p className="text-muted-foreground text-xs">
-                Try /emoji, /persona, or /skills add &lt;skill&gt; to customize the assistant.
+                Type @ to call files, tools, or automations. Try /emoji, /persona, or /skills add &lt;skill&gt;.
               </p>
             )}
           </div>
