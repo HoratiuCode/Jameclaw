@@ -100,7 +100,11 @@ export function AppHeader() {
           <IconMenu2 />
         </SidebarTrigger>
         <div className="flex shrink-0 items-center sm:w-44">
-          <Link to="/" className="flex items-center">
+          <Link
+            to="/"
+            search={{ prompt: undefined }}
+            className="flex items-center"
+          >
             <img className="h-11 w-auto object-contain" src={headerLogoSrc} alt="JameClaw" />
           </Link>
         </div>

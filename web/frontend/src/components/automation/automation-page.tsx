@@ -3,12 +3,15 @@ import {
   IconCalendarTime,
   IconClockHour4,
   IconMessageCircle,
+  IconPlus,
 } from "@tabler/icons-react"
+import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import type { ComponentType } from "react"
 
 import { type AutomationItem, getAutomations } from "@/api/automation"
 import { PageHeader } from "@/components/page-header"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -32,7 +35,19 @@ export function AutomationPage() {
 
   return (
     <div className="bg-background flex h-full flex-col">
-      <PageHeader title="Automations" />
+      <PageHeader title="Automations">
+        <Button asChild size="sm" className="h-9 gap-2">
+          <Link
+            to="/"
+            search={{
+              prompt: "Create an automation for: ",
+            }}
+          >
+            <IconPlus className="size-4" />
+            <span className="hidden sm:inline">New automation</span>
+          </Link>
+        </Button>
+      </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">

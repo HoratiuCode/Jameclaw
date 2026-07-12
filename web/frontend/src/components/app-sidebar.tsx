@@ -246,6 +246,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarHeader className="px-3 pb-2">
         <Link
           to="/"
+          search={{ prompt: undefined }}
           className="hover:bg-muted/60 flex items-center gap-2 rounded-md px-1.5 py-1.5 transition-colors"
           aria-label="JameClaw home"
         >

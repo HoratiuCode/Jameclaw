@@ -1,4 +1,5 @@
 import { IconPlus } from "@tabler/icons-react"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -22,6 +23,8 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 export function ChatPage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { prompt } = useSearch({ from: "/" })
   const scrollRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -84,6 +87,18 @@ export function ChatPage() {
           : null
   const hasActiveAssistantPlaceholder =
     isTyping && messages[messages.length - 1]?.role === "assistant"
+
+  useEffect(() => {
+    if (!prompt) {
+      return
+    }
+    setInput(prompt)
+    void navigate({
+      to: "/",
+      search: { prompt: undefined },
+      replace: true,
+    })
+  }, [navigate, prompt])
 
   const {
     sessions,
