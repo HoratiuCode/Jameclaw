@@ -15,6 +15,9 @@ import { Link } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { getAgents, type AgentSummary } from "@/api/agents"
+import { getAutomations, type AutomationItem } from "@/api/automation"
+import { getLearnedSkills, type LearnedSkillItem } from "@/api/skills"
 import { getHostInfo, type HostInfo } from "@/api/system"
 import { Button } from "@/components/ui/button"
 
@@ -31,7 +34,112 @@ const starterPrompts = [
   "Review my config and explain what I should improve.",
 ]
 
+const maxStarterPrompts = 3
+
 const shellLaunchSplashCookie = "jameclaw_shell_launch"
+
+function compactList(values: string[], limit = 2): string {
+  return values
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .join(", ")
+}
+
+function workspaceName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  return parts.at(-1) ?? path
+}
+
+function memoryPreview(notes: string): string {
+  return notes
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/[.!?]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 1)
+    .join("")
+}
+
+function buildTailoredPrompts({
+  agents,
+  learnedSkills,
+  automations,
+}: {
+  agents: AgentSummary[]
+  learnedSkills: LearnedSkillItem[]
+  automations: AutomationItem[]
+}): string[] {
+  const prompts: string[] = []
+  const defaultAgent = agents.find((agent) => agent.default) ?? agents[0]
+  const agentName = defaultAgent?.name || defaultAgent?.id || "my JameClaw agent"
+  const learnedSkillNames = compactList(
+    learnedSkills.map((skill) => skill.name),
+    3,
+  )
+  const configuredSkillNames = compactList(defaultAgent?.skills ?? [], 3)
+  const subagentNames = compactList(defaultAgent?.subagents ?? [], 2)
+  const activeAutomationNames = compactList(
+    automations
+      .filter((automation) => automation.enabled)
+      .map((automation) => automation.name),
+    2,
+  )
+  const memory = memoryPreview(defaultAgent?.human.memory_notes ?? "")
+  const workspace = defaultAgent?.workspace
+    ? workspaceName(defaultAgent.workspace)
+    : ""
+
+  if (memory) {
+    prompts.push(
+      `Use what you remember about me (${memory}) to suggest my next three JameClaw tasks.`,
+    )
+  } else if (learnedSkillNames) {
+    prompts.push(
+      `Based on my learned skills (${learnedSkillNames}), suggest what I should automate next.`,
+    )
+  } else if (workspace) {
+    prompts.push(
+      `Summarize my ${workspace} workspace and tell me where to start.`,
+    )
+  }
+
+  if (configuredSkillNames || subagentNames) {
+    const focus = compactList(
+      [configuredSkillNames, subagentNames && `subagents: ${subagentNames}`],
+      2,
+    )
+    prompts.push(
+      `Review ${agentName}'s setup, especially ${focus}, and explain what I should improve.`,
+    )
+  } else if (defaultAgent?.message_count || defaultAgent?.tool_calls) {
+    prompts.push(
+      `Review my recent ${agentName} activity and suggest a better workflow for today.`,
+    )
+  }
+
+  if (activeAutomationNames) {
+    prompts.push(
+      `Review my automations (${activeAutomationNames}) and tell me what to keep, pause, or add next.`,
+    )
+  } else if (learnedSkillNames) {
+    prompts.push(
+      `Create a plan for today using my learned skills: ${learnedSkillNames}.`,
+    )
+  }
+
+  for (const fallbackPrompt of starterPrompts) {
+    if (prompts.length >= maxStarterPrompts) {
+      break
+    }
+    if (!prompts.includes(fallbackPrompt)) {
+      prompts.push(fallbackPrompt)
+    }
+  }
+
+  return prompts.slice(0, maxStarterPrompts)
+}
 
 function StepCard({
   step,
@@ -119,6 +227,8 @@ export function ChatEmptyState({
   const { t } = useTranslation()
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null)
   const [showHostSplash, setShowHostSplash] = useState(false)
+  const [tailoredPrompts, setTailoredPrompts] =
+    useState<string[]>(starterPrompts)
 
   useEffect(() => {
     const shouldShowSplash = document.cookie
@@ -164,6 +274,44 @@ export function ChatEmptyState({
       window.clearTimeout(timeout)
     }
   }, [showHostSplash])
+
+  useEffect(() => {
+    if (!hasConfiguredModels || !defaultModelName || !isConnected) {
+      setTailoredPrompts(starterPrompts)
+      return
+    }
+
+    let active = true
+
+    void Promise.allSettled([
+      getAgents(),
+      getLearnedSkills(),
+      getAutomations(),
+    ]).then(([agentsResult, learnedSkillsResult, automationsResult]) => {
+      if (!active) {
+        return
+      }
+
+      const agents =
+        agentsResult.status === "fulfilled" ? agentsResult.value.agents : []
+      const learnedSkills =
+        learnedSkillsResult.status === "fulfilled"
+          ? learnedSkillsResult.value.skills
+          : []
+      const automations =
+        automationsResult.status === "fulfilled"
+          ? automationsResult.value
+          : []
+
+      setTailoredPrompts(
+        buildTailoredPrompts({ agents, learnedSkills, automations }),
+      )
+    })
+
+    return () => {
+      active = false
+    }
+  }, [defaultModelName, hasConfiguredModels, isConnected])
 
   if (!hasConfiguredModels) {
     return (
@@ -346,7 +494,7 @@ export function ChatEmptyState({
           </div>
 
           <div className="grid gap-3">
-            {starterPrompts.map((prompt) => (
+            {tailoredPrompts.map((prompt) => (
               <button
                 key={prompt}
                 type="button"
