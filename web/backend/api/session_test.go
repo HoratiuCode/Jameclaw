@@ -215,6 +215,98 @@ func TestHandleGetSession_JSONLStorage(t *testing.T) {
 	}
 }
 
+func TestHandleExtensionSessionsAllowsOpaqueOrigin(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+
+	sessionKey := jameSessionPrefix + "extension-list"
+	if err := store.AddFullMessage(nil, sessionKey, providers.Message{
+		Role:    "user",
+		Content: "show this conversation in the extension explorer",
+	}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/extension/sessions?limit=50", nil)
+	req.Header.Set("Origin", "null")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "null" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, "null")
+	}
+
+	var items []sessionListItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "extension-list" {
+		t.Fatalf("items = %#v, want extension-list", items)
+	}
+}
+
+func TestHandleExtensionSessionAllowsChromeExtensionOrigin(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+
+	sessionKey := jameSessionPrefix + "extension-detail"
+	if err := store.AddFullMessage(nil, sessionKey, providers.Message{
+		Role:    "assistant",
+		Content: "existing answer",
+	}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/extension/sessions/extension-detail", nil)
+	req.Header.Set("Origin", "chrome-extension://jameclaw-test")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "chrome-extension://jameclaw-test" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want extension origin", got)
+	}
+
+	var resp struct {
+		ID       string `json:"id"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.ID != "extension-detail" || len(resp.Messages) != 1 || resp.Messages[0].Content != "existing answer" {
+		t.Fatalf("resp = %#v, want extension-detail with existing answer", resp)
+	}
+}
+
 func TestHandleDeleteSession_JSONLStorage(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

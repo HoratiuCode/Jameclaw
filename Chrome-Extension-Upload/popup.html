@@ -14,7 +14,24 @@
           <div class="title">JameClaw Chat</div>
           <div id="status" class="status">Connecting…</div>
         </div>
+        <button
+          id="conversation-explorer"
+          class="icon-button"
+          type="button"
+          aria-label="Conversations"
+          title="Conversations"
+        >
+          <span class="folder-icon" aria-hidden="true"></span>
+        </button>
         <button id="refresh-context" class="topbar-button" type="button">Dock</button>
+      </div>
+
+      <div id="conversation-panel" class="conversation-panel" hidden>
+        <div class="conversation-panel-header">
+          <span>Conversations</span>
+          <button id="new-conversation" class="small-button" type="button">New</button>
+        </div>
+        <div id="conversation-list" class="conversation-list"></div>
       </div>
 
       <div id="messages" class="messages"></div>

@@ -76,10 +76,29 @@ cat > "${APP_CONTENTS}/Info.plist" << 'EOF'
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
-    <key>LSRequiresCarbon</key>
-    <true/>
     <key>LSUIElement</key>
-    <string>1</string>
+    <true/>
+    <key>NSUserNotificationUsageDescription</key>
+    <string>JameClaw uses notifications to show alerts for agent actions, automation results, and gateway status changes.</string>
+    <key>NSScreenCaptureDescription</key>
+    <string>JameClaw can capture the screen when you ask an agent to use screenshots as context.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>JameClaw can access the camera when you ask an agent to capture photos or video context.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>JameClaw uses the microphone for voice messages and voice-driven agent workflows.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>JameClaw can use speech recognition when you enable voice-driven workflows.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>JameClaw uses Automation permission when you ask an agent to control local apps or run macOS workflows.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>JameClaw uses the local network to connect the Web Console, gateway, extensions, and local model services.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>JameClaw can access Reminders when you ask an agent to work with reminders.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
 EOF

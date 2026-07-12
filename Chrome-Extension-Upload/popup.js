@@ -13,6 +13,10 @@ const composerEl = document.getElementById("composer")
 const inputEl = document.getElementById("input")
 const sendEl = document.getElementById("send")
 const refreshContextEl = document.getElementById("refresh-context")
+const conversationExplorerEl = document.getElementById("conversation-explorer")
+const conversationPanelEl = document.getElementById("conversation-panel")
+const conversationListEl = document.getElementById("conversation-list")
+const newConversationEl = document.getElementById("new-conversation")
 const titleEl = document.querySelector(".title")
 const isDock = document.body.classList.contains("dock")
 
@@ -65,6 +69,37 @@ function clearBootstrapRetryTimer() {
   }
 }
 
+function closeSocketForSessionChange() {
+  clearReconnectTimer()
+  clearBootstrapRetryTimer()
+  lastBootstrap = null
+  reconnectAttempts = 0
+  bootstrapRetryAttempts = 0
+  if (socket) {
+    try {
+      socket.close(1000, "session change")
+    } catch {
+      // Ignore close errors from a socket that is already closing.
+    }
+  }
+  socket = null
+  currentAssistantMessage = null
+  setComposerEnabled(false)
+}
+
+function saveSessionId(nextSessionId) {
+  return new Promise((resolve) => {
+    sessionId = nextSessionId
+    if (!chrome.storage?.local) {
+      resolve()
+      return
+    }
+    chrome.storage.local.set({ [SESSION_ID_KEY]: nextSessionId }, () => {
+      resolve()
+    })
+  })
+}
+
 function getOrCreateSessionId() {
   return new Promise((resolve) => {
     if (!chrome.storage?.local) {
@@ -90,6 +125,42 @@ function getOrCreateSessionId() {
       })
     })
   })
+}
+
+function extensionApiOrigins() {
+  return BOOTSTRAP_URLS.map((url) => new URL(url).origin)
+}
+
+async function fetchExtensionJSON(path) {
+  let lastError = null
+
+  for (const origin of extensionApiOrigins()) {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      BOOTSTRAP_TIMEOUT_MS,
+    )
+
+    try {
+      const response = await fetch(`${origin}${path}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`)
+      }
+
+      return await response.json()
+    } catch (error) {
+      lastError = error
+    } finally {
+      window.clearTimeout(timeoutId)
+    }
+  }
+
+  throw lastError || new Error("Could not reach local JameClaw.")
 }
 
 function scheduleReconnect(reason = "") {
@@ -137,6 +208,21 @@ function appendMessage(role, content) {
   return item
 }
 
+function renderConversationMessages(messages) {
+  messagesEl.innerHTML = ""
+  currentAssistantMessage = null
+
+  for (const message of messages || []) {
+    const role = message?.role === "user" ? "user" : "assistant"
+    const content = String(message?.content || "").trim()
+    if (content) {
+      appendMessage(role, content)
+    }
+  }
+
+  ensureEmptyState()
+}
+
 function ensureEmptyState() {
   if (messagesEl.children.length > 0) {
     return
@@ -147,6 +233,117 @@ function ensureEmptyState() {
   empty.textContent =
     "Start typing. The current page context is attached automatically. Select text on the website before opening the popup if you want JameClaw to focus on it."
   messagesEl.appendChild(empty)
+}
+
+function setConversationPanelOpen(open) {
+  if (!conversationPanelEl || !conversationExplorerEl) {
+    return
+  }
+  conversationPanelEl.hidden = !open
+  conversationExplorerEl.classList.toggle("is-active", open)
+}
+
+function formatConversationMeta(item) {
+  const count = Number(item?.message_count || 0)
+  const countText = count === 1 ? "1 message" : `${count} messages`
+  const updated = item?.updated ? new Date(item.updated) : null
+  if (!updated || Number.isNaN(updated.getTime())) {
+    return countText
+  }
+  return `${countText} · ${updated.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  })}`
+}
+
+function renderConversationList(items) {
+  if (!conversationListEl) {
+    return
+  }
+
+  conversationListEl.innerHTML = ""
+  if (!Array.isArray(items) || items.length === 0) {
+    const empty = document.createElement("div")
+    empty.className = "conversation-empty"
+    empty.textContent = "No saved conversations yet."
+    conversationListEl.appendChild(empty)
+    return
+  }
+
+  for (const item of items) {
+    if (!item?.id) {
+      continue
+    }
+
+    const button = document.createElement("button")
+    button.className = "conversation-item"
+    button.type = "button"
+    button.classList.toggle("is-active", item.id === sessionId)
+    button.dataset.sessionId = item.id
+
+    const title = document.createElement("span")
+    title.className = "conversation-title"
+    title.textContent = item.title || item.preview || "Untitled conversation"
+
+    const meta = document.createElement("span")
+    meta.className = "conversation-meta"
+    meta.textContent = item.preview || formatConversationMeta(item)
+
+    button.append(title, meta)
+    button.addEventListener("click", () => {
+      void switchConversation(item.id)
+    })
+    conversationListEl.appendChild(button)
+  }
+}
+
+async function loadConversationList() {
+  if (!conversationListEl) {
+    return
+  }
+
+  conversationListEl.innerHTML = '<div class="conversation-empty">Loading conversations…</div>'
+  try {
+    const items = await fetchExtensionJSON("/api/extension/sessions?offset=0&limit=50")
+    renderConversationList(items)
+  } catch (error) {
+    conversationListEl.innerHTML = ""
+    const empty = document.createElement("div")
+    empty.className = "conversation-empty"
+    empty.textContent = errorMessage(error) || "Could not load conversations."
+    conversationListEl.appendChild(empty)
+  }
+}
+
+async function switchConversation(nextSessionId) {
+  if (!nextSessionId || nextSessionId === sessionId) {
+    setConversationPanelOpen(false)
+    return
+  }
+
+  closeSocketForSessionChange()
+  setStatus("Loading conversation…")
+
+  try {
+    const detail = await fetchExtensionJSON(
+      `/api/extension/sessions/${encodeURIComponent(nextSessionId)}`,
+    )
+    await saveSessionId(nextSessionId)
+    renderConversationMessages(detail?.messages || [])
+    setConversationPanelOpen(false)
+    void bootstrap()
+  } catch (error) {
+    setStatus(errorMessage(error) || "Could not load conversation.")
+  }
+}
+
+async function startNewConversation() {
+  closeSocketForSessionChange()
+  await saveSessionId(crypto.randomUUID())
+  messagesEl.innerHTML = ""
+  ensureEmptyState()
+  setConversationPanelOpen(false)
+  void bootstrap()
 }
 
 function buildContextBlock(context) {
@@ -382,6 +579,18 @@ inputEl.addEventListener("keydown", (event) => {
     event.preventDefault()
     composerEl.requestSubmit()
   }
+})
+
+conversationExplorerEl?.addEventListener("click", () => {
+  const willOpen = conversationPanelEl?.hidden !== false
+  setConversationPanelOpen(willOpen)
+  if (willOpen) {
+    void loadConversationList()
+  }
+})
+
+newConversationEl?.addEventListener("click", () => {
+  void startNewConversation()
 })
 
 refreshContextEl.addEventListener("click", () => {

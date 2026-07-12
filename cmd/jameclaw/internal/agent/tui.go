@@ -92,6 +92,16 @@ type terminalVoiceRecorder struct {
 	cmd  *exec.Cmd
 }
 
+var (
+	terminalColorBackground = tcell.NewHexColor(0x0b0b0d)
+	terminalColorPanel      = tcell.NewHexColor(0x141417)
+	terminalColorRed        = tcell.NewHexColor(0xef4444)
+	terminalColorRedBright  = tcell.NewHexColor(0xff6b6b)
+	terminalColorWhite      = tcell.NewHexColor(0xf8fafc)
+	terminalColorMuted      = tcell.NewHexColor(0xb9c0cc)
+	terminalColorBlack      = tcell.NewHexColor(0x0b0b0d)
+)
+
 func runTerminalChat(loop *agentcore.AgentLoop, sessionKey, agentEmoji string, reasoningDisplay reasoningMode) error {
 	if loop == nil {
 		return fmt.Errorf("agent loop is nil")
@@ -137,6 +147,11 @@ func (t *terminalChat) build() {
 	t.footer = tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
 	t.chat = tview.NewTextView().SetDynamicColors(true).SetRegions(true).SetScrollable(true).SetWrap(true)
 	t.chat.SetBorder(true).SetTitle(" Conversation ")
+	t.header.SetTextColor(terminalColorWhite).SetBackgroundColor(terminalColorBackground)
+	t.status.SetTextColor(terminalColorWhite).SetBackgroundColor(terminalColorBackground)
+	t.footer.SetTextColor(terminalColorMuted).SetBackgroundColor(terminalColorBackground)
+	t.chat.SetTextColor(terminalColorWhite).SetBackgroundColor(terminalColorBackground)
+	t.chat.SetBorderColor(terminalColorRed).SetTitleColor(terminalColorRedBright)
 	t.chat.SetHighlightedFunc(func(added, _, _ []string) {
 		if len(added) == 0 {
 			return
@@ -155,6 +170,8 @@ func (t *terminalChat) build() {
 		SetLabel(" You > ").
 		SetPlaceholder("message or /command")
 	t.input.SetBorder(true).SetTitle(" Enter/Ctrl-S: send | Ctrl-J: newline | Tab: complete | F1: help ")
+	t.input.SetBorderColor(terminalColorRed).SetTitleColor(terminalColorRedBright)
+	t.input.SetBackgroundColor(terminalColorPanel)
 	t.input.SetChangedFunc(t.updateSuggestions)
 
 	t.app.SetInputCapture(t.handleKey)
@@ -314,9 +331,13 @@ type terminalCommandItem struct {
 
 func (t *terminalChat) showListOverlay(title, hint string, items []terminalPickerItem) {
 	list := tview.NewList().
-		SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorGreen).Bold(true)).
+		SetSelectedStyle(tcell.StyleDefault.Foreground(terminalColorWhite).Background(terminalColorRed).Bold(true)).
 		SetHighlightFullLine(true)
 	list.SetBorder(true).SetTitle(" " + title + " ")
+	list.SetMainTextColor(terminalColorWhite).
+		SetSecondaryTextColor(terminalColorMuted).
+		SetBackgroundColor(terminalColorBackground)
+	list.SetBorderColor(terminalColorRed).SetTitleColor(terminalColorRedBright)
 	for _, item := range items {
 		action := item.Action
 		list.AddItem(item.Main, item.Secondary, item.Shortcut, func() {
@@ -334,7 +355,7 @@ func (t *terminalChat) showListOverlay(title, hint string, items []terminalPicke
 			AddItem(tview.NewBox(), 0, 1, false).
 			AddItem(list, 0, 4, true).
 			AddItem(tview.NewBox(), 0, 1, false), 0, 4, true).
-		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[gray]"+hint+"[-]"), 1, 0, false)
+		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[white]"+hint+"[-]"), 1, 0, false)
 	t.app.SetRoot(frame, true).SetFocus(list)
 }
 
@@ -346,11 +367,19 @@ func (t *terminalChat) openCommandPalette(initialQuery string) {
 		SetLabel(" Search / ").
 		SetFieldWidth(0)
 	search.SetBorder(true).SetTitle(" Slash Commands ")
+	search.SetFieldTextColor(terminalColorWhite).
+		SetFieldBackgroundColor(terminalColorPanel).
+		SetLabelColor(terminalColorRedBright)
+	search.SetBorderColor(terminalColorRed).SetTitleColor(terminalColorRedBright)
 
 	list := tview.NewList().
-		SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorGreen).Bold(true)).
+		SetSelectedStyle(tcell.StyleDefault.Foreground(terminalColorWhite).Background(terminalColorRed).Bold(true)).
 		SetHighlightFullLine(true)
 	list.SetBorder(true).SetTitle(" Matches ")
+	list.SetMainTextColor(terminalColorWhite).
+		SetSecondaryTextColor(terminalColorMuted).
+		SetBackgroundColor(terminalColorBackground)
+	list.SetBorderColor(terminalColorRed).SetTitleColor(terminalColorRedBright)
 
 	insertSelected := func() {
 		if len(filtered) == 0 {
@@ -429,7 +458,7 @@ func (t *terminalChat) openCommandPalette(initialQuery string) {
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(search, 3, 0, true).
 			AddItem(list, 0, 1, false), 0, 5, true).
-		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[gray]Type to search, Enter selects command, Down moves to list, Esc closes[-]"), 1, 0, false)
+		AddItem(tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter).SetText("[white]Type to search, Enter selects command, Down moves to list, Esc closes[-]"), 1, 0, false)
 
 	search.SetText(strings.TrimPrefix(strings.TrimSpace(initialQuery), "/"))
 	refresh(search.GetText())
@@ -1562,9 +1591,9 @@ func (t *terminalChat) renderHeaderFooter() {
 	busyMode, pending, background, activity := t.busyMode, len(t.pendingInputs), len(t.backgroundRuns), t.activity
 	started := t.sessionStarted
 	t.mu.Unlock()
-	t.header.SetText(fmt.Sprintf("[::b]%s JameClaw Terminal Chat[-:-:-]  [gray]agent %s | session %s | connected[-]", tview.Escape(t.agentEmoji), tview.Escape(agentID), tview.Escape(t.sessionKey)))
+	t.header.SetText(fmt.Sprintf("[red::b]%s JameClaw Terminal Chat[-:-:-]  [white]agent %s | session %s | connected[-]", tview.Escape(t.agentEmoji), tview.Escape(agentID), tview.Escape(t.sessionKey)))
 	usage := formatUsage(t.totalTokens, contextWindow)
-	t.footer.SetText(fmt.Sprintf("[gray]model %s | session %s | activity %s | %s | duration %s | busy %s | pending %d | bg %d | thinking %s | F1 help[-]",
+	t.footer.SetText(fmt.Sprintf("[white]model %s | session %s | activity %s | %s | duration %s | busy %s | pending %d | bg %d | thinking %s | F1 help[-]",
 		tview.Escape(model), tview.Escape(t.sessionKey), tview.Escape(activity), usage, formatDuration(time.Since(started)), busyMode, pending, background, onOff(t.showThinking)))
 }
 
@@ -1577,11 +1606,11 @@ func (t *terminalChat) renderStatus() {
 	} else if !busy && suggestion != "" {
 		activity = suggestion
 	}
-	color := "green"
+	color := "white"
 	if activity == "error" || activity == "aborted" {
 		color = "red"
 	} else if busy {
-		color = "yellow"
+		color = "red"
 	}
 	elapsed := ""
 	if busy && !started.IsZero() {
@@ -1604,22 +1633,22 @@ func (t *terminalChat) renderChat() {
 		}
 		switch entry.kind {
 		case "user":
-			out.WriteString("[deepskyblue::b]You[-:-:-]\n")
+			out.WriteString("[red::b]You[-:-:-]\n")
 			out.WriteString(t.renderMarkdown(entry.text))
 		case "assistant":
 			label := t.agentEmoji
 			if entry.status == "streaming" {
 				label += " streaming"
 			}
-			out.WriteString("[green::b]" + tview.Escape(label) + "[-:-:-]\n")
+			out.WriteString("[white::b]" + tview.Escape(label) + "[-:-:-]\n")
 			if showThinking && entry.reasoning != "" {
-				out.WriteString("[gray::i]Reasoning\n" + tview.Escape(entry.reasoning) + "[-:-:-]\n\n")
+				out.WriteString("[white::i]Reasoning\n" + tview.Escape(entry.reasoning) + "[-:-:-]\n\n")
 			}
 			out.WriteString(t.renderMarkdown(entry.text))
 		case "tool":
-			color := "yellow"
+			color := "red"
 			if entry.status == "done" {
-				color = "green"
+				color = "white"
 			} else if entry.status == "error" {
 				color = "red"
 			}
@@ -1631,9 +1660,9 @@ func (t *terminalChat) renderChat() {
 			if dur > 0 {
 				duration = " " + formatDuration(dur)
 			}
-			out.WriteString(fmt.Sprintf("[%s::b]Tool: %s (%s%s)[-:-:-]\n[gray]%s[-]", color, tview.Escape(entry.tool), entry.status, duration, tview.Escape(entry.text)))
+			out.WriteString(fmt.Sprintf("[%s::b]Tool: %s (%s%s)[-:-:-]\n[white]%s[-]", color, tview.Escape(entry.tool), entry.status, duration, tview.Escape(entry.text)))
 		default:
-			out.WriteString("[gray::i]" + tview.Escape(entry.text) + "[-:-:-]")
+			out.WriteString("[white::i]" + tview.Escape(entry.text) + "[-:-:-]")
 		}
 	}
 	t.chat.SetText(out.String()).ScrollToEnd()
@@ -1648,7 +1677,7 @@ func (t *terminalChat) renderMarkdown(text string) string {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			if !inCode {
 				language = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "```"))
-				out.WriteString("[gray::b]" + tview.Escape(language) + "[-:-:-]")
+				out.WriteString("[red::b]" + tview.Escape(language) + "[-:-:-]")
 			}
 			inCode = !inCode
 			if i < len(lines)-1 {
@@ -1662,15 +1691,15 @@ func (t *terminalChat) renderMarkdown(text string) string {
 			trimmed := strings.TrimSpace(line)
 			switch {
 			case strings.HasPrefix(trimmed, "### "):
-				out.WriteString("[purple::b]" + t.renderInline(strings.TrimPrefix(trimmed, "### ")) + "[-:-:-]")
+				out.WriteString("[red::b]" + t.renderInline(strings.TrimPrefix(trimmed, "### ")) + "[-:-:-]")
 			case strings.HasPrefix(trimmed, "## "):
-				out.WriteString("[purple::b]" + t.renderInline(strings.TrimPrefix(trimmed, "## ")) + "[-:-:-]")
+				out.WriteString("[red::b]" + t.renderInline(strings.TrimPrefix(trimmed, "## ")) + "[-:-:-]")
 			case strings.HasPrefix(trimmed, "# "):
-				out.WriteString("[purple::b]" + t.renderInline(strings.TrimPrefix(trimmed, "# ")) + "[-:-:-]")
+				out.WriteString("[red::b]" + t.renderInline(strings.TrimPrefix(trimmed, "# ")) + "[-:-:-]")
 			case strings.HasPrefix(trimmed, "> "):
-				out.WriteString("[gray::i]│ " + t.renderInline(strings.TrimPrefix(trimmed, "> ")) + "[-:-:-]")
+				out.WriteString("[white::i]│ " + t.renderInline(strings.TrimPrefix(trimmed, "> ")) + "[-:-:-]")
 			case strings.HasPrefix(trimmed, "- "), strings.HasPrefix(trimmed, "* "):
-				out.WriteString("[yellow]•[-] " + t.renderInline(trimmed[2:]))
+				out.WriteString("[red]•[-] " + t.renderInline(trimmed[2:]))
 			default:
 				out.WriteString(t.renderInline(line))
 			}
@@ -1715,7 +1744,7 @@ func (t *terminalChat) renderBareInline(text string) string {
 
 func renderInlineCode(text string) string {
 	escaped := tview.Escape(text)
-	return inlineCodePattern.ReplaceAllString(escaped, "[orange]$1[-]")
+	return inlineCodePattern.ReplaceAllString(escaped, "[red]$1[-]")
 }
 
 func (t *terminalChat) linkTag(label, url string) string {
@@ -1723,7 +1752,7 @@ func (t *terminalChat) linkTag(label, url string) string {
 	id := fmt.Sprintf("link-%d", len(t.links)+1)
 	t.links[id] = url
 	t.mu.Unlock()
-	return fmt.Sprintf("[blue::u][\"%s\"]%s[\"\"][-:-:-]", id, tview.Escape(label))
+	return fmt.Sprintf("[red::u][\"%s\"]%s[\"\"][-:-:-]", id, tview.Escape(label))
 }
 
 var codeKeywordPattern = regexp.MustCompile(`\b(func|package|import|return|if|else|for|range|type|struct|interface|const|var|let|class|def|async|await|try|catch|throw|switch|case|break|continue|true|false|null|nil)\b`)
@@ -1731,9 +1760,9 @@ var codeStringPattern = regexp.MustCompile(`("[^"\n]*"|'[^'\n]*')`)
 
 func highlightCode(line, _ string) string {
 	escaped := tview.Escape(line)
-	escaped = codeStringPattern.ReplaceAllString(escaped, "[green]$1[-]")
-	escaped = codeKeywordPattern.ReplaceAllString(escaped, "[purple::b]$1[-:-:-]")
-	return "[gray]│[-] " + escaped
+	escaped = codeStringPattern.ReplaceAllString(escaped, "[white]$1[-]")
+	escaped = codeKeywordPattern.ReplaceAllString(escaped, "[red::b]$1[-:-:-]")
+	return "[red]│[-] " + escaped
 }
 
 func (t *terminalChat) autocomplete(current string) []string {

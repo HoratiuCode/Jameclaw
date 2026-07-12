@@ -1,0 +1,1 @@
+import{a5 as e,j as a,ab as n,a6 as s}from"./index-vmRzELIQ.js";function r(){return e({select:t=>t.location.pathname})==="/channels"?a.jsx(n,{to:"/channels/$name",params:{name:"telegram"}}):a.jsx(s,{})}export{r as component};

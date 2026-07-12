@@ -23,6 +23,10 @@ func (h *Handler) registerJameRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/jame/setup", h.handleJameSetup)
 	mux.HandleFunc("OPTIONS /api/extension/bootstrap", h.handleExtensionBootstrapOptions)
 	mux.HandleFunc("GET /api/extension/bootstrap", h.handleExtensionBootstrap)
+	mux.HandleFunc("OPTIONS /api/extension/sessions", h.handleExtensionBootstrapOptions)
+	mux.HandleFunc("GET /api/extension/sessions", h.handleExtensionSessions)
+	mux.HandleFunc("OPTIONS /api/extension/sessions/{id}", h.handleExtensionBootstrapOptions)
+	mux.HandleFunc("GET /api/extension/sessions/{id}", h.handleExtensionSession)
 
 	// WebSocket proxy: forward /jame/ws to gateway
 	// This allows the frontend to connect via the same port as the web UI,
@@ -54,6 +58,22 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 		}
 		proxy.ServeHTTP(w, proxyReq)
 	}
+}
+
+func (h *Handler) handleExtensionSessions(w http.ResponseWriter, r *http.Request) {
+	if !setExtensionCORSHeaders(w, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	h.handleListSessions(w, r)
+}
+
+func (h *Handler) handleExtensionSession(w http.ResponseWriter, r *http.Request) {
+	if !setExtensionCORSHeaders(w, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	h.handleGetSession(w, r)
 }
 
 // handleGetJameToken returns the current WS token and URL for the frontend.

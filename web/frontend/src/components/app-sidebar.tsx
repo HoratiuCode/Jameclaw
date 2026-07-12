@@ -33,6 +33,7 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -242,6 +243,27 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       {...props}
       className="bg-background border-r-border/20 border-r pt-3"
     >
+      <SidebarHeader className="px-3 pb-2">
+        <Link
+          to="/"
+          className="hover:bg-muted/60 flex items-center gap-2 rounded-md px-1.5 py-1.5 transition-colors"
+          aria-label="JameClaw home"
+        >
+          <img
+            src="/favicon-96x96.png"
+            alt=""
+            className="size-8 shrink-0 rounded-md"
+          />
+          <div className="min-w-0 group-data-[collapsible=icon]:hidden">
+            <div className="text-sidebar-foreground truncate text-sm font-semibold">
+              JameClaw
+            </div>
+            <div className="text-muted-foreground truncate text-[11px]">
+              Web Console
+            </div>
+          </div>
+        </Link>
+      </SidebarHeader>
       <SidebarContent className="bg-background">
         {navGroups.map((group) => (
           <Collapsible
