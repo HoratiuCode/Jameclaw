@@ -6,6 +6,7 @@ import {
   IconMicrophone,
   IconPaperclip,
   IconPlayerStopFilled,
+  IconSparkles,
   IconTools,
 } from "@tabler/icons-react"
 import type { KeyboardEvent } from "react"
@@ -15,6 +16,7 @@ import TextareaAutosize from "react-textarea-autosize"
 
 import { getAutomations, type AutomationItem } from "@/api/automation"
 import { type LocalFileSearchItem, searchLocalFiles } from "@/api/files"
+import { getLearnedSkills, type LearnedSkillItem } from "@/api/skills"
 import { getTools, type ToolSupportItem } from "@/api/tools"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -49,6 +51,14 @@ type MentionItem =
       subtitle: string
       insertText: string
       tool: ToolSupportItem
+    }
+  | {
+      id: string
+      type: "skill"
+      title: string
+      subtitle: string
+      insertText: string
+      skill: LearnedSkillItem
     }
   | {
       id: string
@@ -117,8 +127,10 @@ export function ChatComposer({
         searchLocalFiles(activeMention.query, 8),
         getTools(),
         getAutomations(),
+        getLearnedSkills(),
       ])
-        .then(([filesResult, toolsResult, automationsResult]) => {
+        .then(
+          ([filesResult, toolsResult, automationsResult, learnedSkillsResult]) => {
           if (cancelled) return
           const nextItems: MentionItem[] = []
 
@@ -180,15 +192,39 @@ export function ChatComposer({
             )
           }
 
+          if (learnedSkillsResult.status === "fulfilled") {
+            nextItems.push(
+              ...learnedSkillsResult.value.skills
+                .filter((skill) =>
+                  matchesMentionQuery(activeMention.query, [
+                    skill.name,
+                    skill.description,
+                    skill.source,
+                  ]),
+                )
+                .slice(0, 8)
+                .map((skill) => ({
+                  id: `skill:${skill.name}`,
+                  type: "skill" as const,
+                  title: skill.name,
+                  subtitle: skill.description || `${skill.source} skill`,
+                  insertText: `@skill:${skill.name} `,
+                  skill,
+                })),
+            )
+          }
+
           setMentionItems(nextItems)
           setIsMentionMenuOpen(true)
           setSelectedMentionIndex(0)
           setMentionSearchError(
             filesResult.status === "rejected" &&
               toolsResult.status === "rejected" &&
-              automationsResult.status === "rejected",
+              automationsResult.status === "rejected" &&
+              learnedSkillsResult.status === "rejected",
           )
-        })
+          },
+        )
         .catch(() => {
           if (cancelled) return
           setMentionItems([])
@@ -278,7 +314,7 @@ export function ChatComposer({
               </div>
             ) : mentionItems.length === 0 ? (
               <div className="text-muted-foreground px-3 py-3 text-sm">
-                No matching files, tools, or automations found.
+                No matching files, tools, skills, or automations found.
               </div>
             ) : (
               <div className="max-h-72 overflow-y-auto py-1">
@@ -286,6 +322,8 @@ export function ChatComposer({
                   const Icon =
                     item.type === "tool"
                       ? IconTools
+                      : item.type === "skill"
+                        ? IconSparkles
                       : item.type === "automation"
                         ? IconCalendarTime
                         : item.file.kind === "folder"
@@ -353,7 +391,7 @@ export function ChatComposer({
             )}
             {!disabledReason && (
               <p className="text-muted-foreground text-xs">
-                Type @ to call files, tools, or automations. Try /emoji, /persona, or /skills add &lt;skill&gt;.
+                Type @ to call files, tools, skills, or automations. Try @skill:agent-browser for Chrome help.
               </p>
             )}
           </div>

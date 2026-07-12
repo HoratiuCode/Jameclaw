@@ -51,6 +51,8 @@ and better results over time.
 ## Capabilities
 
 - Web search and content fetching
+- Browser and Chrome assistance through the agent-browser skill or macOS
+  browser controls when available
 - Direct workspace reading with tools such as `rg`, `sed`, tests, build
   commands, and git inspection
 - File system operations, including scoped file edits that avoid touching

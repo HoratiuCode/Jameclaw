@@ -1,24 +1,51 @@
 ---
 name: agent-browser
-description: "Browser automation via agent-browser CLI. Use when the user needs to navigate websites, fill forms, click buttons, take screenshots, extract data, or test web apps."
+description: "Browser automation via agent-browser CLI and Chrome. Use when the user needs to open Chrome, navigate websites, fill forms, click buttons, take screenshots, extract data, or test web apps."
 metadata: {"nanobot":{"emoji":"🌐","requires":{"bins":["agent-browser"]},"install":[{"id":"npm","kind":"npm","package":"agent-browser","global":true,"bins":["agent-browser"],"label":"Install agent-browser (npm)"}]}}
 ---
 
 # Agent Browser
 
-CLI browser automation via Chrome/Chromium CDP. Install: `npm i -g agent-browser && agent-browser install`.
+CLI browser automation via Chrome/Chromium CDP. Prefer the user's local Google Chrome when possible so browser state, logins, and visible tabs are easy to reuse.
 
-**Before using this skill**, verify the tool is available by running `which agent-browser`. If the command is not found, tell the user that browser automation requires the `agent-browser` CLI and Chromium, which are only available in the heavy container image. Do not attempt to install it at runtime.
+**Before using deep browser automation**, verify the tool is available by running `which agent-browser`.
+
+- If `agent-browser` exists, use it for page snapshots, clicks, form fills, screenshots, PDF export, and DOM extraction.
+- If `agent-browser` is missing but the `mac_control` tool is available, use `mac_control` to open Google Chrome, open URLs, search the web, activate Chrome, type text, and press keyboard shortcuts.
+- If neither path is available, explain the missing capability and ask the user to install/enable browser automation.
+
+Do not use browser automation for sensitive actions such as payments, account deletion, or credential changes without explicit user confirmation.
+
+## Quick Chrome Access
+
+Use this path when the user simply wants Chrome opened, searched, or focused:
+
+```json
+{"action":"open_app","app":"Google Chrome"}
+{"action":"open_url","app":"Google Chrome","url":"https://example.com"}
+{"action":"search","app":"Google Chrome","engine":"google","query":"JameClaw browser automation"}
+{"action":"activate_app","app":"Google Chrome"}
+```
+
+For address-bar navigation in the visible Chrome window:
+
+```json
+{"action":"keyboard_shortcut","keys":["command","l"]}
+{"action":"type_text","text":"https://example.com"}
+{"action":"key_code","key_code":36}
+```
+
+Use `agent-browser` when the task needs page understanding or exact interaction.
 
 ## Core Workflow
 
-1. `agent-browser open <url>` — navigate
+1. `agent-browser --session-name chrome open <url>` — navigate with a reusable Chrome session
 2. `agent-browser snapshot -i` — get interactive elements with refs (`@e1`, `@e2`, ...)
 3. Interact using refs — `click @e1`, `fill @e2 "text"`
 4. Re-snapshot after any navigation or DOM change — refs are invalidated
 
 ```bash
-agent-browser open https://example.com/form
+agent-browser --session-name chrome open https://example.com/form
 agent-browser snapshot -i
 # @e1 [input] "Email", @e2 [input] "Password", @e3 [button] "Submit"
 agent-browser fill @e1 "user@example.com"
@@ -30,14 +57,14 @@ agent-browser snapshot -i
 
 Chain commands with `&&` when you don't need intermediate output:
 ```bash
-agent-browser open https://example.com && agent-browser wait --load networkidle && agent-browser snapshot -i
+agent-browser --session-name chrome open https://example.com && agent-browser wait --load networkidle && agent-browser snapshot -i
 ```
 
 ## Commands
 
 ```bash
 # Navigation
-agent-browser open <url>
+agent-browser --session-name chrome open <url>
 agent-browser close
 
 # Snapshot
@@ -80,22 +107,24 @@ agent-browser find role button click --name "Submit"
 ## Authentication
 
 ```bash
-# Option 1: Import from user's running Chrome
+# Preferred on a local Mac: import from user's running Chrome
 agent-browser --auto-connect state save ./auth.json
 agent-browser --state ./auth.json open https://app.example.com
 
-# Option 2: Persistent profile
+# Persistent profile for a website that needs login
 agent-browser --profile ~/.myapp open https://app.example.com/login
 # ... login once, all future runs are authenticated
 
-# Option 3: Session name (auto-save/restore)
+# Session name for ordinary repeat work
 agent-browser --session-name myapp open https://app.example.com/login
 # ... login, close, next run state is restored
 
-# Option 4: State file
+# State file when the user explicitly wants a portable auth snapshot
 agent-browser state save auth.json
 agent-browser state load auth.json
 ```
+
+Prefer `--session-name chrome` for general browsing so the agent can resume the same browser state across steps.
 
 ## Iframes
 
