@@ -32,7 +32,7 @@ func (t *MacControlTool) Name() string {
 }
 
 func (t *MacControlTool) Description() string {
-	return "Control visible macOS desktop actions: open apps/URLs/files, search the browser, control Finder, inspect or activate apps/windows, run Shortcuts, take screenshots, type text or keyboard shortcuts, and optionally run approved AppleScript."
+	return "Control visible macOS desktop actions, especially Google Chrome browser access: open Chrome, open websites like Instagram, search the web, focus browser windows, type text, press keyboard shortcuts, open apps/URLs/files, control Finder, run Shortcuts, take screenshots, and optionally run approved AppleScript. Use this as the browser fallback when agent-browser or CDP automation is unavailable."
 }
 
 func (t *MacControlTool) Parameters() map[string]any {
@@ -41,7 +41,7 @@ func (t *MacControlTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"description": "Desktop action to perform.",
+				"description": "Desktop action to perform. For websites such as Instagram, use action=open_url with app=Google Chrome and an https URL. For browser searches, use action=search with app=Google Chrome.",
 				"enum": []string{
 					"open_app", "activate_app", "quit_app", "list_apps", "frontmost_app", "front_window_title", "front_window_bounds",
 					"open_url", "open_path", "open_finder", "reveal_path", "search",
@@ -50,7 +50,7 @@ func (t *MacControlTool) Parameters() map[string]any {
 			},
 			"app": map[string]any{
 				"type":        "string",
-				"description": "macOS application name, such as Safari, Google Chrome, Terminal, Notes, Finder, or Messages.",
+				"description": "macOS application name. Use Google Chrome for browser requests unless the user asks for another browser.",
 			},
 			"url": map[string]any{
 				"type":        "string",

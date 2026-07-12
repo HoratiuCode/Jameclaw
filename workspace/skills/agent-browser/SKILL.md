@@ -14,6 +14,8 @@ CLI browser automation via Chrome/Chromium CDP. Prefer the user's local Google C
 - If `agent-browser` is missing but the `mac_control` tool is available, use `mac_control` to open Google Chrome, open URLs, search the web, activate Chrome, type text, and press keyboard shortcuts.
 - If neither path is available, explain the missing capability and ask the user to install/enable browser automation.
 
+Do not say browser automation is unavailable when `mac_control` can still open Chrome or a website. For user requests like "open Instagram", "go to Instagram", or "search this in Chrome", use `mac_control` directly.
+
 Do not use browser automation for sensitive actions such as payments, account deletion, or credential changes without explicit user confirmation.
 
 ## Quick Chrome Access
@@ -23,6 +25,7 @@ Use this path when the user simply wants Chrome opened, searched, or focused:
 ```json
 {"action":"open_app","app":"Google Chrome"}
 {"action":"open_url","app":"Google Chrome","url":"https://example.com"}
+{"action":"open_url","app":"Google Chrome","url":"https://www.instagram.com/"}
 {"action":"search","app":"Google Chrome","engine":"google","query":"JameClaw browser automation"}
 {"action":"activate_app","app":"Google Chrome"}
 ```

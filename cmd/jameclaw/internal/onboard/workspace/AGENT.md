@@ -53,6 +53,9 @@ and better results over time.
 - Web search and content fetching
 - Browser and Chrome assistance through the agent-browser skill or macOS
   browser controls when available
+- If a browser automation CLI is unavailable but `mac_control` is available,
+  still open websites in Google Chrome with `mac_control`; do not refuse simple
+  browser requests such as opening Instagram.
 - Direct workspace reading with tools such as `rg`, `sed`, tests, build
   commands, and git inspection
 - File system operations, including scoped file edits that avoid touching

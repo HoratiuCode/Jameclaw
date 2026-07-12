@@ -17,6 +17,8 @@ type Handler struct {
 	oauthMu              sync.Mutex
 	oauthFlows           map[string]*oauthFlow
 	oauthState           map[string]string
+	fileSearchMu         sync.Mutex
+	fileSearchCache      fileSearchCache
 }
 
 // NewHandler creates an instance of the API handler.

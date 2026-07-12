@@ -23,6 +23,11 @@ type fileSearchResponse struct {
 	Items []fileSearchItem `json:"items"`
 }
 
+type fileSearchCache struct {
+	RootsKey string
+	Items    []fileSearchItem
+}
+
 type fileSearchItem struct {
 	Name       string `json:"name"`
 	Path       string `json:"path"`
@@ -44,10 +49,28 @@ func (h *Handler) handleFileSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roots := h.fileSearchRoots()
-	items := searchLocalFiles(roots, query, limit)
+	items := searchIndexedLocalFiles(h.cachedLocalFileIndex(roots), query, limit)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(fileSearchResponse{Items: items})
+}
+
+func (h *Handler) cachedLocalFileIndex(roots []string) []fileSearchItem {
+	rootsKey := strings.Join(roots, "\x00")
+
+	h.fileSearchMu.Lock()
+	defer h.fileSearchMu.Unlock()
+
+	if h.fileSearchCache.RootsKey == rootsKey && h.fileSearchCache.Items != nil {
+		return append([]fileSearchItem(nil), h.fileSearchCache.Items...)
+	}
+
+	items := buildLocalFileIndex(roots)
+	h.fileSearchCache = fileSearchCache{
+		RootsKey: rootsKey,
+		Items:    append([]fileSearchItem(nil), items...),
+	}
+	return items
 }
 
 func (h *Handler) fileSearchRoots() []string {
@@ -88,15 +111,10 @@ func (h *Handler) fileSearchRoots() []string {
 }
 
 func searchLocalFiles(roots []string, query string, limit int) []fileSearchItem {
-	if limit <= 0 {
-		return nil
-	}
+	return searchIndexedLocalFiles(buildLocalFileIndex(roots), query, limit)
+}
 
-	query = strings.ToLower(strings.TrimSpace(query))
-	tokens := strings.FieldsFunc(query, func(r rune) bool {
-		return r == '/' || r == '\\' || r == '-' || r == '_' || r == '.'
-	})
-
+func buildLocalFileIndex(roots []string) []fileSearchItem {
 	var items []fileSearchItem
 	visited := 0
 	for _, root := range roots {
@@ -132,10 +150,6 @@ func searchLocalFiles(roots []string, query string, limit int) []fileSearchItem 
 				return nil
 			}
 
-			if query != "" && !fileSearchMatches(path, name, tokens) {
-				return nil
-			}
-
 			info, statErr := entry.Info()
 			if statErr != nil {
 				return nil
@@ -157,17 +171,37 @@ func searchLocalFiles(roots []string, query string, limit int) []fileSearchItem 
 			return nil
 		})
 	}
-
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Kind != items[j].Kind {
-			return items[i].Kind == "file"
-		}
-		return fileSearchRank(items[i], query) > fileSearchRank(items[j], query)
-	})
-	if len(items) > limit {
-		items = items[:limit]
-	}
 	return items
+}
+
+func searchIndexedLocalFiles(items []fileSearchItem, query string, limit int) []fileSearchItem {
+	if limit <= 0 {
+		return nil
+	}
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	tokens := strings.FieldsFunc(query, func(r rune) bool {
+		return r == '/' || r == '\\' || r == '-' || r == '_' || r == '.'
+	})
+
+	matches := make([]fileSearchItem, 0, len(items))
+	for _, item := range items {
+		if query != "" && !fileSearchMatches(item.Path, item.Name, tokens) {
+			continue
+		}
+		matches = append(matches, item)
+	}
+
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].Kind != matches[j].Kind {
+			return matches[i].Kind == "file"
+		}
+		return fileSearchRank(matches[i], query) > fileSearchRank(matches[j], query)
+	})
+	if len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches
 }
 
 func parsePositiveInt(raw string, fallback int) int {
