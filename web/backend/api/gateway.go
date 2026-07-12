@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -841,8 +842,13 @@ func gatewayLogsData(r *http.Request) map[string]any {
 	runID := gateway.logs.RunID()
 
 	if runID == 0 {
-		data["logs"] = []string{}
-		data["log_total"] = 0
+		allLines := recentJameClawFileLogs(240)
+		lines := allLines
+		if clientRunID == 0 && clientOffset >= len(allLines) {
+			lines = []string{}
+		}
+		data["logs"] = lines
+		data["log_total"] = len(allLines)
 		data["log_run_id"] = 0
 		return data
 	}
@@ -858,10 +864,75 @@ func gatewayLogsData(r *http.Request) map[string]any {
 		lines = []string{}
 	}
 
+	if clientRunID < 0 {
+		lines = append(recentJameClawFileLogs(240), lines...)
+	}
+
 	data["logs"] = lines
 	data["log_total"] = total
 	data["log_run_id"] = runID
 	return data
+}
+
+func recentJameClawFileLogs(limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	home := utils.GetJameclawHome()
+	files := []struct {
+		label string
+		path  string
+	}{
+		{"launcher", filepath.Join(home, "logs", "launcher.log")},
+		{"gateway", filepath.Join(home, "logs", "gateway.log")},
+		{"gateway-run", filepath.Join(home, "run", "gateway.log")},
+		{"launcher-panic", filepath.Join(home, "logs", "launcher_panic.log")},
+		{"gateway-panic", filepath.Join(home, "logs", "gateway_panic.log")},
+	}
+
+	perFile := limit / len(files)
+	if perFile < 20 {
+		perFile = 20
+	}
+
+	lines := make([]string, 0, limit)
+	for _, file := range files {
+		for _, line := range tailLogFile(file.path, perFile) {
+			lines = append(lines, fmt.Sprintf("[%s] %s", file.label, line))
+		}
+	}
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	return lines
+}
+
+func tailLogFile(path string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	buffer := make([]string, 0, limit)
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(buffer) < limit {
+			buffer = append(buffer, line)
+			continue
+		}
+		copy(buffer, buffer[1:])
+		buffer[len(buffer)-1] = line
+	}
+	return buffer
 }
 
 // scanPipe reads lines from r and appends them to buf. Returns when r reaches EOF.
