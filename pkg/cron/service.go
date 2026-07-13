@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,10 +36,14 @@ type CronPayload struct {
 }
 
 type CronJobState struct {
-	NextRunAtMS *int64 `json:"nextRunAtMs,omitempty"`
-	LastRunAtMS *int64 `json:"lastRunAtMs,omitempty"`
-	LastStatus  string `json:"lastStatus,omitempty"`
-	LastError   string `json:"lastError,omitempty"`
+	NextRunAtMS         *int64 `json:"nextRunAtMs,omitempty"`
+	LastRunAtMS         *int64 `json:"lastRunAtMs,omitempty"`
+	RunningAtMS         *int64 `json:"runningAtMs,omitempty"`
+	RunClaimExpiresAtMS *int64 `json:"runClaimExpiresAtMs,omitempty"`
+	LastStatus          string `json:"lastStatus,omitempty"`
+	LastError           string `json:"lastError,omitempty"`
+	LastOutputPath      string `json:"lastOutputPath,omitempty"`
+	LastDurationMS      int64  `json:"lastDurationMs,omitempty"`
 }
 
 type CronJob struct {
@@ -59,23 +65,45 @@ type CronStore struct {
 
 type JobHandler func(job *CronJob) (string, error)
 
+const (
+	storeVersion              = 2
+	defaultParallelJobs       = 4
+	runClaimTTL               = 30 * time.Minute
+	tickerHeartbeatFilename   = "ticker_heartbeat"
+	tickerLastSuccessFilename = "ticker_last_success"
+)
+
 type CronService struct {
-	storePath string
-	store     *CronStore
-	onJob     JobHandler
-	mu        sync.RWMutex
-	running   bool
-	stopChan  chan struct{}
-	wakeChan  chan struct{}
-	gronx     *gronx.Gronx
+	storePath         string
+	cronDir           string
+	outputDir         string
+	lockPath          string
+	heartbeatPath     string
+	lastSuccessPath   string
+	store             *CronStore
+	onJob             JobHandler
+	mu                sync.RWMutex
+	running           bool
+	stopChan          chan struct{}
+	wakeChan          chan struct{}
+	gronx             *gronx.Gronx
+	parallelSem       chan struct{}
+	parallelWaitGroup sync.WaitGroup
 }
 
 func NewCronService(storePath string, onJob JobHandler) *CronService {
+	cronDir := filepath.Dir(storePath)
 	cs := &CronService{
-		storePath: storePath,
-		onJob:     onJob,
-		gronx:     gronx.New(),
-		wakeChan:  make(chan struct{}),
+		storePath:       storePath,
+		cronDir:         cronDir,
+		outputDir:       filepath.Join(cronDir, "output"),
+		lockPath:        filepath.Join(cronDir, ".jobs.lock"),
+		heartbeatPath:   filepath.Join(cronDir, tickerHeartbeatFilename),
+		lastSuccessPath: filepath.Join(cronDir, tickerLastSuccessFilename),
+		onJob:           onJob,
+		gronx:           gronx.New(),
+		wakeChan:        make(chan struct{}),
+		parallelSem:     make(chan struct{}, defaultParallelJobs),
 	}
 	// Initialize and load store on creation
 	cs.loadStore()
@@ -94,6 +122,7 @@ func (cs *CronService) Start() error {
 		return fmt.Errorf("failed to load store: %w", err)
 	}
 
+	cs.recoverStaleRunningJobs(time.Now().UnixMilli())
 	cs.recomputeNextRuns()
 	if err := cs.saveStoreUnsafe(); err != nil {
 		return fmt.Errorf("failed to save store: %w", err)
@@ -111,9 +140,9 @@ func (cs *CronService) Start() error {
 
 func (cs *CronService) Stop() {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
 
 	if !cs.running {
+		cs.mu.Unlock()
 		return
 	}
 
@@ -122,6 +151,8 @@ func (cs *CronService) Stop() {
 		close(cs.stopChan)
 		cs.stopChan = nil
 	}
+	cs.mu.Unlock()
+	cs.parallelWaitGroup.Wait()
 }
 
 func (cs *CronService) runLoop(stopChan chan struct{}) {
@@ -132,6 +163,7 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 	defer timer.Stop()
 
 	for {
+		cs.writeHeartbeat(cs.heartbeatPath)
 		// every loop, recalculate the next wake time
 		cs.mu.RLock()
 		nextWake := cs.getNextWakeMS()
@@ -167,6 +199,7 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 			continue
 		case <-timer.C:
 			cs.checkJobs()
+			cs.writeHeartbeat(cs.lastSuccessPath)
 		}
 	}
 }
@@ -181,11 +214,12 @@ func (cs *CronService) checkJobs() {
 
 	now := time.Now().UnixMilli()
 	var dueJobIDs []string
+	cs.recoverStaleRunningJobs(now)
 
 	// Collect jobs that are due (we need to copy them to execute outside lock)
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
-		if job.Enabled && job.State.NextRunAtMS != nil && *job.State.NextRunAtMS <= now {
+		if job.Enabled && job.State.RunningAtMS == nil && job.State.NextRunAtMS != nil && *job.State.NextRunAtMS <= now {
 			dueJobIDs = append(dueJobIDs, job.ID)
 		}
 	}
@@ -198,6 +232,8 @@ func (cs *CronService) checkJobs() {
 	for i := range cs.store.Jobs {
 		if dueMap[cs.store.Jobs[i].ID] {
 			cs.store.Jobs[i].State.NextRunAtMS = nil
+			cs.store.Jobs[i].State.RunningAtMS = cronInt64Ptr(now)
+			cs.store.Jobs[i].State.RunClaimExpiresAtMS = cronInt64Ptr(now + runClaimTTL.Milliseconds())
 		}
 	}
 
@@ -209,7 +245,13 @@ func (cs *CronService) checkJobs() {
 
 	// Execute jobs outside lock.
 	for _, jobID := range dueJobIDs {
-		cs.executeJobByID(jobID)
+		cs.parallelWaitGroup.Add(1)
+		go func(id string) {
+			defer cs.parallelWaitGroup.Done()
+			cs.parallelSem <- struct{}{}
+			defer func() { <-cs.parallelSem }()
+			cs.executeJobByID(id)
+		}(jobID)
 	}
 }
 
@@ -238,8 +280,9 @@ func (cs *CronService) executeJobByID(jobID string) {
 		callbackJob.Name, jobID, callbackJob.Schedule.Kind, callbackJob.Payload.Channel)
 
 	var err error
+	var output string
 	if cs.onJob != nil {
-		_, err = cs.onJob(callbackJob)
+		output, err = cs.onJob(callbackJob)
 	}
 
 	execDuration := time.Now().UnixMilli() - startTime
@@ -261,6 +304,9 @@ func (cs *CronService) executeJobByID(jobID string) {
 	}
 
 	job.State.LastRunAtMS = &startTime
+	job.State.RunningAtMS = nil
+	job.State.RunClaimExpiresAtMS = nil
+	job.State.LastDurationMS = execDuration
 	job.UpdatedAtMS = time.Now().UnixMilli()
 
 	if err != nil {
@@ -270,6 +316,11 @@ func (cs *CronService) executeJobByID(jobID string) {
 	} else {
 		job.State.LastStatus = "ok"
 		job.State.LastError = ""
+	}
+	if outputPath, outputErr := cs.saveJobOutput(callbackJob, output, err, startTime, execDuration); outputErr != nil {
+		log.Printf("[cron] failed to save output for job '%s': %v", job.Name, outputErr)
+	} else {
+		job.State.LastOutputPath = outputPath
 	}
 
 	// Compute next run time
@@ -349,8 +400,31 @@ func (cs *CronService) recomputeNextRuns() {
 	now := time.Now().UnixMilli()
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
-		if job.Enabled {
+		if job.Enabled && job.State.RunningAtMS == nil {
 			job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, now)
+		}
+	}
+}
+
+func (cs *CronService) recoverStaleRunningJobs(now int64) {
+	for i := range cs.store.Jobs {
+		job := &cs.store.Jobs[i]
+		if job.State.RunningAtMS == nil {
+			continue
+		}
+		if job.State.RunClaimExpiresAtMS != nil && *job.State.RunClaimExpiresAtMS > now {
+			continue
+		}
+		job.State.RunningAtMS = nil
+		job.State.RunClaimExpiresAtMS = nil
+		job.State.LastStatus = "stale_recovered"
+		job.State.LastError = "previous run claim expired before completion"
+		if job.Enabled {
+			if job.Schedule.Kind == "at" {
+				job.State.NextRunAtMS = job.Schedule.AtMS
+			} else {
+				job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, now)
+			}
 		}
 	}
 }
@@ -381,29 +455,47 @@ func (cs *CronService) SetOnJob(handler JobHandler) {
 
 func (cs *CronService) loadStore() error {
 	cs.store = &CronStore{
-		Version: 1,
+		Version: storeVersion,
 		Jobs:    []CronJob{},
 	}
 
-	data, err := os.ReadFile(cs.storePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	err := withCronFileLock(cs.lockPath, func() error {
+		data, err := os.ReadFile(cs.storePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
 		}
+
+		if err := json.Unmarshal(data, cs.store); err != nil {
+			return err
+		}
+		if cs.store.Version == 0 {
+			cs.store.Version = 1
+		}
+		if cs.store.Jobs == nil {
+			cs.store.Jobs = []CronJob{}
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-
-	return json.Unmarshal(data, cs.store)
+	return nil
 }
 
 func (cs *CronService) saveStoreUnsafe() error {
+	cs.store.Version = storeVersion
 	data, err := json.MarshalIndent(cs.store, "", "  ")
 	if err != nil {
 		return err
 	}
 
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
-	return fileutil.WriteFileAtomic(cs.storePath, data, 0o600)
+	return withCronFileLock(cs.lockPath, func() error {
+		return fileutil.WriteFileAtomic(cs.storePath, data, 0o600)
+	})
 }
 
 func (cs *CronService) AddJob(
@@ -533,7 +625,7 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 	defer cs.mu.RUnlock()
 
 	if includeDisabled {
-		return cs.store.Jobs
+		return append([]CronJob(nil), cs.store.Jobs...)
 	}
 
 	var enabled []CronJob
@@ -551,17 +643,126 @@ func (cs *CronService) Status() map[string]any {
 	defer cs.mu.RUnlock()
 
 	var enabledCount int
+	var runningCount int
 	for _, job := range cs.store.Jobs {
 		if job.Enabled {
 			enabledCount++
 		}
+		if job.State.RunningAtMS != nil {
+			runningCount++
+		}
 	}
 
 	return map[string]any{
-		"enabled":      cs.running,
-		"jobs":         len(cs.store.Jobs),
-		"nextWakeAtMS": cs.getNextWakeMS(),
+		"enabled":              cs.running,
+		"jobs":                 len(cs.store.Jobs),
+		"enabledJobs":          enabledCount,
+		"runningJobs":          runningCount,
+		"nextWakeAtMS":         cs.getNextWakeMS(),
+		"cronDir":              cs.cronDir,
+		"outputDir":            cs.outputDir,
+		"heartbeatPath":        cs.heartbeatPath,
+		"lastSuccessPath":      cs.lastSuccessPath,
+		"lastHeartbeatModTime": fileModUnixMS(cs.heartbeatPath),
+		"lastSuccessfulTickMS": fileModUnixMS(cs.lastSuccessPath),
+		"parallelWorkers":      cap(cs.parallelSem),
 	}
+}
+
+func (cs *CronService) saveJobOutput(job *CronJob, output string, runErr error, startedAtMS, durationMS int64) (string, error) {
+	if job == nil {
+		return "", nil
+	}
+	jobID := sanitizePathComponent(job.ID)
+	if jobID == "" {
+		return "", fmt.Errorf("invalid job id %q", job.ID)
+	}
+	dir := filepath.Join(cs.outputDir, jobID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+
+	status := "ok"
+	errText := ""
+	if runErr != nil {
+		status = "error"
+		errText = runErr.Error()
+	}
+	ts := time.UnixMilli(startedAtMS).Format("20060102-150405.000")
+	path := filepath.Join(dir, ts+".md")
+	var b strings.Builder
+	b.WriteString("# Cron Job Output\n\n")
+	b.WriteString(fmt.Sprintf("- Job: %s\n", job.Name))
+	b.WriteString(fmt.Sprintf("- ID: %s\n", job.ID))
+	b.WriteString(fmt.Sprintf("- Status: %s\n", status))
+	b.WriteString(fmt.Sprintf("- Started: %s\n", time.UnixMilli(startedAtMS).Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("- Duration: %dms\n", durationMS))
+	if errText != "" {
+		b.WriteString(fmt.Sprintf("- Error: %s\n", errText))
+	}
+	b.WriteString("\n## Output\n\n")
+	if strings.TrimSpace(output) == "" {
+		b.WriteString("(empty)\n")
+	} else {
+		b.WriteString(output)
+		if !strings.HasSuffix(output, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	return path, fileutil.WriteFileAtomic(path, []byte(b.String()), 0o600)
+}
+
+func IsSilentResponse(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	normalized := strings.ToUpper(strings.Join(strings.Fields(trimmed), " "))
+	switch normalized {
+	case "[SILENT]", "SILENT", "NO_REPLY", "NO REPLY":
+		return true
+	}
+	lines := strings.Split(trimmed, "\n")
+	first := strings.ToUpper(strings.Join(strings.Fields(lines[0]), " "))
+	last := strings.ToUpper(strings.Join(strings.Fields(lines[len(lines)-1]), " "))
+	return first == "[SILENT]" || last == "[SILENT]" || strings.HasPrefix(strings.ToUpper(trimmed), "[SILENT]")
+}
+
+func sanitizePathComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "." || value == ".." || strings.ContainsAny(value, `/\`) {
+		return ""
+	}
+	if filepath.IsAbs(value) {
+		return ""
+	}
+	return value
+}
+
+func (cs *CronService) writeHeartbeat(path string) {
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Printf("[cron] failed to create heartbeat dir: %v", err)
+		return
+	}
+	now := []byte(fmt.Sprintf("%d\n", time.Now().UnixMilli()))
+	if err := fileutil.WriteFileAtomic(path, now, 0o600); err != nil {
+		log.Printf("[cron] failed to write heartbeat: %v", err)
+	}
+}
+
+func fileModUnixMS(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().UnixMilli()
+}
+
+func cronInt64Ptr(v int64) *int64 {
+	return &v
 }
 
 func generateID() string {

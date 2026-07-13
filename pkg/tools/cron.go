@@ -345,6 +345,9 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		} else {
 			output = fmt.Sprintf("Scheduled command '%s' executed:\n%s", job.Payload.Command, result.ForLLM)
 		}
+		if cron.IsSilentResponse(result.ForLLM) {
+			return "[SILENT]"
+		}
 
 		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer pubCancel()
@@ -358,6 +361,9 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 
 	// If deliver=true and approved, send message directly without agent processing.
 	if cron.DeliveryAllowed(job) {
+		if cron.IsSilentResponse(job.Payload.Message) {
+			return "[SILENT]"
+		}
 		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer pubCancel()
 		t.msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
@@ -385,8 +391,9 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err)
 	}
+	if cron.IsSilentResponse(response) {
+		return "[SILENT]"
+	}
 
-	// Response is automatically sent via MessageBus by AgentLoop
-	_ = response // Will be sent by AgentLoop
-	return "ok"
+	return response
 }

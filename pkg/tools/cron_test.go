@@ -300,6 +300,27 @@ func TestCronTool_ExecuteJobPublishesApprovedDelivery(t *testing.T) {
 	}
 }
 
+func TestCronTool_ExecuteJobSuppressesSilentDelivery(t *testing.T) {
+	tool := newTestCronTool(t)
+	job := &cron.CronJob{}
+	job.ID = "job-1"
+	job.Payload.Channel = "telegram"
+	job.Payload.To = "chat-1"
+	job.Payload.Message = "[SILENT]"
+	job.Payload.Deliver = true
+	job.Payload.DeliveryApproved = true
+
+	if got := tool.ExecuteJob(context.Background(), job); got != "[SILENT]" {
+		t.Fatalf("ExecuteJob() = %q, want [SILENT]", got)
+	}
+
+	select {
+	case msg := <-tool.msgBus.OutboundChan():
+		t.Fatalf("unexpected outbound message: %+v", msg)
+	default:
+	}
+}
+
 func TestCronTool_ExecuteJobPublishesErrorWhenExecDisabled(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Tools.Exec.Enabled = false

@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -40,14 +42,15 @@ func int64Ptr(v int64) *int64 {
 	return &v
 }
 
-func setupService(handler JobHandler) (*CronService, string) {
-	tmpFile := fmt.Sprintf("test_cron_%d.json", time.Now().UnixNano())
+func setupService(t *testing.T, handler JobHandler) (*CronService, string) {
+	t.Helper()
+	tmpFile := filepath.Join(t.TempDir(), fmt.Sprintf("test_cron_%d.json", time.Now().UnixNano()))
 	cs := NewCronService(tmpFile, handler)
 	return cs, tmpFile
 }
 
 func TestCronService_CRUD(t *testing.T) {
-	cs, path := setupService(nil)
+	cs, path := setupService(t, nil)
 	defer os.Remove(path)
 
 	// Test AddJob
@@ -84,7 +87,7 @@ func TestCronService_CRUD(t *testing.T) {
 
 // 2. Test Cron Expression Calculation Logic
 func TestCronService_ComputeNextRun(t *testing.T) {
-	cs, path := setupService(nil)
+	cs, path := setupService(t, nil)
 	defer os.Remove(path)
 
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC).UnixMilli()
@@ -123,7 +126,7 @@ func TestCronService_ExecutionFlow(t *testing.T) {
 		return "ok", nil
 	}
 
-	cs, path := setupService(handler)
+	cs, path := setupService(t, handler)
 	defer os.Remove(path)
 
 	// Start the service
@@ -161,7 +164,7 @@ func TestCronService_ExecutionFlow(t *testing.T) {
 }
 
 func TestCronService_PersistenceIntegrity(t *testing.T) {
-	tmpFile := "persist_test.json"
+	tmpFile := filepath.Join(t.TempDir(), "persist_test.json")
 	defer os.Remove(tmpFile)
 
 	// write a job and persist
@@ -195,7 +198,7 @@ func TestCronService_PersistenceIntegrity(t *testing.T) {
 }
 
 func TestCronService_ConcurrentAccess(t *testing.T) {
-	cs, path := setupService(nil)
+	cs, path := setupService(t, nil)
 	defer os.Remove(path)
 
 	cs.Start()
@@ -234,4 +237,152 @@ func TestCronService_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestCronService_OutputHistoryAndStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "cron", "jobs.json")
+	done := make(chan struct{})
+	cs := NewCronService(storePath, func(job *CronJob) (string, error) {
+		close(done)
+		return "completed report", nil
+	})
+
+	if err := cs.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer cs.Stop()
+
+	target := time.Now().Add(50 * time.Millisecond).UnixMilli()
+	job, err := cs.AddJob("OutputJob", CronSchedule{Kind: "at", AtMS: &target}, "msg", false, false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+	job.DeleteAfterRun = false
+	if err := cs.UpdateJob(job); err != nil {
+		t.Fatalf("UpdateJob failed: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for cron job")
+	}
+
+	var got CronJob
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		jobs := cs.ListJobs(true)
+		if len(jobs) == 1 && jobs[0].State.LastOutputPath != "" {
+			got = jobs[0]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got.State.LastOutputPath == "" {
+		t.Fatal("expected last output path")
+	}
+	data, err := os.ReadFile(got.State.LastOutputPath)
+	if err != nil {
+		t.Fatalf("ReadFile output failed: %v", err)
+	}
+	if !strings.Contains(string(data), "completed report") {
+		t.Fatalf("output history missing result: %s", string(data))
+	}
+
+	status := cs.Status()
+	if status["outputDir"] == "" || status["heartbeatPath"] == "" || status["parallelWorkers"].(int) < 1 {
+		t.Fatalf("status missing scheduler metadata: %#v", status)
+	}
+	if _, err := os.Stat(status["heartbeatPath"].(string)); err != nil {
+		t.Fatalf("expected heartbeat file: %v", err)
+	}
+}
+
+func TestCronService_ParallelJobExecution(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "cron", "jobs.json")
+	var running int32
+	var maxRunning int32
+	done := make(chan struct{}, 2)
+	cs := NewCronService(storePath, func(job *CronJob) (string, error) {
+		current := atomic.AddInt32(&running, 1)
+		for {
+			old := atomic.LoadInt32(&maxRunning)
+			if current <= old || atomic.CompareAndSwapInt32(&maxRunning, old, current) {
+				break
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+		atomic.AddInt32(&running, -1)
+		done <- struct{}{}
+		return "ok", nil
+	})
+
+	if err := cs.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer cs.Stop()
+
+	target := time.Now().Add(50 * time.Millisecond).UnixMilli()
+	for _, name := range []string{"ParallelA", "ParallelB"} {
+		if _, err := cs.AddJob(name, CronSchedule{Kind: "at", AtMS: &target}, "msg", false, false, "cli", "direct"); err != nil {
+			t.Fatalf("AddJob failed: %v", err)
+		}
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout waiting for parallel cron jobs")
+		}
+	}
+	if atomic.LoadInt32(&maxRunning) < 2 {
+		t.Fatalf("expected jobs to overlap, max running = %d", maxRunning)
+	}
+}
+
+func TestCronService_StaleRunningRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "cron", "jobs.json")
+	cs := NewCronService(storePath, nil)
+	past := time.Now().Add(-time.Hour).UnixMilli()
+	every := int64(60000)
+	cs.store.Jobs = []CronJob{{
+		ID:      "stale-job",
+		Name:    "Stale",
+		Enabled: true,
+		Schedule: CronSchedule{
+			Kind:    "every",
+			EveryMS: &every,
+		},
+		State: CronJobState{
+			RunningAtMS:         &past,
+			RunClaimExpiresAtMS: &past,
+		},
+	}}
+
+	cs.recoverStaleRunningJobs(time.Now().UnixMilli())
+	jobs := cs.ListJobs(true)
+	if jobs[0].State.RunningAtMS != nil {
+		t.Fatal("expected stale running claim to be cleared")
+	}
+	if jobs[0].State.LastStatus != "stale_recovered" {
+		t.Fatalf("last status = %q, want stale_recovered", jobs[0].State.LastStatus)
+	}
+	if jobs[0].State.NextRunAtMS == nil {
+		t.Fatal("expected next run to be recomputed")
+	}
+}
+
+func TestIsSilentResponse(t *testing.T) {
+	for _, text := range []string{"[SILENT]", " silent ", "[SILENT] no changes", "done\n[SILENT]"} {
+		if !IsSilentResponse(text) {
+			t.Fatalf("IsSilentResponse(%q) = false, want true", text)
+		}
+	}
+	if IsSilentResponse("the word silent appears in a sentence") {
+		t.Fatal("plain sentence should not be treated as silent marker")
+	}
 }
