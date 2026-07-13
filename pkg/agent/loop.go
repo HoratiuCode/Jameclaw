@@ -280,6 +280,12 @@ func registerSharedTools(
 				nil,
 			))
 		}
+		if cfg.Tools.IsToolEnabled("screen_recording") {
+			agent.Tools.Register(tools.NewScreenRecordingTool(
+				cfg.Agents.Defaults.GetMaxMediaSize(),
+				nil,
+			))
+		}
 
 		// Skill discovery and installation tools
 		skills_enabled := cfg.Tools.IsToolEnabled("skills")
@@ -1086,6 +1092,11 @@ func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 	registry.ForEachTool("screenshot", func(t tools.Tool) {
 		if st, ok := t.(*tools.ScreenshotTool); ok {
 			st.SetMediaStore(s)
+		}
+	})
+	registry.ForEachTool("screen_recording", func(t tools.Tool) {
+		if rt, ok := t.(*tools.ScreenRecordingTool); ok {
+			rt.SetMediaStore(s)
 		}
 	})
 	registry.ForEachTool("create_pdf", func(t tools.Tool) {
