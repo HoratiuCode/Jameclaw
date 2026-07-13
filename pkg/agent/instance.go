@@ -71,6 +71,12 @@ func NewAgentInstance(
 	allowWritePaths := compilePatterns(cfg.Tools.AllowWritePaths)
 
 	toolsRegistry := tools.NewToolRegistry()
+	var todoTool *tools.TodoTool
+
+	if cfg.Tools.IsToolEnabled("todo") {
+		todoTool = tools.NewTodoTool(workspace)
+		toolsRegistry.Register(todoTool)
+	}
 
 	if cfg.Tools.IsToolEnabled("read_file") {
 		maxReadFileSize := cfg.Tools.ReadFile.MaxReadFileSize
@@ -110,6 +116,9 @@ func NewAgentInstance(
 		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseBM25,
 		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
 	)
+	if todoTool != nil {
+		contextBuilder.WithPlanContext(todoTool.FormatForContext)
+	}
 
 	agentID := routing.DefaultAgentID
 	agentName := ""

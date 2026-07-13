@@ -448,6 +448,54 @@ func TestCodexCliProvider_GetDefaultModel(t *testing.T) {
 	}
 }
 
+func TestCodexCliProvider_ResolvesCustomCommand(t *testing.T) {
+	scriptPath := createMockCodexCLI(t, nil)
+	t.Setenv(codexCliPathEnv, scriptPath)
+
+	p := NewCodexCliProvider("")
+	if p.command != scriptPath {
+		t.Fatalf("command = %q, want %q", p.command, scriptPath)
+	}
+}
+
+func TestNvmCodexCandidatesSortNewestFirst(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "v18.19.0", "bin", "codex")
+	newPath := filepath.Join(root, "v24.13.0", "bin", "codex")
+	for _, path := range []string{oldPath, newPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := nvmCodexCandidates(root)
+	if len(got) != 2 {
+		t.Fatalf("len(candidates) = %d, want 2", len(got))
+	}
+	if got[0] != newPath {
+		t.Fatalf("first candidate = %q, want %q", got[0], newPath)
+	}
+}
+
+func TestCodexCLIEnvPrependsCommandDir(t *testing.T) {
+	command := filepath.Join(t.TempDir(), "bin", "codex")
+	env := codexCLIEnv(command)
+	wantPrefix := filepath.Dir(command) + string(os.PathListSeparator)
+
+	for _, item := range env {
+		if strings.HasPrefix(item, "PATH=") {
+			if !strings.HasPrefix(strings.TrimPrefix(item, "PATH="), wantPrefix) {
+				t.Fatalf("PATH = %q, want prefix %q", item, wantPrefix)
+			}
+			return
+		}
+	}
+	t.Fatal("PATH not found in env")
+}
+
 // --- Mock CLI Integration Test ---
 
 func createMockCodexCLI(t *testing.T, events []string) string {

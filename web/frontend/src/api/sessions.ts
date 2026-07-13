@@ -4,6 +4,10 @@ export interface SessionSummary {
   id: string
   title: string
   preview: string
+  agent_id?: string
+  channel?: string
+  chat_type?: string
+  chat_id?: string
   message_count: number
   created: string
   updated: string

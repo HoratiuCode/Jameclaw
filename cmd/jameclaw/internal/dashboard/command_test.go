@@ -3,6 +3,9 @@ package dashboard
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +16,12 @@ import (
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func setupDashboardTest(t *testing.T, port int) *bytes.Buffer {
 	t.Helper()
@@ -42,6 +51,7 @@ func setupDashboardTest(t *testing.T, port int) *bytes.Buffer {
 	oldFresh := dashboardFresh
 	oldWaitFor := dashboardWaitFor
 	oldWait := dashboardWait
+	oldHTTPClient := dashboardHTTPClient
 	t.Cleanup(func() {
 		dashboardOutput = oldOut
 		dashboardOpenURL = oldOpen
@@ -51,6 +61,7 @@ func setupDashboardTest(t *testing.T, port int) *bytes.Buffer {
 		dashboardFresh = oldFresh
 		dashboardWaitFor = oldWaitFor
 		dashboardWait = oldWait
+		dashboardHTTPClient = oldHTTPClient
 	})
 	dashboardOutput = &out
 	dashboardOpenURL = func(string) error { return nil }
@@ -61,6 +72,38 @@ func setupDashboardTest(t *testing.T, port int) *bytes.Buffer {
 	dashboardWaitFor = func(context.Context, string, time.Duration) bool { return true }
 	dashboardWait = 10 * time.Millisecond
 	return &out
+}
+
+func TestFreshUsesLauncherAccessToken(t *testing.T) {
+	_ = setupDashboardTest(t, 19004)
+	if err := os.WriteFile(filepath.Join(os.Getenv(config.EnvHome), "launcher_access_token"), []byte("token-fresh\n"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	var gotToken string
+	dashboardHTTPClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if cookie, err := req.Cookie("jameclaw_launcher_session"); err == nil {
+				gotToken = cookie.Value
+			}
+			body, _ := json.Marshal(map[string]any{
+				"blueprints": []map[string]string{{"key": "morning-brief"}},
+			})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader(body)),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	if !fresh(context.Background(), "http://localhost:19004") {
+		t.Fatal("fresh() = false, want true")
+	}
+	if gotToken != "token-fresh" {
+		t.Fatalf("access_token = %q, want token-fresh", gotToken)
+	}
 }
 
 func TestResolveTargetUsesLauncherConfigAndAccessToken(t *testing.T) {
@@ -142,8 +185,8 @@ func TestRunDashboardStartsWebUIWhenUnreachable(t *testing.T) {
 	}
 }
 
-func TestRunDashboardRefusesStaleRunningWebUI(t *testing.T) {
-	_ = setupDashboardTest(t, 19003)
+func TestRunDashboardWarnsForStaleRunningWebUI(t *testing.T) {
+	out := setupDashboardTest(t, 19003)
 	var started bool
 	dashboardStartWebUI = func() error {
 		started = true
@@ -152,14 +195,13 @@ func TestRunDashboardRefusesStaleRunningWebUI(t *testing.T) {
 	dashboardReachable = func(context.Context, string) bool { return true }
 	dashboardFresh = func(context.Context, string) bool { return false }
 
-	err := runDashboard(context.Background(), dashboardOptions{NoOpen: true})
-	if err == nil {
-		t.Fatal("expected stale Web Console error")
+	if err := runDashboard(context.Background(), dashboardOptions{NoOpen: true}); err != nil {
+		t.Fatalf("runDashboard() error = %v", err)
 	}
 	if started {
 		t.Fatal("did not expect WebUI start while stale process owns the port")
 	}
-	if !strings.Contains(err.Error(), "old version") {
-		t.Fatalf("error = %q, want old version guidance", err.Error())
+	if !strings.Contains(out.String(), "compatibility check did not pass") {
+		t.Fatalf("output missing compatibility warning:\n%s", out.String())
 	}
 }

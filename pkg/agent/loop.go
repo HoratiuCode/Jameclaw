@@ -665,17 +665,42 @@ func (al *AgentLoop) publishResponseIfNeeded(ctx context.Context, channel, chatI
 		return
 	}
 
-	al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+	al.publishOutboundResponse(ctx, channel, chatID, response)
+}
+
+func (al *AgentLoop) publishOutboundResponse(ctx context.Context, channel, chatID, response string) bool {
+	if al.bus == nil || response == "" {
+		return false
+	}
+
+	pubBase := ctx
+	if pubBase == nil || pubBase.Err() != nil {
+		pubBase = context.Background()
+	}
+	pubCtx, cancel := context.WithTimeout(pubBase, 10*time.Second)
+	defer cancel()
+
+	err := al.bus.PublishOutbound(pubCtx, bus.OutboundMessage{
 		Channel: channel,
 		ChatID:  chatID,
 		Content: response,
 	})
-	logger.InfoCF("agent", "Published outbound response",
-		map[string]any{
+	if err != nil {
+		logger.ErrorCF("agent", "Failed to publish outbound response", map[string]any{
 			"channel":     channel,
 			"chat_id":     chatID,
 			"content_len": len(response),
+			"error":       err.Error(),
 		})
+		return false
+	}
+
+	logger.InfoCF("agent", "Published outbound response", map[string]any{
+		"channel":     channel,
+		"chat_id":     chatID,
+		"content_len": len(response),
+	})
+	return true
 }
 
 func (al *AgentLoop) buildContinuationTarget(msg bus.InboundMessage) (*continuationTarget, error) {
@@ -1604,11 +1629,7 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	if opts.SendResponse && result.finalContent != "" {
-		al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-			Channel: opts.Channel,
-			ChatID:  opts.ChatID,
-			Content: result.finalContent,
-		})
+		al.publishOutboundResponse(ctx, opts.Channel, opts.ChatID, result.finalContent)
 	}
 
 	if result.finalContent != "" {
@@ -1806,6 +1827,18 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 			ts.agent.Sessions.AddMessage(ts.sessionKey, rootMsg.Role, rootMsg.Content)
 		}
 		ts.recordPersistedMessage(rootMsg)
+		if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
+			turnStatus = TurnEndStatusError
+			al.emitEvent(
+				EventKindError,
+				ts.eventMeta("runTurn", "turn.error"),
+				ErrorPayload{
+					Stage:   "session_save_user_message",
+					Message: err.Error(),
+				},
+			)
+			return turnResult{}, err
+		}
 	}
 	al.emitReasoningStep(ts, "decide_action", "Prepared model input and tool definitions for the next action.", map[string]any{
 		"messages": len(messages),

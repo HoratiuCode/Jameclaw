@@ -226,9 +226,16 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 	if v, loaded := m.placeholders.LoadAndDelete(key); loaded {
 		if entry, ok := v.(placeholderEntry); ok && entry.id != "" {
 			if editor, ok := ch.(MessageEditor); ok {
-				if err := editor.EditMessage(ctx, msg.ChatID, entry.id, msg.Content); err == nil {
+				err := editor.EditMessage(ctx, msg.ChatID, entry.id, msg.Content)
+				if err == nil {
 					return true // edited successfully, skip Send
 				}
+				logger.WarnCF("channels", "Placeholder edit failed, falling back to send", map[string]any{
+					"channel":        name,
+					"chat_id":        msg.ChatID,
+					"placeholder_id": entry.id,
+					"error":          err.Error(),
+				})
 				// edit failed → fall through to normal Send
 			}
 		}
@@ -644,10 +651,10 @@ func (m *Manager) runWorker(ctx context.Context, name string, w *channelWorker) 
 				for _, chunk := range chunks {
 					chunkMsg := msg
 					chunkMsg.Content = chunk
-					m.sendWithRetry(ctx, name, w, chunkMsg)
+					_ = m.sendWithRetry(ctx, name, w, chunkMsg)
 				}
 			} else {
-				m.sendWithRetry(ctx, name, w, msg)
+				_ = m.sendWithRetry(ctx, name, w, msg)
 			}
 		case <-ctx.Done():
 			return
@@ -660,23 +667,23 @@ func (m *Manager) runWorker(ctx context.Context, name string, w *channelWorker) 
 //   - ErrNotRunning / ErrSendFailed: permanent, no retry
 //   - ErrRateLimit: fixed delay retry
 //   - ErrTemporary / unknown: exponential backoff retry
-func (m *Manager) sendWithRetry(ctx context.Context, name string, w *channelWorker, msg bus.OutboundMessage) {
+func (m *Manager) sendWithRetry(ctx context.Context, name string, w *channelWorker, msg bus.OutboundMessage) error {
 	// Rate limit: wait for token
 	if err := w.limiter.Wait(ctx); err != nil {
 		// ctx canceled, shutting down
-		return
+		return err
 	}
 
 	// Pre-send: stop typing and try to edit placeholder
 	if m.preSend(ctx, name, msg, w.ch) {
-		return // placeholder was edited successfully, skip Send
+		return nil // placeholder was edited successfully, skip Send
 	}
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		lastErr = w.ch.Send(ctx, msg)
 		if lastErr == nil {
-			return
+			return nil
 		}
 
 		// Permanent failures — don't retry
@@ -695,7 +702,7 @@ func (m *Manager) sendWithRetry(ctx context.Context, name string, w *channelWork
 			case <-time.After(rateLimitDelay):
 				continue
 			case <-ctx.Done():
-				return
+				return ctx.Err()
 			}
 		}
 
@@ -704,7 +711,7 @@ func (m *Manager) sendWithRetry(ctx context.Context, name string, w *channelWork
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		}
 	}
 
@@ -715,6 +722,7 @@ func (m *Manager) sendWithRetry(ctx context.Context, name string, w *channelWork
 		"error":   lastErr.Error(),
 		"retries": maxRetries,
 	})
+	return lastErr
 }
 
 func dispatchLoop[M any](
@@ -1063,15 +1071,17 @@ func (m *Manager) SendMessage(ctx context.Context, msg bus.OutboundMessage) erro
 		maxLen = mlp.MaxMessageLength()
 	}
 	if maxLen > 0 && len([]rune(msg.Content)) > maxLen {
+		var lastErr error
 		for _, chunk := range SplitMessage(msg.Content, maxLen) {
 			chunkMsg := msg
 			chunkMsg.Content = chunk
-			m.sendWithRetry(ctx, msg.Channel, w, chunkMsg)
+			if err := m.sendWithRetry(ctx, msg.Channel, w, chunkMsg); err != nil {
+				lastErr = err
+			}
 		}
-	} else {
-		m.sendWithRetry(ctx, msg.Channel, w, msg)
+		return lastErr
 	}
-	return nil
+	return m.sendWithRetry(ctx, msg.Channel, w, msg)
 }
 
 func (m *Manager) SendToChannel(ctx context.Context, channelName, chatID, content string) error {

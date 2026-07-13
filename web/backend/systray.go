@@ -162,7 +162,7 @@ func startTrayActivityIndicator() {
 		ticker := time.NewTicker(750 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
-			next := apiHandler != nil && apiHandler.WebActivityActive()
+			next := apiHandler != nil && apiHandler.AgentActivityActive()
 			if next == active {
 				continue
 			}
@@ -176,7 +176,7 @@ func applyTrayActivityIcon(active bool) {
 	normal, activeIcon := trayIcons()
 	if active {
 		systray.SetIcon(activeIcon)
-		systray.SetTooltip(fmt.Sprintf("%s - Web active", fmt.Sprintf(T(AppTooltip), appName)))
+		systray.SetTooltip(fmt.Sprintf("%s - Agent active", fmt.Sprintf(T(AppTooltip), appName)))
 		return
 	}
 	systray.SetIcon(normal)

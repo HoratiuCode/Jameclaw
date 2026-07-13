@@ -37,9 +37,18 @@ type sessionListItem struct {
 	ID           string `json:"id"`
 	Title        string `json:"title"`
 	Preview      string `json:"preview"`
+	AgentID      string `json:"agent_id,omitempty"`
+	Channel      string `json:"channel,omitempty"`
+	ChatType     string `json:"chat_type,omitempty"`
+	ChatID       string `json:"chat_id,omitempty"`
 	MessageCount int    `json:"message_count"`
 	Created      string `json:"created"`
 	Updated      string `json:"updated"`
+}
+
+type sessionRecord struct {
+	ID      string
+	Session sessionFile
 }
 
 type sessionMetaFile struct {
@@ -61,6 +70,7 @@ type sessionMetaFile struct {
 //	agent_main_jame_direct_jame_<session-uuid>.json
 const (
 	jameSessionPrefix          = "agent:main:jame:direct:jame:"
+	agentSessionPrefix         = "agent:"
 	sanitizedJameSessionPrefix = "agent_main_jame_direct_jame_"
 	maxSessionJSONLLineSize    = 10 * 1024 * 1024 // 10 MB
 	maxSessionTitleRunes       = 60
@@ -83,11 +93,72 @@ func extractJameSessionIDFromSanitizedKey(key string) (string, bool) {
 }
 
 func sanitizeSessionKey(key string) string {
-	return strings.ReplaceAll(key, ":", "_")
+	key = strings.ReplaceAll(key, ":", "_")
+	key = strings.ReplaceAll(key, "/", "_")
+	key = strings.ReplaceAll(key, "\\", "_")
+	return key
+}
+
+func sessionIDForKey(key string) string {
+	if sessionID, ok := extractJameSessionID(key); ok {
+		return sessionID
+	}
+	return key
+}
+
+func sessionKeyForID(id string) string {
+	if strings.HasPrefix(id, agentSessionPrefix) {
+		return id
+	}
+	return jameSessionPrefix + id
+}
+
+func sessionIdentityForKey(key string) (agentID, channel, chatType, chatID string) {
+	parts := strings.SplitN(strings.TrimSpace(key), ":", 3)
+	if len(parts) < 3 || parts[0] != "agent" {
+		return "", "", "", ""
+	}
+
+	agentID = parts[1]
+	rest := strings.Split(parts[2], ":")
+	if len(rest) == 1 {
+		return agentID, rest[0], "", ""
+	}
+
+	peerKindIndex := -1
+	for i, part := range rest {
+		switch part {
+		case "direct", "group", "channel":
+			peerKindIndex = i
+		}
+		if peerKindIndex >= 0 {
+			break
+		}
+	}
+	if peerKindIndex < 0 {
+		return agentID, rest[0], "", ""
+	}
+
+	channel = rest[0]
+	chatType = rest[peerKindIndex]
+	if peerKindIndex+1 < len(rest) {
+		chatParts := rest[peerKindIndex+1:]
+		if len(chatParts) >= 3 && chatParts[len(chatParts)-2] == "thread" {
+			threadID := chatParts[len(chatParts)-1]
+			chatID = strings.Join(chatParts[:len(chatParts)-2], ":") + "/thread/" + threadID
+		} else {
+			chatID = strings.Join(chatParts, ":")
+		}
+	}
+	return agentID, channel, chatType, chatID
 }
 
 func (h *Handler) readLegacySession(dir, sessionID string) (sessionFile, error) {
-	path := filepath.Join(dir, sanitizeSessionKey(jameSessionPrefix+sessionID)+".json")
+	return h.readLegacySessionByKey(dir, sessionKeyForID(sessionID))
+}
+
+func (h *Handler) readLegacySessionByKey(dir, sessionKey string) (sessionFile, error) {
+	path := filepath.Join(dir, sanitizeSessionKey(sessionKey)+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return sessionFile{}, err
@@ -155,7 +226,10 @@ func (h *Handler) readSessionMessages(path string, skip int) ([]providers.Messag
 }
 
 func (h *Handler) readJSONLSession(dir, sessionID string) (sessionFile, error) {
-	sessionKey := jameSessionPrefix + sessionID
+	return h.readJSONLSessionByKey(dir, sessionKeyForID(sessionID))
+}
+
+func (h *Handler) readJSONLSessionByKey(dir, sessionKey string) (sessionFile, error) {
 	base := filepath.Join(dir, sanitizeSessionKey(sessionKey))
 	jsonlPath := base + ".jsonl"
 	metaPath := base + ".meta.json"
@@ -221,11 +295,16 @@ func buildSessionListItem(sessionID string, sess sessionFile) sessionListItem {
 			validMessageCount++
 		}
 	}
+	agentID, channel, chatType, chatID := sessionIdentityForKey(sess.Key)
 
 	return sessionListItem{
 		ID:           sessionID,
 		Title:        title,
 		Preview:      preview,
+		AgentID:      agentID,
+		Channel:      channel,
+		ChatType:     chatType,
+		ChatID:       chatID,
 		MessageCount: validMessageCount,
 		Created:      sess.Created.Format(time.RFC3339),
 		Updated:      sess.Updated.Format(time.RFC3339),
@@ -311,17 +390,26 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listAllSessions() []sessionFile {
+	records := h.listAllSessionRecords()
+	sessions := make([]sessionFile, 0, len(records))
+	for _, record := range records {
+		sessions = append(sessions, record.Session)
+	}
+	return sessions
+}
+
+func (h *Handler) listAllSessionRecords() []sessionRecord {
 	dir, err := h.sessionsDir()
 	if err != nil {
-		return []sessionFile{}
+		return []sessionRecord{}
 	}
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return []sessionFile{}
+		return []sessionRecord{}
 	}
 
-	sessions := []sessionFile{}
+	records := []sessionRecord{}
 	seen := make(map[string]struct{})
 
 	for _, entry := range entries {
@@ -331,19 +419,28 @@ func (h *Handler) listAllSessions() []sessionFile {
 
 		name := entry.Name()
 		var (
-			sessionID string
-			sess      sessionFile
-			loadErr   error
-			ok        bool
+			sessionKey string
+			sess       sessionFile
+			loadErr    error
 		)
 
 		switch {
 		case strings.HasSuffix(name, ".jsonl"):
-			sessionID, ok = extractJameSessionIDFromSanitizedKey(strings.TrimSuffix(name, ".jsonl"))
-			if !ok {
+			base := strings.TrimSuffix(name, ".jsonl")
+			meta, metaErr := h.readSessionMeta(filepath.Join(dir, base+".meta.json"), "")
+			if metaErr != nil {
 				continue
 			}
-			sess, loadErr = h.readJSONLSession(dir, sessionID)
+			sessionKey = strings.TrimSpace(meta.Key)
+			if sessionKey == "" {
+				if sessionID, ok := extractJameSessionIDFromSanitizedKey(base); ok {
+					sessionKey = jameSessionPrefix + sessionID
+				}
+			}
+			if sessionKey == "" {
+				continue
+			}
+			sess, loadErr = h.readJSONLSessionByKey(dir, sessionKey)
 			if loadErr == nil && isEmptySession(sess) {
 				continue
 			}
@@ -352,11 +449,24 @@ func (h *Handler) listAllSessions() []sessionFile {
 		case filepath.Ext(name) == ".json":
 			base := strings.TrimSuffix(name, ".json")
 			if _, statErr := os.Stat(filepath.Join(dir, base+".jsonl")); statErr == nil {
+				if meta, metaErr := h.readSessionMeta(filepath.Join(dir, base+".meta.json"), ""); metaErr == nil {
+					jsonlKey := strings.TrimSpace(meta.Key)
+					if jsonlKey == "" {
+						if jsonlSessionID, found := extractJameSessionIDFromSanitizedKey(base); found {
+							jsonlKey = jameSessionPrefix + jsonlSessionID
+						}
+					}
+					if jsonlKey != "" {
+						if jsonlSess, jsonlErr := h.readJSONLSessionByKey(dir, jsonlKey); jsonlErr == nil &&
+							!isEmptySession(jsonlSess) {
+							continue
+						}
+					}
+				}
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, base+".jsonl")); statErr == nil {
 				if jsonlSessionID, found := extractJameSessionIDFromSanitizedKey(base); found {
-					if jsonlSess, jsonlErr := h.readJSONLSession(
-						dir,
-						jsonlSessionID,
-					); jsonlErr == nil &&
+					if jsonlSess, jsonlErr := h.readJSONLSession(dir, jsonlSessionID); jsonlErr == nil &&
 						!isEmptySession(jsonlSess) {
 						continue
 					}
@@ -372,11 +482,11 @@ func (h *Handler) listAllSessions() []sessionFile {
 			if isEmptySession(sess) {
 				continue
 			}
-			sessionID, ok = extractJameSessionID(sess.Key)
-			if !ok {
+			sessionKey = strings.TrimSpace(sess.Key)
+			if sessionKey == "" {
 				continue
 			}
-			if _, exists := seen[sessionID]; exists {
+			if _, exists := seen[sessionKey]; exists {
 				continue
 			}
 		default:
@@ -386,30 +496,35 @@ func (h *Handler) listAllSessions() []sessionFile {
 		if loadErr != nil {
 			continue
 		}
-		if _, exists := seen[sessionID]; exists {
+		if sessionKey == "" {
+			sessionKey = sess.Key
+		}
+		if sessionKey == "" {
+			continue
+		}
+		if _, exists := seen[sessionKey]; exists {
 			continue
 		}
 
-		seen[sessionID] = struct{}{}
-		sessions = append(sessions, sess)
+		seen[sessionKey] = struct{}{}
+		records = append(records, sessionRecord{
+			ID:      sessionIDForKey(sessionKey),
+			Session: sess,
+		})
 	}
 
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].Updated.After(sessions[j].Updated)
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].Session.Updated.After(records[j].Session.Updated)
 	})
 
-	return sessions
+	return records
 }
 
 func (h *Handler) listAllSessionItems() []sessionListItem {
-	sessions := h.listAllSessions()
-	items := make([]sessionListItem, 0, len(sessions))
-	for _, sess := range sessions {
-		sessionID, ok := extractJameSessionID(sess.Key)
-		if !ok {
-			continue
-		}
-		items = append(items, buildSessionListItem(sessionID, sess))
+	records := h.listAllSessionRecords()
+	items := make([]sessionListItem, 0, len(records))
+	for _, record := range records {
+		items = append(items, buildSessionListItem(record.ID, record.Session))
 	}
 	return items
 }
@@ -430,13 +545,14 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.readJSONLSession(dir, sessionID)
+	sessionKey := sessionKeyForID(sessionID)
+	sess, err := h.readJSONLSessionByKey(dir, sessionKey)
 	if err == nil && isEmptySession(sess) {
 		err = os.ErrNotExist
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			sess, err = h.readLegacySession(dir, sessionID)
+			sess, err = h.readLegacySessionByKey(dir, sessionKey)
 			if err == nil && isEmptySession(sess) {
 				err = os.ErrNotExist
 			}
@@ -494,7 +610,8 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := filepath.Join(dir, sanitizeSessionKey(jameSessionPrefix+sessionID))
+	sessionKey := sessionKeyForID(sessionID)
+	base := filepath.Join(dir, sanitizeSessionKey(sessionKey))
 	jsonlPath := base + ".jsonl"
 	metaPath := base + ".meta.json"
 	legacyPath := base + ".json"

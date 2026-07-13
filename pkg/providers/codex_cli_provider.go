@@ -10,8 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 )
+
+const codexCliPathEnv = "JAMECLAW_CODEX_CLI_PATH"
 
 // CodexCliProvider implements LLMProvider by wrapping the codex CLI as a subprocess.
 type CodexCliProvider struct {
@@ -22,7 +26,7 @@ type CodexCliProvider struct {
 // NewCodexCliProvider creates a new Codex CLI provider.
 func NewCodexCliProvider(workspace string) *CodexCliProvider {
 	return &CodexCliProvider{
-		command:   "codex",
+		command:   resolveCodexCLICommand(),
 		workspace: workspace,
 	}
 }
@@ -62,6 +66,7 @@ func (p *CodexCliProvider) Chat(
 	args = append(args, "-") // read prompt from stdin
 
 	cmd := exec.CommandContext(ctx, p.command, args...)
+	cmd.Env = codexCLIEnv(p.command)
 	cmd.Stdin = bytes.NewReader([]byte(prompt))
 
 	var stdout, stderr bytes.Buffer
@@ -91,6 +96,97 @@ func (p *CodexCliProvider) Chat(
 	}
 
 	return p.parseJSONLEvents(stdout.String())
+}
+
+func resolveCodexCLICommand() string {
+	if custom := strings.TrimSpace(os.Getenv(codexCliPathEnv)); custom != "" {
+		if isExecutableFile(custom) {
+			return custom
+		}
+	}
+
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates := nvmCodexCandidates(filepath.Join(home, ".nvm", "versions", "node"))
+		for _, candidate := range candidates {
+			if isExecutableFile(candidate) {
+				return candidate
+			}
+		}
+	}
+
+	if path, err := exec.LookPath("codex"); err == nil && path != "" {
+		return path
+	}
+	return "codex"
+}
+
+func nvmCodexCandidates(nodeVersionsDir string) []string {
+	matches, err := filepath.Glob(filepath.Join(nodeVersionsDir, "v*", "bin", "codex"))
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return compareNodeVersion(filepath.Base(filepath.Dir(filepath.Dir(matches[i]))), filepath.Base(filepath.Dir(filepath.Dir(matches[j])))) > 0
+	})
+	return matches
+}
+
+func compareNodeVersion(a, b string) int {
+	aa := parseNodeVersion(a)
+	bb := parseNodeVersion(b)
+	for i := range aa {
+		if aa[i] > bb[i] {
+			return 1
+		}
+		if aa[i] < bb[i] {
+			return -1
+		}
+	}
+	return strings.Compare(a, b)
+}
+
+func parseNodeVersion(version string) [3]int {
+	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
+	parts := strings.Split(version, ".")
+	var parsed [3]int
+	for i := 0; i < len(parsed) && i < len(parts); i++ {
+		n, _ := strconv.Atoi(parts[i])
+		parsed[i] = n
+	}
+	return parsed
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
+}
+
+func codexCLIEnv(command string) []string {
+	env := os.Environ()
+	if command == "" || !filepath.IsAbs(command) {
+		return env
+	}
+	binDir := filepath.Dir(command)
+	if binDir == "." || binDir == "" {
+		return env
+	}
+	pathValue := os.Getenv("PATH")
+	nextPath := binDir
+	if pathValue != "" {
+		nextPath += string(os.PathListSeparator) + pathValue
+	}
+	replaced := false
+	for i, item := range env {
+		if strings.HasPrefix(item, "PATH=") {
+			env[i] = "PATH=" + nextPath
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		env = append(env, "PATH="+nextPath)
+	}
+	return env
 }
 
 type stagedCodexMedia struct {

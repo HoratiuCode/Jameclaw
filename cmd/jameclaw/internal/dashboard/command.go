@@ -60,7 +60,7 @@ func runDashboard(ctx context.Context, opts dashboardOptions) error {
 
 	if dashboardReachable(ctx, target.BaseURL) {
 		if !dashboardFresh(ctx, target.BaseURL) {
-			return fmt.Errorf("Web Console is already running on %s, but it appears to be an old version. Stop the old jameclaw-web process and run `jameclaw dashboard` again", target.BaseURL)
+			fmt.Fprintf(dashboardOutput, "Warning: Web Console is running on %s, but the compatibility check did not pass. Continuing with the dashboard URL.\n", target.BaseURL)
 		}
 	} else {
 		fmt.Fprintf(dashboardOutput, "Web Console is not running; starting jameclaw-web on %s...\n", target.BaseURL)
@@ -69,7 +69,7 @@ func runDashboard(ctx context.Context, opts dashboardOptions) error {
 		} else if !dashboardWaitFor(ctx, target.BaseURL, dashboardWait) {
 			fmt.Fprintf(dashboardOutput, "Web Console started but is not responding yet. Use the URL below once it is ready.\n")
 		} else if !dashboardFresh(ctx, target.BaseURL) {
-			return fmt.Errorf("Web Console started on %s, but it does not expose the current automation blueprint API", target.BaseURL)
+			fmt.Fprintf(dashboardOutput, "Warning: Web Console started on %s, but the compatibility check did not pass yet. Use the URL below once it is ready.\n", target.BaseURL)
 		}
 	}
 
@@ -164,11 +164,15 @@ func fresh(ctx context.Context, rawURL string) bool {
 	if err != nil {
 		return false
 	}
+	token := strings.TrimSpace(readLauncherAccessToken())
 	reqCtx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return false
+	}
+	if token != "" {
+		req.AddCookie(&http.Cookie{Name: "jameclaw_launcher_session", Value: token})
 	}
 	resp, err := dashboardHTTPClient.Do(req)
 	if err != nil {

@@ -319,6 +319,9 @@ func setupAndStartServices(
 
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
+	runningServices.HealthServer.SetAgentActiveFunc(func() bool {
+		return agentLoop.GetActiveTurn() != nil
+	})
 	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, agentLoop, msgBus.PublishOutbound)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
 
@@ -515,6 +518,9 @@ func restartServices(
 	if runningServices.HealthServer == nil {
 		runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	}
+	runningServices.HealthServer.SetAgentActiveFunc(func() bool {
+		return al.GetActiveTurn() != nil
+	})
 	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, al, msgBus.PublishOutbound)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
 

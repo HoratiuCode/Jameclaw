@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
 
@@ -96,4 +98,18 @@ func (h *Handler) Shutdown() {
 // to the Jame gateway through the launcher WebSocket proxy.
 func (h *Handler) WebActivityActive() bool {
 	return h.activeJameWebSockets.Load() > 0
+}
+
+// AgentActivityActive reports whether either the Web Console is connected or
+// the gateway is currently running an agent turn from any channel.
+func (h *Handler) AgentActivityActive() bool {
+	if h.WebActivityActive() {
+		return true
+	}
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return false
+	}
+	healthResp, statusCode, err := h.getGatewayHealth(cfg, 500*time.Millisecond)
+	return err == nil && statusCode == http.StatusOK && healthResp.AgentActive
 }

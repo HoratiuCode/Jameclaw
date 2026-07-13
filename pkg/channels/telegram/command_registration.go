@@ -46,7 +46,7 @@ func (c *TelegramChannel) RegisterCommands(ctx context.Context, defs []commands.
 	if err != nil {
 		// If we can't read current commands, fall through to set them.
 		logger.WarnCF("telegram", "Failed to get current commands, will set unconditionally",
-			map[string]any{"error": err.Error()})
+			map[string]any{"error": c.redactTelegramError(err)})
 	} else if slices.Equal(current, botCommands) {
 		logger.DebugCF("telegram", "Bot commands are up to date", nil)
 		return nil
@@ -93,7 +93,7 @@ func (c *TelegramChannel) startCommandRegistration(ctx context.Context, defs []c
 
 			delay := commandRegistrationDelay(attempt)
 			logger.WarnCF("telegram", "Telegram command registration failed; will retry", map[string]any{
-				"error":       err.Error(),
+				"error":       c.redactTelegramError(err),
 				"retry_after": delay.String(),
 			})
 			attempt++

@@ -27,6 +27,7 @@ type ContextBuilder struct {
 	memory             *MemoryStore
 	toolDiscoveryBM25  bool
 	toolDiscoveryRegex bool
+	planContext        func(channel, chatID string) string
 	agentName          string
 	human              *config.HumanConfig
 
@@ -58,6 +59,11 @@ func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuil
 func (cb *ContextBuilder) WithHumanConfig(agentName string, human *config.HumanConfig) *ContextBuilder {
 	cb.agentName = strings.TrimSpace(agentName)
 	cb.human = human
+	return cb
+}
+
+func (cb *ContextBuilder) WithPlanContext(fn func(channel, chatID string) string) *ContextBuilder {
+	cb.planContext = fn
 	return cb
 }
 
@@ -142,6 +148,8 @@ Your workspace is at: %s
 3. **Memory** - When interacting with me if something seems memorable, update %s/memory/MEMORY.md or the relevant user profile file.
 
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.
+
+5. **Long-running tasks** - For large, multi-step, or longer-running work, use the todo tool to create and maintain a concrete plan. Keep exactly one item in_progress, update the plan after meaningful progress, and read the plan before resuming older work. Use spawn for independent background sub-tasks when useful.
 
 %s`,
 		emoji, version, agentName, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
@@ -640,6 +648,13 @@ func (cb *ContextBuilder) BuildMessages(
 	if memoryText := cb.buildRelevantMemoryContext(currentMessage); memoryText != "" {
 		stringParts = append(stringParts, memoryText)
 		contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: memoryText})
+	}
+
+	if cb.planContext != nil {
+		if planText := cb.planContext(channel, chatID); planText != "" {
+			stringParts = append(stringParts, planText)
+			contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: planText})
+		}
 	}
 
 	if summary != "" {

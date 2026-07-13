@@ -18,6 +18,7 @@ type Server struct {
 	checks     map[string]Check
 	startTime  time.Time
 	reloadFunc func() error
+	activeFunc func() bool
 }
 
 type Check struct {
@@ -28,10 +29,11 @@ type Check struct {
 }
 
 type StatusResponse struct {
-	Status string           `json:"status"`
-	Uptime string           `json:"uptime"`
-	Checks map[string]Check `json:"checks,omitempty"`
-	Pid    int              `json:"pid"`
+	Status      string           `json:"status"`
+	Uptime      string           `json:"uptime"`
+	Checks      map[string]Check `json:"checks,omitempty"`
+	Pid         int              `json:"pid"`
+	AgentActive bool             `json:"agent_active,omitempty"`
 }
 
 func NewServer(host string, port int) *Server {
@@ -115,6 +117,12 @@ func (s *Server) SetReloadFunc(fn func() error) {
 	s.reloadFunc = fn
 }
 
+func (s *Server) SetAgentActiveFunc(fn func() bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeFunc = fn
+}
+
 func (s *Server) reloadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Content-Type", "application/json")
@@ -150,11 +158,16 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
+	s.mu.RLock()
+	activeFunc := s.activeFunc
+	s.mu.RUnlock()
+
 	uptime := time.Since(s.startTime)
 	resp := StatusResponse{
-		Status: "ok",
-		Uptime: uptime.String(),
-		Pid:    os.Getpid(),
+		Status:      "ok",
+		Uptime:      uptime.String(),
+		Pid:         os.Getpid(),
+		AgentActive: activeFunc != nil && activeFunc(),
 	}
 
 	json.NewEncoder(w).Encode(resp)

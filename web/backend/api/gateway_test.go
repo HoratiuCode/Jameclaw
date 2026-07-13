@@ -46,6 +46,15 @@ func mockGatewayHealthResponse(statusCode, pid int) *http.Response {
 	}
 }
 
+func mockGatewayHealthResponseWithActivity(statusCode, pid int, active bool) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Body: io.NopCloser(strings.NewReader(
+			`{"status":"ok","uptime":"1s","pid":` + strconv.Itoa(pid) + `,"agent_active":` + strconv.FormatBool(active) + `}`,
+		)),
+	}
+}
+
 func startIgnoringTermProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
 
@@ -381,6 +390,26 @@ func TestGatewayStatusIncludesStartConditionWhenNotReady(t *testing.T) {
 	}
 	if _, ok := body["gateway_start_reason"].(string); !ok {
 		t.Fatalf("gateway_start_reason missing or not string: %#v", body["gateway_start_reason"])
+	}
+}
+
+func TestAgentActivityActiveIncludesGatewayAgentTurns(t *testing.T) {
+	originalHealthGet := gatewayHealthGet
+	t.Cleanup(func() { gatewayHealthGet = originalHealthGet })
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := config.DefaultConfig()
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	gatewayHealthGet = func(url string, timeout time.Duration) (*http.Response, error) {
+		return mockGatewayHealthResponseWithActivity(http.StatusOK, 1234, true), nil
+	}
+
+	h := NewHandler(configPath)
+	if !h.AgentActivityActive() {
+		t.Fatal("AgentActivityActive() = false, want true when gateway has active agent turn")
 	}
 }
 

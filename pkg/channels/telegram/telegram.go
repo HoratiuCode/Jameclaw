@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -55,6 +57,7 @@ type TelegramChannel struct {
 
 	registerFunc     func(context.Context, []commands.Definition) error
 	commandRegCancel context.CancelFunc
+	lastMessageAt    atomic.Int64
 }
 
 func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChannel, error) {
@@ -67,6 +70,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChann
 			return nil, fmt.Errorf("invalid proxy URL %q: %w", telegramCfg.Proxy, parseErr)
 		}
 		opts = append(opts, telego.WithHTTPClient(&http.Client{
+			Timeout: 45 * time.Second,
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(proxyURL),
 			},
@@ -74,9 +78,14 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChann
 	} else if os.Getenv("HTTP_PROXY") != "" || os.Getenv("HTTPS_PROXY") != "" {
 		// Use environment proxy if configured
 		opts = append(opts, telego.WithHTTPClient(&http.Client{
+			Timeout: 45 * time.Second,
 			Transport: &http.Transport{
 				Proxy: http.ProxyFromEnvironment,
 			},
+		}))
+	} else {
+		opts = append(opts, telego.WithHTTPClient(&http.Client{
+			Timeout: 45 * time.Second,
 		}))
 	}
 
@@ -133,16 +142,29 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	}, th.AnyMessage())
 
 	c.SetRunning(true)
-	logger.InfoCF("telegram", "Telegram bot connected", map[string]any{
-		"username": c.bot.Username(),
-	})
+	logger.InfoC("telegram", "Telegram bot polling started")
+
+	go func() {
+		meCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+		defer cancel()
+		me, err := c.bot.GetMe(meCtx)
+		if err != nil {
+			logger.WarnCF("telegram", "Telegram getMe failed after startup", map[string]any{
+				"error": c.redactTelegramError(err),
+			})
+			return
+		}
+		logger.InfoCF("telegram", "Telegram bot connected", map[string]any{
+			"username": me.Username,
+		})
+	}()
 
 	c.startCommandRegistration(c.ctx, commands.BuiltinDefinitions())
 
 	go func() {
 		if err = bh.Start(); err != nil {
 			logger.ErrorCF("telegram", "Bot handler failed", map[string]any{
-				"error": err.Error(),
+				"error": c.redactTelegramError(err),
 			})
 		}
 	}()
@@ -168,6 +190,51 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (c *TelegramChannel) HealthPath() string {
+	return "/health/telegram"
+}
+
+func (c *TelegramChannel) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	status := "ok"
+	var username string
+	var botAPIError string
+	if me, err := c.bot.GetMe(ctx); err != nil {
+		status = "degraded"
+		botAPIError = c.redactTelegramError(err)
+	} else if me != nil {
+		username = me.Username
+	}
+
+	resp := map[string]any{
+		"status":     status,
+		"running":    c.IsRunning(),
+		"bot_api_ok": botAPIError == "",
+	}
+	if username != "" {
+		resp["username"] = username
+	}
+	if botAPIError != "" {
+		resp["error"] = botAPIError
+	}
+	if ts := c.lastMessageAt.Load(); ts > 0 {
+		resp["last_message_at"] = time.Unix(ts, 0).Format(time.RFC3339)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if status != "ok" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
@@ -295,12 +362,18 @@ func (c *TelegramChannel) sendChunk(
 	}
 
 	if _, err := c.bot.SendMessage(ctx, tgMsg); err != nil {
-		logParseFailed(err, params.useMarkdownV2)
+		formattedErr := err
+		c.logParseFailed(formattedErr, params.useMarkdownV2)
 
 		tgMsg.Text = params.mdFallback
 		tgMsg.ParseMode = ""
 		if _, err = c.bot.SendMessage(ctx, tgMsg); err != nil {
-			return fmt.Errorf("telegram send: %w", channels.ErrTemporary)
+			return fmt.Errorf(
+				"telegram send failed after formatted and plain-text attempts: formatted=%s plain=%s: %w",
+				c.redactTelegramError(formattedErr),
+				c.redactTelegramError(err),
+				channels.ErrTemporary,
+			)
 		}
 	}
 
@@ -372,11 +445,14 @@ func (c *TelegramChannel) EditMessage(ctx context.Context, chatID string, messag
 	}
 	_, err = c.bot.EditMessageText(ctx, editMsg)
 	if err != nil {
-		logParseFailed(err, useMarkdownV2)
+		c.logParseFailed(err, useMarkdownV2)
 		_, err = c.bot.EditMessageText(ctx, tu.EditMessageText(tu.ID(cid), mid, content))
 	}
 
-	return err
+	if err != nil {
+		return fmt.Errorf("telegram edit message: %s", c.redactTelegramError(err))
+	}
+	return nil
 }
 
 // DeleteMessage implements channels.MessageDeleter.
@@ -529,7 +605,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 		if err != nil {
 			logger.ErrorCF("telegram", "Failed to send media", map[string]any{
 				"type":  part.Type,
-				"error": err.Error(),
+				"error": c.redactTelegramError(err),
 			})
 			return fmt.Errorf("telegram send media: %w", channels.ErrTemporary)
 		}
@@ -632,6 +708,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	if message == nil {
 		return fmt.Errorf("message is nil")
 	}
+	c.lastMessageAt.Store(time.Now().Unix())
 
 	user := message.From
 	if user == nil {
@@ -811,7 +888,7 @@ func (c *TelegramChannel) downloadPhoto(ctx context.Context, fileID string) stri
 	file, err := c.bot.GetFile(ctx, &telego.GetFileParams{FileID: fileID})
 	if err != nil {
 		logger.ErrorCF("telegram", "Failed to get photo file", map[string]any{
-			"error": err.Error(),
+			"error": c.redactTelegramError(err),
 		})
 		return ""
 	}
@@ -825,7 +902,7 @@ func (c *TelegramChannel) downloadFileWithInfo(file *telego.File, ext string) st
 	}
 
 	url := c.bot.FileDownloadURL(file.FilePath)
-	logger.DebugCF("telegram", "File URL", map[string]any{"url": url})
+	logger.DebugCF("telegram", "File URL", map[string]any{"url": c.redactTelegramString(url)})
 
 	// Use FilePath as filename for better identification
 	filename := file.FilePath + ext
@@ -838,7 +915,7 @@ func (c *TelegramChannel) downloadFile(ctx context.Context, fileID, ext string) 
 	file, err := c.bot.GetFile(ctx, &telego.GetFileParams{FileID: fileID})
 	if err != nil {
 		logger.ErrorCF("telegram", "Failed to get file", map[string]any{
-			"error": err.Error(),
+			"error": c.redactTelegramError(err),
 		})
 		return ""
 	}
@@ -873,7 +950,7 @@ func parseTelegramChatID(chatID string) (int64, int, error) {
 	return cid, tid, nil
 }
 
-func logParseFailed(err error, useMarkdownV2 bool) {
+func (c *TelegramChannel) logParseFailed(err error, useMarkdownV2 bool) {
 	parsingName := "HTML"
 	if useMarkdownV2 {
 		parsingName = "MarkdownV2"
@@ -882,7 +959,7 @@ func logParseFailed(err error, useMarkdownV2 bool) {
 	logger.ErrorCF("telegram",
 		fmt.Sprintf("%s parse failed, falling back to plain text", parsingName),
 		map[string]any{
-			"error": err.Error(),
+			"error": c.redactTelegramError(err),
 		},
 	)
 }
@@ -990,6 +1067,7 @@ func (c *TelegramChannel) BeginStream(ctx context.Context, chatID string) (chann
 	streamCfg := c.config.Channels.Telegram.Streaming
 	return &telegramStreamer{
 		bot:              c.bot,
+		token:            c.config.Channels.Telegram.Token(),
 		chatID:           cid,
 		draftID:          cryptoRandInt(),
 		throttleInterval: time.Duration(streamCfg.ThrottleSeconds) * time.Second,
@@ -1002,6 +1080,7 @@ func (c *TelegramChannel) BeginStream(ctx context.Context, chatID string) (chann
 // becomes a no-op, while Finalize still delivers the final message.
 type telegramStreamer struct {
 	bot              *telego.Bot
+	token            string
 	chatID           int64
 	draftID          int
 	throttleInterval time.Duration
@@ -1038,7 +1117,7 @@ func (s *telegramStreamer) Update(ctx context.Context, content string) error {
 	if err != nil {
 		// First error → degrade silently (e.g. no forum mode)
 		logger.WarnCF("telegram", "sendMessageDraft failed, disabling streaming", map[string]any{
-			"error": err.Error(),
+			"error": s.redactTelegramError(err),
 		})
 		s.failed = true
 		return nil // don't propagate — Finalize will still deliver
@@ -1060,10 +1139,10 @@ func (s *telegramStreamer) Finalize(ctx context.Context, content string) error {
 		if _, err = s.bot.SendMessage(ctx, tgMsg); err != nil {
 			logger.ErrorCF("telegram", "Finalize failed after HTML and plain-text attempts", map[string]any{
 				"chat_id": s.chatID,
-				"error":   err.Error(),
+				"error":   s.redactTelegramError(err),
 				"len":     len(content),
 			})
-			return fmt.Errorf("telegram finalize: %w", err)
+			return fmt.Errorf("telegram finalize: %s: %w", s.redactTelegramError(err), channels.ErrTemporary)
 		}
 	}
 	return nil
@@ -1071,6 +1150,39 @@ func (s *telegramStreamer) Finalize(ctx context.Context, content string) error {
 
 func (s *telegramStreamer) Cancel(ctx context.Context) {
 	// Draft auto-expires on Telegram's side; nothing to clean up.
+}
+
+func (c *TelegramChannel) redactTelegramError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return c.redactTelegramString(err.Error())
+}
+
+func (c *TelegramChannel) redactTelegramString(value string) string {
+	token := ""
+	if c != nil && c.config != nil {
+		token = c.config.Channels.Telegram.Token()
+	}
+	return redactTelegramErrorString(value, token)
+}
+
+func (s *telegramStreamer) redactTelegramError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return redactTelegramErrorString(err.Error(), s.token)
+}
+
+func redactTelegramErrorString(value, token string) string {
+	value = strings.TrimSpace(value)
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return value
+	}
+	value = strings.ReplaceAll(value, "bot"+token, "bot[telegram-token]")
+	value = strings.ReplaceAll(value, token, "[telegram-token]")
+	return value
 }
 
 // cryptoRandInt returns a non-zero random int using crypto/rand.
