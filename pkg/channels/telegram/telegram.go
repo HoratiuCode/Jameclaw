@@ -6,9 +6,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -439,7 +441,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 	}
 
 	for _, part := range msg.Parts {
-		localPath, err := store.Resolve(part.Ref)
+		localPath, meta, err := store.ResolveWithMeta(part.Ref)
 		if err != nil {
 			logger.ErrorCF("telegram", "Failed to resolve media ref", map[string]any{
 				"ref":   part.Ref,
@@ -447,6 +449,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 			})
 			continue
 		}
+		part = enrichTelegramMediaPart(part, meta, localPath)
 
 		file, err := os.Open(localPath)
 		if err != nil {
@@ -459,23 +462,25 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 
 		switch part.Type {
 		case "image":
+			photo := telego.InputFile{File: tu.NameReader(file, part.Filename)}
 			params := &telego.SendPhotoParams{
 				ChatID:          tu.ID(chatID),
 				MessageThreadID: threadID,
-				Photo:           telego.InputFile{File: file},
+				Photo:           photo,
 				Caption:         part.Caption,
 			}
 			_, err = c.bot.SendPhoto(ctx, params)
-			if err != nil && strings.Contains(err.Error(), "PHOTO_INVALID_DIMENSIONS") {
+			if err != nil && shouldFallbackPhotoToDocument(err) {
 				if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
 					file.Close()
 					return fmt.Errorf("telegram rewind media after photo failure: %w", channels.ErrTemporary)
 				}
 
+				document := telego.InputFile{File: tu.NameReader(file, part.Filename)}
 				docParams := &telego.SendDocumentParams{
 					ChatID:          tu.ID(chatID),
 					MessageThreadID: threadID,
-					Document:        telego.InputFile{File: file},
+					Document:        document,
 					Caption:         part.Caption,
 				}
 				_, err = c.bot.SendDocument(ctx, docParams)
@@ -488,7 +493,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 				vparams := &telego.SendVoiceParams{
 					ChatID:          tu.ID(chatID),
 					MessageThreadID: threadID,
-					Voice:           telego.InputFile{File: file},
+					Voice:           telego.InputFile{File: tu.NameReader(file, part.Filename)},
 					Caption:         part.Caption,
 				}
 				_, err = c.bot.SendVoice(ctx, vparams)
@@ -496,7 +501,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 				params := &telego.SendAudioParams{
 					ChatID:          tu.ID(chatID),
 					MessageThreadID: threadID,
-					Audio:           telego.InputFile{File: file},
+					Audio:           telego.InputFile{File: tu.NameReader(file, part.Filename)},
 					Caption:         part.Caption,
 				}
 				_, err = c.bot.SendAudio(ctx, params)
@@ -505,7 +510,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 			params := &telego.SendVideoParams{
 				ChatID:          tu.ID(chatID),
 				MessageThreadID: threadID,
-				Video:           telego.InputFile{File: file},
+				Video:           telego.InputFile{File: tu.NameReader(file, part.Filename)},
 				Caption:         part.Caption,
 			}
 			_, err = c.bot.SendVideo(ctx, params)
@@ -513,7 +518,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 			params := &telego.SendDocumentParams{
 				ChatID:          tu.ID(chatID),
 				MessageThreadID: threadID,
-				Document:        telego.InputFile{File: file},
+				Document:        telego.InputFile{File: tu.NameReader(file, part.Filename)},
 				Caption:         part.Caption,
 			}
 			_, err = c.bot.SendDocument(ctx, params)
@@ -531,6 +536,96 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 	}
 
 	return nil
+}
+
+func enrichTelegramMediaPart(part bus.MediaPart, meta media.MediaMeta, localPath string) bus.MediaPart {
+	if part.ContentType == "" {
+		part.ContentType = meta.ContentType
+	}
+	if part.Filename == "" {
+		part.Filename = meta.Filename
+	}
+	part.Filename = telegramMediaFilename(part.Filename, part.ContentType, localPath)
+	if part.Type == "" {
+		part.Type = inferTelegramMediaType(part.Filename, part.ContentType)
+	}
+	return part
+}
+
+func telegramMediaFilename(filename, contentType, localPath string) string {
+	candidates := []string{filename, filepath.Base(localPath)}
+	for _, candidate := range candidates {
+		name := strings.TrimSpace(utils.SanitizeFilename(candidate))
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			continue
+		}
+		if filepath.Ext(name) == "" {
+			name += preferredTelegramMediaExt(contentType)
+		}
+		return name
+	}
+	return "file" + preferredTelegramMediaExt(contentType)
+}
+
+func preferredTelegramMediaExt(contentType string) string {
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	switch ct {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "audio/ogg", "application/ogg", "application/x-ogg":
+		return ".ogg"
+	case "audio/mpeg":
+		return ".mp3"
+	case "video/mp4":
+		return ".mp4"
+	}
+	if exts, err := mime.ExtensionsByType(ct); err == nil && len(exts) > 0 {
+		return exts[0]
+	}
+	return ""
+}
+
+func inferTelegramMediaType(filename, contentType string) string {
+	ct := strings.ToLower(contentType)
+	fn := strings.ToLower(filename)
+
+	if strings.HasPrefix(ct, "image/") {
+		return "image"
+	}
+	if strings.HasPrefix(ct, "audio/") || ct == "application/ogg" || ct == "application/x-ogg" {
+		return "audio"
+	}
+	if strings.HasPrefix(ct, "video/") {
+		return "video"
+	}
+
+	switch filepath.Ext(fn) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg":
+		return "image"
+	case ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".aac", ".wma", ".opus":
+		return "audio"
+	case ".mp4", ".avi", ".mov", ".webm", ".mkv":
+		return "video"
+	}
+
+	return "file"
+}
+
+func shouldFallbackPhotoToDocument(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "PHOTO_INVALID_DIMENSIONS") ||
+		strings.Contains(msg, "PHOTO_INVALID") ||
+		strings.Contains(msg, "IMAGE_PROCESS_FAILED") ||
+		strings.Contains(msg, "WRONG_FILE_IDENTIFIER")
 }
 
 func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Message) error {

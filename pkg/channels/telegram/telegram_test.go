@@ -45,6 +45,7 @@ type stubConstructor struct{}
 type multipartCall struct {
 	Parameters map[string]string
 	FileSizes  map[string]int
+	FileNames  map[string]string
 }
 
 func (s *stubConstructor) JSONRequest(parameters any) (*ta.RequestData, error) {
@@ -77,6 +78,7 @@ func (s *multipartRecordingConstructor) MultipartRequest(
 	call := multipartCall{
 		Parameters: make(map[string]string, len(parameters)),
 		FileSizes:  make(map[string]int, len(files)),
+		FileNames:  make(map[string]string, len(files)),
 	}
 	for k, v := range parameters {
 		call.Parameters[k] = v
@@ -85,6 +87,7 @@ func (s *multipartRecordingConstructor) MultipartRequest(
 		if file == nil {
 			continue
 		}
+		call.FileNames[field] = file.Name()
 		data, err := io.ReadAll(file)
 		if err != nil {
 			return nil, err
@@ -184,7 +187,59 @@ func TestSendMedia_ImageFallbacksToDocumentOnInvalidDimensions(t *testing.T) {
 	require.Len(t, constructor.calls, 2)
 	assert.Equal(t, len(content), constructor.calls[0].FileSizes["photo"])
 	assert.Equal(t, len(content), constructor.calls[1].FileSizes["document"])
+	assert.Equal(t, "woodstock-en-10s.png", constructor.calls[0].FileNames["photo"])
+	assert.Equal(t, "woodstock-en-10s.png", constructor.calls[1].FileNames["document"])
 	assert.Equal(t, "caption", constructor.calls[1].Parameters["caption"])
+}
+
+func TestSendMedia_ImageFallbacksToDocumentOnTelegramPhotoProcessingError(t *testing.T) {
+	constructor := &multipartRecordingConstructor{}
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			switch {
+			case strings.Contains(url, "sendPhoto"):
+				return nil, errors.New(`api: 400 "Bad Request: IMAGE_PROCESS_FAILED"`)
+			case strings.Contains(url, "sendDocument"):
+				return successResponse(t), nil
+			default:
+				t.Fatalf("unexpected API call: %s", url)
+				return nil, nil
+			}
+		},
+	}
+	ch := newTestChannelWithConstructor(t, caller, constructor)
+
+	store := media.NewFileMediaStore()
+	ch.SetMediaStore(store)
+
+	tmpDir := t.TempDir()
+	localPath := filepath.Join(tmpDir, "internal-upload")
+	content := []byte("fake-png-content")
+	require.NoError(t, os.WriteFile(localPath, content, 0o644))
+
+	ref, err := store.Store(
+		localPath,
+		media.MediaMeta{Filename: "generated-image", ContentType: "image/png"},
+		"scope-1",
+	)
+	require.NoError(t, err)
+
+	err = ch.SendMedia(context.Background(), bus.OutboundMediaMessage{
+		ChatID: "12345",
+		Parts: []bus.MediaPart{{
+			Ref: ref,
+		}},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, caller.calls, 2)
+	assert.Contains(t, caller.calls[0].URL, "sendPhoto")
+	assert.Contains(t, caller.calls[1].URL, "sendDocument")
+	require.Len(t, constructor.calls, 2)
+	assert.Equal(t, "generated-image.png", constructor.calls[0].FileNames["photo"])
+	assert.Equal(t, "generated-image.png", constructor.calls[1].FileNames["document"])
+	assert.Equal(t, len(content), constructor.calls[0].FileSizes["photo"])
+	assert.Equal(t, len(content), constructor.calls[1].FileSizes["document"])
 }
 
 func TestSendMedia_ImageNonDimensionErrorDoesNotFallback(t *testing.T) {
@@ -219,6 +274,7 @@ func TestSendMedia_ImageNonDimensionErrorDoesNotFallback(t *testing.T) {
 	require.Len(t, caller.calls, 1)
 	assert.Contains(t, caller.calls[0].URL, "sendPhoto")
 	require.Len(t, constructor.calls, 1)
+	assert.Equal(t, "image.png", constructor.calls[0].FileNames["photo"])
 	assert.NotContains(t, caller.calls[0].URL, "sendDocument")
 }
 
