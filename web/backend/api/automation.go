@@ -16,6 +16,19 @@ type automationResponse struct {
 	Items []automationItem `json:"items"`
 }
 
+type automationBlueprintResponse struct {
+	Blueprints []cron.AutomationBlueprint `json:"blueprints"`
+}
+
+type automationBlueprintInstantiateRequest struct {
+	Blueprint string            `json:"blueprint"`
+	Values    map[string]string `json:"values"`
+}
+
+type automationBlueprintInstantiateResponse struct {
+	Item automationItem `json:"item"`
+}
+
 type automationItem struct {
 	ID               string `json:"id"`
 	Name             string `json:"name"`
@@ -36,6 +49,8 @@ type automationItem struct {
 
 func (h *Handler) registerAutomationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/automation", h.handleAutomationList)
+	mux.HandleFunc("GET /api/automation/blueprints", h.handleAutomationBlueprintList)
+	mux.HandleFunc("POST /api/automation/blueprints/instantiate", h.handleAutomationBlueprintInstantiate)
 }
 
 func (h *Handler) handleAutomationList(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +69,44 @@ func (h *Handler) handleAutomationList(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(automationResponse{Items: items})
+}
+
+func (h *Handler) handleAutomationBlueprintList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(automationBlueprintResponse{Blueprints: cron.AutomationBlueprints})
+}
+
+func (h *Handler) handleAutomationBlueprintInstantiate(w http.ResponseWriter, r *http.Request) {
+	var req automationBlueprintInstantiateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid blueprint request", http.StatusBadRequest)
+		return
+	}
+
+	spec, err := cron.FillAutomationBlueprint(req.Blueprint, req.Values)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	if spec.Deliver {
+		http.Error(w, "origin delivery can only be used from an active chat; choose local in the dashboard", http.StatusUnprocessableEntity)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+	service := cron.NewCronService(filepath.Join(cfg.WorkspacePath(), "cron", "jobs.json"), nil)
+	job, err := service.AddJob(spec.Name, spec.Schedule, spec.Prompt, false, false, "web", "dashboard")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to create automation: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(automationBlueprintInstantiateResponse{Item: automationFromCronJob(*job)})
 }
 
 func automationFromCronJob(job cron.CronJob) automationItem {
@@ -184,6 +237,10 @@ func isClockField(value string) bool {
 
 func weekdayLabel(value string) string {
 	switch strings.ToUpper(value) {
+	case "1-5":
+		return "weekdays"
+	case "0,6", "6,0":
+		return "weekends"
 	case "0", "7", "SUN":
 		return "Sunday"
 	case "1", "MON":

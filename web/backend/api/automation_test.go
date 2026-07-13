@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -82,5 +84,102 @@ func TestFormatAutomationScheduleEveryInterval(t *testing.T) {
 	got := formatAutomationSchedule(cron.CronSchedule{Kind: "every", EveryMS: &every})
 	if got != "Every day" {
 		t.Fatalf("formatAutomationSchedule() = %q, want Every day", got)
+	}
+}
+
+func TestHandleAutomationBlueprintList(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/automation/blueprints", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp automationBlueprintResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(resp.Blueprints) == 0 {
+		t.Fatal("expected blueprints")
+	}
+	if resp.Blueprints[0].Key == "" || len(resp.Blueprints[0].Fields) == 0 {
+		t.Fatalf("invalid blueprint response: %+v", resp.Blueprints[0])
+	}
+}
+
+func TestHandleAutomationBlueprintInstantiateCreatesCronJob(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := []byte(`{"blueprint":"news-digest","values":{"topic":"robotics","time":"09:15","recurrence":"weekdays","count":"3","deliver":"local"}}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/automation/blueprints/instantiate", bytes.NewReader(body))
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp automationBlueprintInstantiateResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if resp.Item.Name != "Topic news digest" {
+		t.Fatalf("name = %q, want Topic news digest", resp.Item.Name)
+	}
+	if resp.Item.Schedule != "Every weekdays at 09:15" {
+		t.Fatalf("schedule = %q, want Every weekdays at 09:15", resp.Item.Schedule)
+	}
+	if resp.Item.Delivery != "Runs in JameClaw" {
+		t.Fatalf("delivery = %q, want Runs in JameClaw", resp.Item.Delivery)
+	}
+	if !strings.Contains(resp.Item.Prompt, "robotics") || !strings.Contains(resp.Item.Prompt, "3 bullets") {
+		t.Fatalf("prompt did not fill values: %q", resp.Item.Prompt)
+	}
+}
+
+func TestHandleAutomationBlueprintInstantiateRejectsInvalidSlot(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := []byte(`{"blueprint":"news-digest","values":{"time":"25:99"}}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/automation/blueprints/instantiate", bytes.NewReader(body))
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+}
+
+func TestHandleAutomationBlueprintInstantiateRejectsOriginDeliveryFromDashboard(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := []byte(`{"blueprint":"morning-brief","values":{"deliver":"origin"}}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/automation/blueprints/instantiate", bytes.NewReader(body))
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
 	}
 }

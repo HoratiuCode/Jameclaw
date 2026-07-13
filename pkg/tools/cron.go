@@ -70,7 +70,7 @@ func (t *CronTool) Name() string {
 
 // Description returns the tool description
 func (t *CronTool) Description() string {
-	return "Schedule reminders, tasks, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for complex recurring schedules. Use 'command' to execute shell commands directly."
+	return "Schedule reminders, tasks, automation blueprints, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Prefer action=add_blueprint for common recurring automations such as morning brief, important mail, weekly review, news digest, habit nudges, meal planning, or daily learning. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for custom recurring schedules. Use 'command' to execute shell commands directly."
 }
 
 // Parameters returns the tool parameters schema
@@ -80,8 +80,16 @@ func (t *CronTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"add", "list", "remove", "enable", "disable"},
-				"description": "Action to perform. Use 'add' when user wants to schedule a reminder or task.",
+				"enum":        []string{"add", "add_blueprint", "list_blueprints", "list", "remove", "enable", "disable"},
+				"description": "Action to perform. Use add_blueprint for ready-made automation templates; use add for custom reminders/tasks.",
+			},
+			"blueprint": map[string]any{
+				"type":        "string",
+				"description": "Blueprint key for action=add_blueprint, e.g. morning-brief, important-mail, weekly-review, custom-reminder, news-digest, habit-checkin, hydration-move, meal-plan, learn-daily.",
+			},
+			"values": map[string]any{
+				"type":        "object",
+				"description": "Slot values for action=add_blueprint. Use list_blueprints to inspect required fields and defaults.",
 			},
 			"message": map[string]any{
 				"type":        "string",
@@ -134,6 +142,10 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 	switch action {
 	case "add":
 		return t.addJob(ctx, args)
+	case "add_blueprint":
+		return t.addBlueprintJob(ctx, args)
+	case "list_blueprints":
+		return t.listBlueprints()
 	case "list":
 		return t.listJobs()
 	case "remove":
@@ -145,6 +157,62 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 	default:
 		return ErrorResult(fmt.Sprintf("unknown action: %s", action))
 	}
+}
+
+func (t *CronTool) listBlueprints() *ToolResult {
+	var result strings.Builder
+	result.WriteString("Automation blueprints:\n")
+	for _, blueprint := range cron.AutomationBlueprints {
+		result.WriteString(fmt.Sprintf("- %s: %s\n", blueprint.Key, blueprint.Title))
+		for _, field := range blueprint.Fields {
+			defaultValue := ""
+			if field.Default != "" {
+				defaultValue = fmt.Sprintf(" (default: %s)", field.Default)
+			}
+			options := ""
+			if len(field.Options) > 0 {
+				options = fmt.Sprintf(" options: %s", strings.Join(field.Options, ", "))
+			}
+			result.WriteString(fmt.Sprintf("  - %s [%s]%s%s\n", field.Name, field.Type, defaultValue, options))
+		}
+	}
+	return SilentResult(result.String())
+}
+
+func (t *CronTool) addBlueprintJob(ctx context.Context, args map[string]any) *ToolResult {
+	channel := ToolChannel(ctx)
+	chatID := ToolChatID(ctx)
+	if channel == "" || chatID == "" {
+		return ErrorResult("no session context (channel/chat_id not set). Use this tool in an active conversation.")
+	}
+
+	key := strings.TrimSpace(getStringArg(args, "blueprint"))
+	if key == "" {
+		return ErrorResult("blueprint is required for add_blueprint")
+	}
+	values := mapStringValues(args["values"])
+	spec, err := cron.FillAutomationBlueprint(key, values)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	deliveryApproved, _ := args["delivery_approved"].(bool)
+	if spec.Deliver && !deliveryApproved {
+		return ErrorResult("delivery_approved=true is required when blueprint deliver=origin")
+	}
+
+	job, err := t.cronService.AddJob(
+		spec.Name,
+		spec.Schedule,
+		spec.Prompt,
+		spec.Deliver,
+		deliveryApproved,
+		channel,
+		chatID,
+	)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("Error adding blueprint job: %v", err))
+	}
+	return SilentResult(fmt.Sprintf("Automation blueprint scheduled: %s (id: %s)", job.Name, job.ID))
 }
 
 func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult {
@@ -396,4 +464,30 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	}
 
 	return response
+}
+
+func mapStringValues(value any) map[string]string {
+	out := map[string]string{}
+	switch typed := value.(type) {
+	case map[string]string:
+		for k, v := range typed {
+			out[k] = v
+		}
+	case map[string]any:
+		for k, v := range typed {
+			switch scalar := v.(type) {
+			case string:
+				out[k] = scalar
+			case fmt.Stringer:
+				out[k] = scalar.String()
+			case float64:
+				out[k] = strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%.6f", scalar), "0"), ".")
+			case int:
+				out[k] = fmt.Sprintf("%d", scalar)
+			case bool:
+				out[k] = fmt.Sprintf("%t", scalar)
+			}
+		}
+	}
+	return out
 }

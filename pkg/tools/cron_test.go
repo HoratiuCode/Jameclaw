@@ -253,6 +253,69 @@ func TestCronTool_DeliverWithApprovalPersistsApproval(t *testing.T) {
 	}
 }
 
+func TestCronTool_ListBlueprints(t *testing.T) {
+	tool := newTestCronTool(t)
+	result := tool.Execute(context.Background(), map[string]any{
+		"action": "list_blueprints",
+	})
+	if result.IsError {
+		t.Fatalf("list_blueprints failed: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "morning-brief") || !strings.Contains(result.ForLLM, "news-digest") {
+		t.Fatalf("blueprint list missing expected entries: %s", result.ForLLM)
+	}
+}
+
+func TestCronTool_AddBlueprint(t *testing.T) {
+	tool := newTestCronTool(t)
+	ctx := WithToolContext(context.Background(), "telegram", "chat-1")
+	result := tool.Execute(ctx, map[string]any{
+		"action":    "add_blueprint",
+		"blueprint": "news-digest",
+		"values": map[string]any{
+			"topic":      "robotics",
+			"time":       "09:15",
+			"recurrence": "weekdays",
+			"count":      "3",
+			"deliver":    "local",
+		},
+	})
+	if result.IsError {
+		t.Fatalf("add_blueprint failed: %s", result.ForLLM)
+	}
+	jobs := tool.cronService.ListJobs(false)
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %d, want 1", len(jobs))
+	}
+	if jobs[0].Name != "Topic news digest" {
+		t.Fatalf("job name = %q, want Topic news digest", jobs[0].Name)
+	}
+	if jobs[0].Schedule.Expr != "15 9 * * 1-5" {
+		t.Fatalf("schedule = %q, want 15 9 * * 1-5", jobs[0].Schedule.Expr)
+	}
+	if !strings.Contains(jobs[0].Payload.Message, "robotics") {
+		t.Fatalf("payload did not include topic: %q", jobs[0].Payload.Message)
+	}
+}
+
+func TestCronTool_AddBlueprintOriginRequiresDeliveryApproval(t *testing.T) {
+	tool := newTestCronTool(t)
+	ctx := WithToolContext(context.Background(), "telegram", "chat-1")
+	result := tool.Execute(ctx, map[string]any{
+		"action":    "add_blueprint",
+		"blueprint": "morning-brief",
+		"values": map[string]any{
+			"deliver": "origin",
+		},
+	})
+	if !result.IsError {
+		t.Fatal("expected origin delivery to require approval")
+	}
+	if !strings.Contains(result.ForLLM, "delivery_approved=true") {
+		t.Fatalf("unexpected error: %s", result.ForLLM)
+	}
+}
+
 func TestCronTool_ExecuteJobBlocksUnapprovedDelivery(t *testing.T) {
 	tool := newTestCronTool(t)
 	job := &cron.CronJob{}
