@@ -167,7 +167,7 @@ func (t *ExecTool) Name() string {
 }
 
 func (t *ExecTool) Description() string {
-	return "Execute a shell command and return its output. Use with caution."
+	return "Execute a shell command and return its output. Use visible_terminal=true when the user should watch the command run in a real Terminal window."
 }
 
 func (t *ExecTool) Parameters() map[string]any {
@@ -181,6 +181,10 @@ func (t *ExecTool) Parameters() map[string]any {
 			"working_dir": map[string]any{
 				"type":        "string",
 				"description": "Optional working directory for the command",
+			},
+			"visible_terminal": map[string]any{
+				"type":        "boolean",
+				"description": "On macOS, run the command in a visible Terminal window and stream stdout/stderr live there while still returning the captured output. Use this when the user asks to see CLI work happen on screen.",
 			},
 		},
 		"required": []string{"command"},
@@ -262,6 +266,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 		cmdCtx, cancel = context.WithCancel(ctx)
 	}
 	defer cancel()
+
+	if getOptionalBoolArg(args, "visible_terminal", false) {
+		return t.executeVisibleTerminal(cmdCtx, command, cwd)
+	}
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
@@ -359,6 +367,112 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 		ForUser: output,
 		IsError: false,
 	}
+}
+
+func (t *ExecTool) executeVisibleTerminal(ctx context.Context, command, cwd string) *ToolResult {
+	if runtime.GOOS != "darwin" {
+		return ErrorResult("visible_terminal is currently supported on macOS only")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "jameclaw-visible-terminal-*")
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("failed to create visible terminal log: %v", err))
+	}
+
+	logPath := filepath.Join(tmpDir, "output.log")
+	statusPath := filepath.Join(tmpDir, "status")
+	terminalCommand := buildVisibleTerminalLaunchCommand(command, cwd, logPath, statusPath)
+	script := fmt.Sprintf(`tell application "Terminal"
+	activate
+	do script %s
+end tell`, appleScriptStringLiteral(terminalCommand))
+
+	if err := exec.CommandContext(ctx, "osascript", "-e", script).Run(); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return ErrorResult(fmt.Sprintf("failed to open visible Terminal command: %v", err))
+	}
+
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if statusBytes, err := os.ReadFile(statusPath); err == nil {
+			status := strings.TrimSpace(string(statusBytes))
+			output := readVisibleTerminalOutput(logPath)
+			_ = os.RemoveAll(tmpDir)
+			if status != "0" {
+				return &ToolResult{
+					ForLLM:  output,
+					ForUser: output,
+					IsError: true,
+				}
+			}
+			return &ToolResult{
+				ForLLM:  output,
+				ForUser: output,
+				IsError: false,
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			output := readVisibleTerminalOutput(logPath)
+			msg := "Visible Terminal command timed out or was cancelled. It may still be running in Terminal."
+			if output != "" && output != "(no output)" {
+				msg += "\n\nPartial output:\n" + output
+			}
+			return &ToolResult{
+				ForLLM:  msg,
+				ForUser: msg,
+				IsError: true,
+				Err:     ctx.Err(),
+			}
+		case <-ticker.C:
+		}
+	}
+}
+
+func buildVisibleTerminalLaunchCommand(command, cwd, logPath, statusPath string) string {
+	return "/bin/zsh -lc " + shellQuoteArg(buildVisibleTerminalInnerCommand(command, cwd, logPath, statusPath))
+}
+
+func buildVisibleTerminalInnerCommand(command, cwd, logPath, statusPath string) string {
+	return strings.Join([]string{
+		"cd " + shellQuoteArg(cwd),
+		"status=$?",
+		`if [ "$status" -ne 0 ]; then`,
+		"  printf " + shellQuoteArg("\n[failed to enter working directory]\n") + " | tee -a " + shellQuoteArg(logPath),
+		"else",
+		"  printf " + shellQuoteArg("$ "+command+"\n"),
+		"  {",
+		command,
+		"  } > >(tee -a " + shellQuoteArg(logPath) + ") 2> >(tee -a " + shellQuoteArg(logPath) + " >&2)",
+		"  status=$?",
+		"fi",
+		`printf "\n[exit code %s]\n" "$status" | tee -a ` + shellQuoteArg(logPath),
+		`printf "%s" "$status" > ` + shellQuoteArg(statusPath),
+		"printf " + shellQuoteArg("\nJameClaw command finished. You can close this window.\n"),
+	}, "\n")
+}
+
+func readVisibleTerminalOutput(logPath string) string {
+	data, err := os.ReadFile(logPath)
+	output := ""
+	if err == nil {
+		output = string(data)
+	}
+	if output == "" {
+		output = "(no output)"
+	}
+	maxLen := 10000
+	if len(output) > maxLen {
+		output = output[:maxLen] + fmt.Sprintf("\n... (truncated, %d more chars)", len(output)-maxLen)
+	}
+	return output
+}
+
+func shellQuoteArg(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func (t *ExecTool) guardCommand(command, cwd string) string {

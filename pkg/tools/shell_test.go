@@ -343,6 +343,42 @@ func TestShellTool_InternalChannelAllowed(t *testing.T) {
 	}
 }
 
+func TestShellToolParametersExposeVisibleTerminal(t *testing.T) {
+	tool, err := NewExecTool("", false)
+	if err != nil {
+		t.Fatalf("unable to configure exec tool: %s", err)
+	}
+
+	params := tool.Parameters()
+	properties, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties missing from params: %#v", params)
+	}
+	if _, ok := properties["visible_terminal"]; !ok {
+		t.Fatalf("visible_terminal missing from exec parameters: %#v", properties)
+	}
+}
+
+func TestBuildVisibleTerminalLaunchCommand(t *testing.T) {
+	command := buildVisibleTerminalLaunchCommand("echo 'hello world'", "/tmp/work dir", "/tmp/jame log.txt", "/tmp/status")
+	if !strings.HasPrefix(command, "/bin/zsh -lc ") {
+		t.Fatalf("visible terminal launch command should use zsh, got:\n%s", command)
+	}
+
+	inner := buildVisibleTerminalInnerCommand("echo 'hello world'", "/tmp/work dir", "/tmp/jame log.txt", "/tmp/status")
+	for _, want := range []string{
+		"cd '/tmp/work dir'",
+		"echo '\\''hello world'\\''",
+		"tee -a '/tmp/jame log.txt'",
+		`printf "%s" "$status" > '/tmp/status'`,
+		"JameClaw command finished",
+	} {
+		if !strings.Contains(inner, want) {
+			t.Fatalf("visible terminal command missing %q:\n%s", want, inner)
+		}
+	}
+}
+
 // TestShellTool_EmptyChannelBlockedWhenNotAllowRemote verifies fail-closed when no channel context
 func TestShellTool_EmptyChannelBlockedWhenNotAllowRemote(t *testing.T) {
 	cfg := &config.Config{}
