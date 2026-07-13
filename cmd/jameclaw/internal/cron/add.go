@@ -10,13 +10,14 @@ import (
 
 func newAddCommand(storePath func() string) *cobra.Command {
 	var (
-		name    string
-		message string
-		every   int64
-		cronExp string
-		deliver bool
-		channel string
-		to      string
+		name            string
+		message         string
+		every           int64
+		cronExp         string
+		deliver         bool
+		approveDelivery bool
+		channel         string
+		to              string
 	)
 
 	cmd := &cobra.Command{
@@ -26,6 +27,9 @@ func newAddCommand(storePath func() string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if every <= 0 && cronExp == "" {
 				return fmt.Errorf("either --every or --cron must be specified")
+			}
+			if deliver && !approveDelivery {
+				return fmt.Errorf("--approve-delivery is required when --deliver is set")
 			}
 
 			var schedule cron.CronSchedule
@@ -37,7 +41,7 @@ func newAddCommand(storePath func() string) *cobra.Command {
 			}
 
 			cs := cron.NewCronService(storePath(), nil)
-			job, err := cs.AddJob(name, schedule, message, deliver, channel, to)
+			job, err := cs.AddJob(name, schedule, message, deliver, approveDelivery, channel, to)
 			if err != nil {
 				return fmt.Errorf("error adding job: %w", err)
 			}
@@ -53,6 +57,7 @@ func newAddCommand(storePath func() string) *cobra.Command {
 	cmd.Flags().Int64VarP(&every, "every", "e", 0, "Run every N seconds")
 	cmd.Flags().StringVarP(&cronExp, "cron", "c", "", "Cron expression (e.g. '0 9 * * *')")
 	cmd.Flags().BoolVarP(&deliver, "deliver", "d", false, "Deliver response to channel")
+	cmd.Flags().BoolVar(&approveDelivery, "approve-delivery", false, "Approve proactive delivery without a new inbound prompt")
 	cmd.Flags().StringVar(&to, "to", "", "Recipient for delivery")
 	cmd.Flags().StringVar(&channel, "channel", "", "Channel for delivery")
 

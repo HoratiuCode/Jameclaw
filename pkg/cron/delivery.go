@@ -9,8 +9,12 @@ type DeliveryTarget struct {
 
 type DeliveryFunc func(ctx context.Context, target DeliveryTarget, content string) error
 
+func DeliveryAllowed(job *CronJob) bool {
+	return job != nil && job.Payload.Deliver && job.Payload.DeliveryApproved
+}
+
 func DeliverJobResult(ctx context.Context, job *CronJob, result string, deliver DeliveryFunc) error {
-	if job == nil || deliver == nil || !job.Payload.Deliver {
+	if deliver == nil || !DeliveryAllowed(job) {
 		return nil
 	}
 	content := result

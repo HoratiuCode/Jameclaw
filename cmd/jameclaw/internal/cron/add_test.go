@@ -22,6 +22,7 @@ func TestNewAddSubcommand(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("every"))
 	assert.NotNil(t, cmd.Flags().Lookup("cron"))
 	assert.NotNil(t, cmd.Flags().Lookup("deliver"))
+	assert.NotNil(t, cmd.Flags().Lookup("approve-delivery"))
 	assert.NotNil(t, cmd.Flags().Lookup("to"))
 	assert.NotNil(t, cmd.Flags().Lookup("channel"))
 
@@ -54,4 +55,19 @@ func TestNewAddCommandEveryAndCronMutuallyExclusive(t *testing.T) {
 
 	err := cmd.Execute()
 	require.Error(t, err)
+}
+
+func TestNewAddCommandDeliverRequiresApproval(t *testing.T) {
+	cmd := newAddCommand(func() string { return "testing" })
+
+	cmd.SetArgs([]string{
+		"--name", "job",
+		"--message", "hello",
+		"--every", "10",
+		"--deliver",
+	})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--approve-delivery")
 }

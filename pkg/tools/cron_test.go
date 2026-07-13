@@ -209,6 +209,97 @@ func TestCronTool_NonCommandJobDefaultsDeliverToFalse(t *testing.T) {
 	}
 }
 
+func TestCronTool_DeliverRequiresApproval(t *testing.T) {
+	tool := newTestCronTool(t)
+	ctx := WithToolContext(context.Background(), "telegram", "chat-1")
+	result := tool.Execute(ctx, map[string]any{
+		"action":     "add",
+		"message":    "message me when this is done",
+		"at_seconds": float64(600),
+		"deliver":    true,
+	})
+
+	if !result.IsError {
+		t.Fatal("expected deliver=true to require delivery approval")
+	}
+	if !strings.Contains(result.ForLLM, "delivery_approved=true") {
+		t.Fatalf("expected delivery approval message, got: %s", result.ForLLM)
+	}
+}
+
+func TestCronTool_DeliverWithApprovalPersistsApproval(t *testing.T) {
+	tool := newTestCronTool(t)
+	ctx := WithToolContext(context.Background(), "telegram", "chat-1")
+	result := tool.Execute(ctx, map[string]any{
+		"action":            "add",
+		"message":           "message me when this is done",
+		"at_seconds":        float64(600),
+		"deliver":           true,
+		"delivery_approved": true,
+	})
+
+	if result.IsError {
+		t.Fatalf("expected approved delivery to succeed, got: %s", result.ForLLM)
+	}
+	jobs := tool.cronService.ListJobs(false)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if !jobs[0].Payload.Deliver {
+		t.Fatal("expected deliver=true")
+	}
+	if !jobs[0].Payload.DeliveryApproved {
+		t.Fatal("expected delivery approval to be persisted")
+	}
+}
+
+func TestCronTool_ExecuteJobBlocksUnapprovedDelivery(t *testing.T) {
+	tool := newTestCronTool(t)
+	job := &cron.CronJob{}
+	job.ID = "job-1"
+	job.Payload.Channel = "telegram"
+	job.Payload.To = "chat-1"
+	job.Payload.Message = "hello"
+	job.Payload.Deliver = true
+
+	if got := tool.ExecuteJob(context.Background(), job); !strings.Contains(got, "not approved") {
+		t.Fatalf("ExecuteJob() = %q, want unapproved delivery error", got)
+	}
+
+	select {
+	case msg := <-tool.msgBus.OutboundChan():
+		t.Fatalf("unexpected outbound message: %+v", msg)
+	default:
+	}
+}
+
+func TestCronTool_ExecuteJobPublishesApprovedDelivery(t *testing.T) {
+	tool := newTestCronTool(t)
+	job := &cron.CronJob{}
+	job.ID = "job-1"
+	job.Payload.Channel = "telegram"
+	job.Payload.To = "chat-1"
+	job.Payload.Message = "hello"
+	job.Payload.Deliver = true
+	job.Payload.DeliveryApproved = true
+
+	if got := tool.ExecuteJob(context.Background(), job); got != "ok" {
+		t.Fatalf("ExecuteJob() = %q, want ok", got)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	select {
+	case msg := <-tool.msgBus.OutboundChan():
+		if msg.Channel != "telegram" || msg.ChatID != "chat-1" || msg.Content != "hello" {
+			t.Fatalf("outbound message = %+v, want telegram/chat-1/hello", msg)
+		}
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for outbound message")
+	}
+}
+
 func TestCronTool_ExecuteJobPublishesErrorWhenExecDisabled(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Tools.Exec.Enabled = false

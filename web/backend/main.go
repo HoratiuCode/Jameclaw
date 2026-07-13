@@ -260,7 +260,7 @@ func main() {
 		if !*noBrowser {
 			// Auto-open browser after systray is ready (if not disabled)
 			// Check no-browser flag via environment or pass as parameter if needed
-			if err := openBrowser(); err != nil {
+			if err := openBrowserBackground(); err != nil {
 				logger.Errorf("Warning: Failed to auto-open browser: %v", err)
 			}
 		}

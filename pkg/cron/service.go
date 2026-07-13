@@ -24,12 +24,13 @@ type CronSchedule struct {
 }
 
 type CronPayload struct {
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
-	Command string `json:"command,omitempty"`
-	Deliver bool   `json:"deliver"`
-	Channel string `json:"channel,omitempty"`
-	To      string `json:"to,omitempty"`
+	Kind             string `json:"kind"`
+	Message          string `json:"message"`
+	Command          string `json:"command,omitempty"`
+	Deliver          bool   `json:"deliver"`
+	DeliveryApproved bool   `json:"delivery_approved,omitempty"`
+	Channel          string `json:"channel,omitempty"`
+	To               string `json:"to,omitempty"`
 }
 
 type CronJobState struct {
@@ -410,6 +411,7 @@ func (cs *CronService) AddJob(
 	schedule CronSchedule,
 	message string,
 	deliver bool,
+	deliveryApproved bool,
 	channel, to string,
 ) (*CronJob, error) {
 	cs.mu.Lock()
@@ -426,11 +428,12 @@ func (cs *CronService) AddJob(
 		Enabled:  true,
 		Schedule: schedule,
 		Payload: CronPayload{
-			Kind:    "agent_turn",
-			Message: message,
-			Deliver: deliver,
-			Channel: channel,
-			To:      to,
+			Kind:             "agent_turn",
+			Message:          message,
+			Deliver:          deliver,
+			DeliveryApproved: deliveryApproved,
+			Channel:          channel,
+			To:               to,
 		},
 		State: CronJobState{
 			NextRunAtMS: cs.computeNextRun(&schedule, now),

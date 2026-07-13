@@ -32,7 +32,7 @@ func (t *MacControlTool) Name() string {
 }
 
 func (t *MacControlTool) Description() string {
-	return "Control visible macOS desktop actions, especially Google Chrome browser access: open Chrome, open websites like Instagram, search the web, focus browser windows, type text, press keyboard shortcuts, open apps/URLs/files, control Finder, run Shortcuts, take screenshots, and optionally run approved AppleScript. Use this as the browser fallback when agent-browser or CDP automation is unavailable."
+	return "Control macOS desktop actions, especially Google Chrome browser access: open Chrome, open websites like Instagram, search the web, focus browser windows, type text, press keyboard shortcuts, open apps/URLs/files, control Finder, run Shortcuts, take screenshots, and optionally run approved AppleScript. Opening apps, URLs, searches, and paths defaults to background mode so the user's current app stays in front; pass background=false or use activate_app only when the user needs the app brought forward. Use this as the browser fallback when agent-browser or CDP automation is unavailable."
 }
 
 func (t *MacControlTool) Parameters() map[string]any {
@@ -41,7 +41,7 @@ func (t *MacControlTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"description": "Desktop action to perform. For websites such as Instagram, use action=open_url with app=Google Chrome and an https URL. For browser searches, use action=search with app=Google Chrome.",
+				"description": "Desktop action to perform. For websites such as Instagram, use action=open_url with app=Google Chrome and an https URL. For browser searches, use action=search with app=Google Chrome. Prefer background opening unless the user asks to see or control the app.",
 				"enum": []string{
 					"open_app", "activate_app", "quit_app", "list_apps", "frontmost_app", "front_window_title", "front_window_bounds",
 					"open_url", "open_path", "open_finder", "reveal_path", "search",
@@ -94,6 +94,10 @@ func (t *MacControlTool) Parameters() map[string]any {
 				"type":        "number",
 				"description": "Screen y coordinate for action=mouse_click.",
 			},
+			"background": map[string]any{
+				"type":        "boolean",
+				"description": "For open_app, open_url, open_path, and search, keep the opened app/browser behind the user's current app. Defaults to true.",
+			},
 		},
 		"required": []string{"action"},
 	}
@@ -121,13 +125,14 @@ func (t *MacControlTool) Execute(ctx context.Context, args map[string]any) *Tool
 func (t *MacControlTool) execute(ctx context.Context, action string, args map[string]any) (string, string, error) {
 	app := cleanMacControlValue(getStringArg(args, "app"))
 	path := cleanMacControlValue(getStringArg(args, "path"))
+	background := getOptionalBoolArg(args, "background", true)
 
 	switch action {
 	case "open_app":
 		if app == "" {
 			return "", "", fmt.Errorf("app is required for action=open_app")
 		}
-		return t.runWithMessage(ctx, "open", "Opened app "+app, "-a", app)
+		return t.runWithMessage(ctx, "open", "Opened app "+app, openArgs(background, "-a", app)...)
 	case "activate_app":
 		if app == "" {
 			return "", "", fmt.Errorf("app is required for action=activate_app")
@@ -167,12 +172,12 @@ end tell`, "Read front window bounds")
 		if err := validateBrowserURL(rawURL); err != nil {
 			return "", "", err
 		}
-		return t.runWithMessage(ctx, "open", "Opened "+rawURL, appendOpenApp([]string{rawURL}, app)...)
+		return t.runWithMessage(ctx, "open", "Opened "+rawURL, openTargetArgs(background, app, rawURL)...)
 	case "open_path":
 		if path == "" {
 			return "", "", fmt.Errorf("path is required for action=open_path")
 		}
-		return t.runWithMessage(ctx, "open", "Opened "+path, appendOpenApp([]string{path}, app)...)
+		return t.runWithMessage(ctx, "open", "Opened "+path, openTargetArgs(background, app, path)...)
 	case "open_finder":
 		if path == "" {
 			path = "."
@@ -192,7 +197,7 @@ end tell`, "Read front window bounds")
 		if err != nil {
 			return "", "", err
 		}
-		return t.runWithMessage(ctx, "open", "Opened search results for "+query, appendOpenApp([]string{searchURL}, app)...)
+		return t.runWithMessage(ctx, "open", "Opened search results for "+query, openTargetArgs(background, app, searchURL)...)
 	case "run_shortcut":
 		if !t.cfg.AllowShortcuts {
 			return "", "", fmt.Errorf("run_shortcut is disabled by tools.mac_control.allow_shortcuts")
@@ -277,6 +282,21 @@ func (t *MacControlTool) runWithMessage(ctx context.Context, command, message st
 func runMacCommand(ctx context.Context, command string, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, command, args...).CombinedOutput()
 	return string(out), err
+}
+
+func openTargetArgs(background bool, app string, target string) []string {
+	args := openArgs(background)
+	if app != "" {
+		args = append(args, "-a", app)
+	}
+	return append(args, target)
+}
+
+func openArgs(background bool, args ...string) []string {
+	if !background {
+		return append([]string{}, args...)
+	}
+	return append([]string{"-g"}, args...)
 }
 
 func appendOpenApp(args []string, app string) []string {
@@ -393,4 +413,16 @@ func getNumberArg(args map[string]any, key string) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func getOptionalBoolArg(args map[string]any, key string, fallback bool) bool {
+	value, ok := args[key]
+	if !ok {
+		return fallback
+	}
+	boolValue, ok := value.(bool)
+	if !ok {
+		return fallback
+	}
+	return boolValue
 }

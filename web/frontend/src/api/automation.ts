@@ -6,6 +6,7 @@ export interface AutomationItem {
   schedule: string
   prompt: string
   delivery: string
+  delivery_approved: boolean
   next_run_at_ms?: number
   last_run_at_ms?: number
   last_status?: string

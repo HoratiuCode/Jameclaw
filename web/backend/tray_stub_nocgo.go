@@ -19,7 +19,7 @@ func runTray() {
 	if !*noBrowser {
 		go func() {
 			time.Sleep(browserDelay)
-			if err := openBrowser(); err != nil {
+			if err := openBrowserBackground(); err != nil {
 				logger.Errorf("Warning: Failed to auto-open browser: %v", err)
 			}
 		}()

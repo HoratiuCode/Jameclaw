@@ -57,39 +57,44 @@ type terminalChat struct {
 	footer     *tview.TextView
 	input      *tview.TextArea
 
-	mu             sync.Mutex
-	entries        []terminalEntry
-	links          map[string]string
-	busy           bool
-	busyMode       string
-	showThinking   bool
-	activity       string
-	sessionStarted time.Time
-	statusStarted  time.Time
-	activeTurnID   string
-	totalTokens    int
-	promptTokens   int
-	completion     int
-	currentModel   string
-	pendingInputs  []string
-	localSearchOK  bool
-	reasoningMode  reasoningMode
-	inputHistory   []string
-	historyIndex   int
-	completionList []string
-	suggestionText string
-	backgroundSeq  int
-	backgroundRuns map[string]string
-	stopSpinner    chan struct{}
-	spinnerFrame   string
-	lastCtrlCAt    time.Time
-	voiceMode      bool
-	voiceRecorder  *terminalVoiceRecorder
+	mu                          sync.Mutex
+	entries                     []terminalEntry
+	links                       map[string]string
+	busy                        bool
+	busyMode                    string
+	showThinking                bool
+	activity                    string
+	sessionStarted              time.Time
+	statusStarted               time.Time
+	activeTurnID                string
+	totalTokens                 int
+	promptTokens                int
+	completion                  int
+	currentModel                string
+	pendingInputs               []string
+	localSearchOK               bool
+	reasoningMode               reasoningMode
+	inputHistory                []string
+	historyIndex                int
+	completionList              []string
+	suggestionText              string
+	backgroundSeq               int
+	backgroundRuns              map[string]string
+	stopSpinner                 chan struct{}
+	spinnerFrame                string
+	lastCtrlCAt                 time.Time
+	voiceMode                   bool
+	voiceRecorder               *terminalVoiceRecorder
+	pendingVoiceRecorderInstall bool
 }
 
 type terminalVoiceRecorder struct {
 	path string
 	cmd  *exec.Cmd
+}
+
+type terminalInstallPlan struct {
+	Args []string
 }
 
 var (
@@ -211,6 +216,9 @@ func (t *terminalChat) submit() {
 	t.input.SetText("", true)
 	t.inputHistory = append(t.inputHistory, text)
 	t.historyIndex = -1
+	if t.handlePendingConfirmation(text) {
+		return
+	}
 	if text == "/quit" || text == "/exit" {
 		t.app.Stop()
 		return
@@ -624,11 +632,11 @@ func (t *terminalChat) enterVoiceMode() {
 		return
 	}
 	if voice.DetectTranscriber(cfg) == nil {
-		t.addSystem("Voice mode needs a configured transcription provider. Configure voice.model_name, select a voice-capable default model such as Codex CLI, or configure ElevenLabs/Groq first.")
+		t.addSystem("Voice mode needs Codex CLI or another audio-capable model. Select /model codex-cli or set voice.model_name to a model that can read audio.")
 		return
 	}
 	if _, err := resolveVoiceRecorderCommand(""); err != nil {
-		t.addSystem("Voice mode needs a local recorder. Install ffmpeg, sox/rec, or arecord, then try /voice again.")
+		t.askInstallVoiceRecorder()
 		return
 	}
 
@@ -638,6 +646,88 @@ func (t *terminalChat) enterVoiceMode() {
 	t.mu.Unlock()
 	t.input.SetText("", true)
 	t.refreshStatus()
+}
+
+func (t *terminalChat) askInstallVoiceRecorder() {
+	plan, err := voiceRecorderInstallPlan()
+	if err != nil {
+		t.addSystem("Voice mode needs a local recorder. " + err.Error())
+		return
+	}
+	t.mu.Lock()
+	t.pendingVoiceRecorderInstall = true
+	t.suggestionText = "Type yes to install the voice recorder, or no to cancel"
+	t.mu.Unlock()
+	t.addSystem(fmt.Sprintf("Voice mode needs a local recorder. Install now? yes/no\nCommand: %s", strings.Join(plan.Args, " ")))
+	t.refreshStatus()
+}
+
+func (t *terminalChat) handlePendingConfirmation(text string) bool {
+	t.mu.Lock()
+	pending := t.pendingVoiceRecorderInstall
+	t.mu.Unlock()
+	if !pending {
+		return false
+	}
+
+	answer := strings.ToLower(strings.TrimSpace(text))
+	switch answer {
+	case "y", "yes":
+		t.mu.Lock()
+		t.pendingVoiceRecorderInstall = false
+		t.suggestionText = "installing voice recorder..."
+		t.mu.Unlock()
+		t.refreshStatus()
+		t.installVoiceRecorder()
+		return true
+	case "n", "no":
+		t.mu.Lock()
+		t.pendingVoiceRecorderInstall = false
+		t.suggestionText = "voice recorder install cancelled"
+		t.mu.Unlock()
+		t.addSystem("Voice recorder install cancelled.")
+		t.refreshStatus()
+		return true
+	default:
+		t.addSystem("Please answer yes or no: install the voice recorder now?")
+		return true
+	}
+}
+
+func (t *terminalChat) installVoiceRecorder() {
+	plan, err := voiceRecorderInstallPlan()
+	if err != nil {
+		t.addSystem("Voice recorder install unavailable: " + err.Error())
+		t.refreshStatus()
+		return
+	}
+
+	t.addSystem("Installing voice recorder: " + strings.Join(plan.Args, " "))
+	go func() {
+		cmd := exec.Command(plan.Args[0], plan.Args[1:]...)
+		output, err := cmd.CombinedOutput()
+		out := strings.TrimSpace(string(output))
+		if err != nil {
+			if out != "" {
+				t.addSystem("Voice recorder install failed: " + err.Error() + "\n" + out)
+			} else {
+				t.addSystem("Voice recorder install failed: " + err.Error())
+			}
+			t.mu.Lock()
+			t.suggestionText = "voice recorder install failed"
+			t.mu.Unlock()
+			t.refreshStatus()
+			return
+		}
+		if out != "" {
+			t.addSystem(out)
+		}
+		t.mu.Lock()
+		t.suggestionText = "voice recorder installed; run /voice again"
+		t.mu.Unlock()
+		t.addSystem("Voice recorder installed. Run /voice again.")
+		t.refreshStatus()
+	}()
 }
 
 func (t *terminalChat) leaveVoiceMode(message string) {
@@ -784,6 +874,29 @@ func resolveVoiceRecorderCommand(path string) (*exec.Cmd, error) {
 		return exec.Command(arecord, "-f", "S16_LE", "-r", "16000", "-c", "1", path), nil
 	}
 	return nil, fmt.Errorf("no supported recorder found in PATH")
+}
+
+func voiceRecorderInstallPlan() (*terminalInstallPlan, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		if brew, err := exec.LookPath("brew"); err == nil {
+			return &terminalInstallPlan{Args: []string{brew, "install", "ffmpeg"}}, nil
+		}
+		return nil, fmt.Errorf("install Homebrew first, then run `brew install ffmpeg`.")
+	case "linux":
+		if apt, err := exec.LookPath("apt"); err == nil {
+			return &terminalInstallPlan{Args: []string{"sudo", apt, "install", "-y", "ffmpeg", "sox", "alsa-utils"}}, nil
+		}
+		if dnf, err := exec.LookPath("dnf"); err == nil {
+			return &terminalInstallPlan{Args: []string{"sudo", dnf, "install", "-y", "ffmpeg", "sox", "alsa-utils"}}, nil
+		}
+		if pacman, err := exec.LookPath("pacman"); err == nil {
+			return &terminalInstallPlan{Args: []string{"sudo", pacman, "-S", "--needed", "ffmpeg", "sox", "alsa-utils"}}, nil
+		}
+		return nil, fmt.Errorf("install ffmpeg, sox, or arecord with your system package manager.")
+	default:
+		return nil, fmt.Errorf("install ffmpeg, sox/rec, or arecord and make sure it is in PATH.")
+	}
 }
 
 func stopVoiceRecorder(cmd *exec.Cmd) error {

@@ -42,7 +42,7 @@ func TestMacControlToolOpenApp(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("Execute() error = %v", result.Err)
 	}
-	assertMacCommand(t, calls, "open", []string{"-a", "Notes"})
+	assertMacCommand(t, calls, "open", []string{"-g", "-a", "Notes"})
 }
 
 func TestMacControlToolSearchWithBrowserApp(t *testing.T) {
@@ -58,7 +58,23 @@ func TestMacControlToolSearchWithBrowserApp(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("Execute() error = %v", result.Err)
 	}
-	assertMacCommand(t, calls, "open", []string{"-a", "Safari", "https://duckduckgo.com/?q=jameclaw+local+ai"})
+	assertMacCommand(t, calls, "open", []string{"-g", "-a", "Safari", "https://duckduckgo.com/?q=jameclaw+local+ai"})
+}
+
+func TestMacControlToolCanOpenForeground(t *testing.T) {
+	var calls []macCommandCall
+	tool := testMacControlTool(&calls)
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"action":     "open_url",
+		"url":        "https://example.com",
+		"app":        "Google Chrome",
+		"background": false,
+	})
+	if result.IsError {
+		t.Fatalf("Execute() error = %v", result.Err)
+	}
+	assertMacCommand(t, calls, "open", []string{"-a", "Google Chrome", "https://example.com"})
 }
 
 func TestMacControlToolActivateAppUsesAppleScript(t *testing.T) {

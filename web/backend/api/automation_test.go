@@ -26,6 +26,7 @@ func TestHandleAutomationListReturnsCronJobs(t *testing.T) {
 		cron.CronSchedule{Kind: "cron", Expr: "0 20 * * *"},
 		"Send me the top technology news.",
 		true,
+		true,
 		"telegram",
 		"12345",
 	)
@@ -67,6 +68,9 @@ func TestHandleAutomationListReturnsCronJobs(t *testing.T) {
 	}
 	if item.Delivery != "Sends result on telegram to 12345" {
 		t.Fatalf("delivery = %q", item.Delivery)
+	}
+	if !item.DeliveryApproved {
+		t.Fatal("delivery_approved = false, want true")
 	}
 	if item.Status != "scheduled" {
 		t.Fatalf("status = %q, want scheduled", item.Status)

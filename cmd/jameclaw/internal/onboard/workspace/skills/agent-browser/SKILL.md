@@ -11,7 +11,7 @@ CLI browser automation via Chrome/Chromium CDP. Prefer the user's local Google C
 **Before using deep browser automation**, verify the tool is available by running `which agent-browser`.
 
 - If `agent-browser` exists, use it for page snapshots, clicks, form fills, screenshots, PDF export, and DOM extraction.
-- If `agent-browser` is missing but the `mac_control` tool is available, use `mac_control` to open Google Chrome, open URLs, search the web, activate Chrome, type text, and press keyboard shortcuts.
+- If `agent-browser` is missing but the `mac_control` tool is available, use `mac_control` to open Google Chrome, open URLs, and search the web in background mode. Activate Chrome only when the user asked to see it or the next step requires visible UI automation such as typing, shortcuts, or clicking.
 - If neither path is available, explain the missing capability and ask the user to install/enable browser automation.
 
 Do not say browser automation is unavailable when `mac_control` can still open Chrome or a website. For user requests like "open Instagram", "go to Instagram", or "search this in Chrome", use `mac_control` directly.
@@ -20,15 +20,16 @@ Do not use browser automation for sensitive actions such as payments, account de
 
 ## Quick Chrome Access
 
-Use this path when the user simply wants Chrome opened, searched, or focused:
+Use this path when the user simply wants Chrome opened or searched without interrupting their current app:
 
 ```json
 {"action":"open_app","app":"Google Chrome"}
 {"action":"open_url","app":"Google Chrome","url":"https://example.com"}
 {"action":"open_url","app":"Google Chrome","url":"https://www.instagram.com/"}
 {"action":"search","app":"Google Chrome","engine":"google","query":"JameClaw browser automation"}
-{"action":"activate_app","app":"Google Chrome"}
 ```
+
+Use `{"action":"activate_app","app":"Google Chrome"}` only when the user asks to bring Chrome forward or when visible UI automation is required.
 
 For address-bar navigation in the visible Chrome window:
 

@@ -112,6 +112,24 @@ func TestDetectTranscriber(t *testing.T) {
 			wantName: "audio-model",
 		},
 		{
+			name: "default codex cli protocol model is used even without model list alias",
+			cfg: &config.Config{
+				Agents: config.AgentsConfig{
+					Defaults: config.AgentDefaults{ModelName: "codex-cli/gpt-5.4"},
+				},
+			},
+			wantName: "audio-model",
+		},
+		{
+			name: "configured codex cli model is used when no voice or default model is set",
+			cfg: &config.Config{
+				ModelList: []*config.ModelConfig{
+					{ModelName: "codex-cli", Model: "codex-cli/gpt-5.4"},
+				},
+			},
+			wantName: "audio-model",
+		},
+		{
 			name: "voice model name with non openai compatible protocol does not select audio model transcriber",
 			cfg: (&config.Config{
 				Voice: config.VoiceConfig{ModelName: "voice-anthropic"},

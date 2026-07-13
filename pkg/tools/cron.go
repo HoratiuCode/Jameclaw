@@ -113,7 +113,11 @@ func (t *CronTool) Parameters() map[string]any {
 			},
 			"deliver": map[string]any{
 				"type":        "boolean",
-				"description": "If true, send message directly to channel. If false, let agent process message (for complex tasks). Default: false",
+				"description": "If true, send the scheduled message directly to the active chat without a fresh inbound prompt. Requires delivery_approved=true because this is proactive messaging. Default: false",
+			},
+			"delivery_approved": map[string]any{
+				"type":        "boolean",
+				"description": "Set true only when the user explicitly approved proactive delivery, for example 'send me a message when this automation finishes' or 'remind me on Telegram'. Required when deliver=true.",
 			},
 		},
 		"required": []string{"action"},
@@ -196,6 +200,10 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 	if d, ok := args["deliver"].(bool); ok {
 		deliver = d
 	}
+	deliveryApproved, _ := args["delivery_approved"].(bool)
+	if deliver && !deliveryApproved {
+		return ErrorResult("delivery_approved=true is required when deliver=true")
+	}
 
 	// GHSA-pv8c-p6jf-3fpp: command scheduling requires internal channel. When
 	// allow_command is disabled, explicit confirmation is required as an override.
@@ -223,6 +231,7 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 		schedule,
 		message,
 		deliver,
+		deliveryApproved,
 		channel,
 		chatID,
 	)
@@ -347,8 +356,8 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return "ok"
 	}
 
-	// If deliver=true, send message directly without agent processing
-	if job.Payload.Deliver {
+	// If deliver=true and approved, send message directly without agent processing.
+	if cron.DeliveryAllowed(job) {
 		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer pubCancel()
 		t.msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
@@ -357,6 +366,9 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			Content: job.Payload.Message,
 		})
 		return "ok"
+	}
+	if job.Payload.Deliver {
+		return "Error: proactive delivery was requested but not approved by the user"
 	}
 
 	// For deliver=false, process through agent (for complex tasks)

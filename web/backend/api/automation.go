@@ -17,20 +17,21 @@ type automationResponse struct {
 }
 
 type automationItem struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Enabled        bool   `json:"enabled"`
-	Status         string `json:"status"`
-	Schedule       string `json:"schedule"`
-	Prompt         string `json:"prompt"`
-	Delivery       string `json:"delivery"`
-	NextRunAtMS    *int64 `json:"next_run_at_ms,omitempty"`
-	LastRunAtMS    *int64 `json:"last_run_at_ms,omitempty"`
-	LastStatus     string `json:"last_status,omitempty"`
-	LastError      string `json:"last_error,omitempty"`
-	CreatedAtMS    int64  `json:"created_at_ms"`
-	UpdatedAtMS    int64  `json:"updated_at_ms"`
-	DeleteAfterRun bool   `json:"delete_after_run"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Enabled          bool   `json:"enabled"`
+	Status           string `json:"status"`
+	Schedule         string `json:"schedule"`
+	Prompt           string `json:"prompt"`
+	Delivery         string `json:"delivery"`
+	DeliveryApproved bool   `json:"delivery_approved"`
+	NextRunAtMS      *int64 `json:"next_run_at_ms,omitempty"`
+	LastRunAtMS      *int64 `json:"last_run_at_ms,omitempty"`
+	LastStatus       string `json:"last_status,omitempty"`
+	LastError        string `json:"last_error,omitempty"`
+	CreatedAtMS      int64  `json:"created_at_ms"`
+	UpdatedAtMS      int64  `json:"updated_at_ms"`
+	DeleteAfterRun   bool   `json:"delete_after_run"`
 }
 
 func (h *Handler) registerAutomationRoutes(mux *http.ServeMux) {
@@ -68,20 +69,21 @@ func automationFromCronJob(job cron.CronJob) automationItem {
 	}
 
 	return automationItem{
-		ID:             job.ID,
-		Name:           firstNonEmpty(job.Name, "Untitled automation"),
-		Enabled:        job.Enabled,
-		Status:         status,
-		Schedule:       formatAutomationSchedule(job.Schedule),
-		Prompt:         job.Payload.Message,
-		Delivery:       formatAutomationDelivery(job.Payload),
-		NextRunAtMS:    job.State.NextRunAtMS,
-		LastRunAtMS:    job.State.LastRunAtMS,
-		LastStatus:     job.State.LastStatus,
-		LastError:      job.State.LastError,
-		CreatedAtMS:    job.CreatedAtMS,
-		UpdatedAtMS:    job.UpdatedAtMS,
-		DeleteAfterRun: job.DeleteAfterRun,
+		ID:               job.ID,
+		Name:             firstNonEmpty(job.Name, "Untitled automation"),
+		Enabled:          job.Enabled,
+		Status:           status,
+		Schedule:         formatAutomationSchedule(job.Schedule),
+		Prompt:           job.Payload.Message,
+		Delivery:         formatAutomationDelivery(job.Payload),
+		DeliveryApproved: job.Payload.DeliveryApproved,
+		NextRunAtMS:      job.State.NextRunAtMS,
+		LastRunAtMS:      job.State.LastRunAtMS,
+		LastStatus:       job.State.LastStatus,
+		LastError:        job.State.LastError,
+		CreatedAtMS:      job.CreatedAtMS,
+		UpdatedAtMS:      job.UpdatedAtMS,
+		DeleteAfterRun:   job.DeleteAfterRun,
 	}
 }
 
@@ -107,6 +109,9 @@ func formatAutomationSchedule(schedule cron.CronSchedule) string {
 func formatAutomationDelivery(payload cron.CronPayload) string {
 	if !payload.Deliver {
 		return "Runs in JameClaw"
+	}
+	if !payload.DeliveryApproved {
+		return "Delivery needs approval"
 	}
 	channel := strings.TrimSpace(payload.Channel)
 	to := strings.TrimSpace(payload.To)

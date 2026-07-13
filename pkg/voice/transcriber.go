@@ -46,19 +46,24 @@ func supportsAudioTranscription(model string) bool {
 // nil if no supported transcription provider is configured.
 func DetectTranscriber(cfg *config.Config) Transcriber {
 	if modelName := strings.TrimSpace(cfg.Voice.ModelName); modelName != "" {
-		modelCfg, err := cfg.GetModelConfig(modelName)
-		if err != nil {
-			return nil
-		}
-		if supportsAudioTranscription(modelCfg.Model) {
-			return NewAudioModelTranscriber(modelCfg)
+		if transcriber := detectAudioModelTranscriber(cfg, modelName); transcriber != nil {
+			return transcriber
 		}
 	}
 
 	if modelName := strings.TrimSpace(cfg.Agents.Defaults.GetModelName()); modelName != "" {
-		modelCfg, err := cfg.GetModelConfig(modelName)
-		if err == nil && supportsAudioTranscription(modelCfg.Model) {
-			if transcriber := NewAudioModelTranscriber(modelCfg); transcriber != nil {
+		if transcriber := detectAudioModelTranscriber(cfg, modelName); transcriber != nil {
+			return transcriber
+		}
+	}
+
+	for _, modelCfg := range cfg.ModelList {
+		if modelCfg == nil {
+			continue
+		}
+		protocol, _ := providers.ExtractProtocol(modelCfg.Model)
+		if protocol == "codex-cli" || protocol == "codexcli" {
+			if transcriber := newSupportedAudioModelTranscriber(modelCfg); transcriber != nil {
 				return transcriber
 			}
 		}
@@ -75,4 +80,29 @@ func DetectTranscriber(cfg *config.Config) Transcriber {
 		}
 	}
 	return nil
+}
+
+func detectAudioModelTranscriber(cfg *config.Config, modelName string) Transcriber {
+	modelCfg, err := cfg.GetModelConfig(modelName)
+	if err == nil {
+		return newSupportedAudioModelTranscriber(modelCfg)
+	}
+	if supportsAudioTranscription(modelName) {
+		return newSupportedAudioModelTranscriber(&config.ModelConfig{
+			ModelName: modelName,
+			Model:     modelName,
+		})
+	}
+	return nil
+}
+
+func newSupportedAudioModelTranscriber(modelCfg *config.ModelConfig) Transcriber {
+	if modelCfg == nil || !supportsAudioTranscription(modelCfg.Model) {
+		return nil
+	}
+	transcriber := NewAudioModelTranscriber(modelCfg)
+	if transcriber == nil {
+		return nil
+	}
+	return transcriber
 }

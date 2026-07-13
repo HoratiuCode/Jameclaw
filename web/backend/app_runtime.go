@@ -65,6 +65,13 @@ func openBrowser() error {
 	return utils.OpenBrowser(launcherOpenURL(serverAddr))
 }
 
+func openBrowserBackground() error {
+	if serverAddr == "" {
+		return fmt.Errorf("server address not set")
+	}
+	return utils.OpenBrowserBackground(launcherOpenURL(serverAddr))
+}
+
 func openTerminalChat() error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("terminal chat launcher is only supported on macOS")
