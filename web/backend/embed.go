@@ -61,6 +61,7 @@ func registerEmbedRoutesWithFS(mux *http.ServeMux, frontend fs.FS) error {
 			// Existing static files/directories should be served directly.
 			if cleanPath != "" {
 				if _, statErr := fs.Stat(subFS, cleanPath); statErr == nil {
+					setFrontendCacheHeaders(w, cleanPath)
 					fileServer.ServeHTTP(w, r)
 					return
 				}
@@ -73,6 +74,7 @@ func registerEmbedRoutesWithFS(mux *http.ServeMux, frontend fs.FS) error {
 
 			indexReq := r.Clone(r.Context())
 			indexReq.URL.Path = "/"
+			setFrontendCacheHeaders(w, "index.html")
 			fileServer.ServeHTTP(w, indexReq)
 		}),
 	)
@@ -97,4 +99,14 @@ func embeddedFrontendSubFS(frontend fs.FS) (fs.FS, error) {
 	}
 
 	return subFS, nil
+}
+
+func setFrontendCacheHeaders(w http.ResponseWriter, name string) {
+	if name == "" || name == "index.html" || strings.HasSuffix(name, ".html") {
+		w.Header().Set("Cache-Control", "no-store")
+		return
+	}
+	if strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 }

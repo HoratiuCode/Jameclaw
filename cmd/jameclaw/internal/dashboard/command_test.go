@@ -39,6 +39,7 @@ func setupDashboardTest(t *testing.T, port int) *bytes.Buffer {
 	oldCopy := dashboardCopyText
 	oldStart := dashboardStartWebUI
 	oldReachable := dashboardReachable
+	oldFresh := dashboardFresh
 	oldWaitFor := dashboardWaitFor
 	oldWait := dashboardWait
 	t.Cleanup(func() {
@@ -47,6 +48,7 @@ func setupDashboardTest(t *testing.T, port int) *bytes.Buffer {
 		dashboardCopyText = oldCopy
 		dashboardStartWebUI = oldStart
 		dashboardReachable = oldReachable
+		dashboardFresh = oldFresh
 		dashboardWaitFor = oldWaitFor
 		dashboardWait = oldWait
 	})
@@ -55,6 +57,7 @@ func setupDashboardTest(t *testing.T, port int) *bytes.Buffer {
 	dashboardCopyText = func(string) error { return nil }
 	dashboardStartWebUI = func() error { return nil }
 	dashboardReachable = func(context.Context, string) bool { return true }
+	dashboardFresh = func(context.Context, string) bool { return true }
 	dashboardWaitFor = func(context.Context, string, time.Duration) bool { return true }
 	dashboardWait = 10 * time.Millisecond
 	return &out
@@ -136,5 +139,27 @@ func TestRunDashboardStartsWebUIWhenUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Web Console is not running") {
 		t.Fatalf("output missing start message:\n%s", out.String())
+	}
+}
+
+func TestRunDashboardRefusesStaleRunningWebUI(t *testing.T) {
+	_ = setupDashboardTest(t, 19003)
+	var started bool
+	dashboardStartWebUI = func() error {
+		started = true
+		return nil
+	}
+	dashboardReachable = func(context.Context, string) bool { return true }
+	dashboardFresh = func(context.Context, string) bool { return false }
+
+	err := runDashboard(context.Background(), dashboardOptions{NoOpen: true})
+	if err == nil {
+		t.Fatal("expected stale Web Console error")
+	}
+	if started {
+		t.Fatal("did not expect WebUI start while stale process owns the port")
+	}
+	if !strings.Contains(err.Error(), "old version") {
+		t.Fatalf("error = %q, want old version guidance", err.Error())
 	}
 }

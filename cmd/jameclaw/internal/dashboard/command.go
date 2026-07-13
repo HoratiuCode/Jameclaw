@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,7 @@ var (
 	dashboardCopyText             = copyText
 	dashboardStartWebUI           = startWebUI
 	dashboardReachable            = reachable
+	dashboardFresh                = fresh
 	dashboardWaitFor              = waitReachable
 	dashboardOutput     io.Writer = os.Stdout
 	dashboardWait                 = 8 * time.Second
@@ -56,12 +58,18 @@ func runDashboard(ctx context.Context, opts dashboardOptions) error {
 		return err
 	}
 
-	if !dashboardReachable(ctx, target.BaseURL) {
+	if dashboardReachable(ctx, target.BaseURL) {
+		if !dashboardFresh(ctx, target.BaseURL) {
+			return fmt.Errorf("Web Console is already running on %s, but it appears to be an old version. Stop the old jameclaw-web process and run `jameclaw dashboard` again", target.BaseURL)
+		}
+	} else {
 		fmt.Fprintf(dashboardOutput, "Web Console is not running; starting jameclaw-web on %s...\n", target.BaseURL)
 		if err := dashboardStartWebUI(); err != nil {
 			fmt.Fprintf(dashboardOutput, "Unable to start Web Console automatically: %v\n", err)
 		} else if !dashboardWaitFor(ctx, target.BaseURL, dashboardWait) {
 			fmt.Fprintf(dashboardOutput, "Web Console started but is not responding yet. Use the URL below once it is ready.\n")
+		} else if !dashboardFresh(ctx, target.BaseURL) {
+			return fmt.Errorf("Web Console started on %s, but it does not expose the current automation blueprint API", target.BaseURL)
 		}
 	}
 
@@ -149,6 +157,34 @@ func reachable(ctx context.Context, rawURL string) bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode < http.StatusInternalServerError
+}
+
+func fresh(ctx context.Context, rawURL string) bool {
+	endpoint, err := url.JoinPath(rawURL, "/api/automation/blueprints")
+	if err != nil {
+		return false
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := dashboardHTTPClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
+		return false
+	}
+	var payload struct {
+		Blueprints []json.RawMessage `json:"blueprints"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return false
+	}
+	return len(payload.Blueprints) > 0
 }
 
 func waitReachable(ctx context.Context, rawURL string, timeout time.Duration) bool {
