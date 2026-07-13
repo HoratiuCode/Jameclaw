@@ -624,7 +624,7 @@ func (t *terminalChat) enterVoiceMode() {
 		return
 	}
 	if voice.DetectTranscriber(cfg) == nil {
-		t.addSystem("Voice mode needs a configured transcription provider. Configure voice.model_name, ElevenLabs, or a Groq model/API key first.")
+		t.addSystem("Voice mode needs a configured transcription provider. Configure voice.model_name, select a voice-capable default model such as Codex CLI, or configure ElevenLabs/Groq first.")
 		return
 	}
 	if _, err := resolveVoiceRecorderCommand(""); err != nil {

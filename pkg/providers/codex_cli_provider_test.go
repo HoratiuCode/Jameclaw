@@ -353,6 +353,58 @@ func TestBuildPrompt_ToolResults(t *testing.T) {
 	}
 }
 
+func TestCodexCliProvider_PrepareMediaMessagesStagesAudio(t *testing.T) {
+	p := &CodexCliProvider{}
+	messages := []Message{
+		{
+			Role:    "user",
+			Content: "Transcribe this audio.",
+			Media:   []string{"data:audio/ogg;base64,ZmFrZS1hdWRpbw=="},
+		},
+	}
+
+	prepared, cleanup, extraDirs, err := p.prepareMediaMessages(messages)
+	if err != nil {
+		t.Fatalf("prepareMediaMessages() error: %v", err)
+	}
+	defer cleanup()
+
+	if len(extraDirs) != 1 {
+		t.Fatalf("len(extraDirs) = %d, want 1", len(extraDirs))
+	}
+	if len(prepared) != 1 {
+		t.Fatalf("len(prepared) = %d, want 1", len(prepared))
+	}
+	if len(prepared[0].Media) != 0 {
+		t.Fatalf("prepared media should be cleared, got %d entries", len(prepared[0].Media))
+	}
+	if !strings.Contains(prepared[0].Content, "Attached media files:") {
+		t.Fatalf("prepared content missing media section: %q", prepared[0].Content)
+	}
+	if !strings.Contains(prepared[0].Content, "audio/ogg:") {
+		t.Fatalf("prepared content missing audio media type: %q", prepared[0].Content)
+	}
+
+	entries, err := os.ReadDir(extraDirs[0])
+	if err != nil {
+		t.Fatalf("ReadDir(%q) error: %v", extraDirs[0], err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("staged file count = %d, want 1", len(entries))
+	}
+	stagedPath := filepath.Join(extraDirs[0], entries[0].Name())
+	data, err := os.ReadFile(stagedPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error: %v", stagedPath, err)
+	}
+	if string(data) != "fake-audio" {
+		t.Fatalf("staged data = %q, want fake-audio", string(data))
+	}
+	if !strings.Contains(prepared[0].Content, stagedPath) {
+		t.Fatalf("prepared content missing staged path %q: %q", stagedPath, prepared[0].Content)
+	}
+}
+
 func TestBuildPrompt_SystemAndTools(t *testing.T) {
 	p := &CodexCliProvider{}
 	messages := []Message{

@@ -28,10 +28,11 @@ func supportsAudioTranscription(model string) bool {
 		"ollama", "moonshot", "shengsuanyun", "deepseek", "cerebras",
 		"vivgrid", "volcengine", "vllm", "qwen", "qwen-intl", "qwen-international", "dashscope-intl",
 		"qwen-us", "dashscope-us", "mistral", "avian", "minimax", "longcat", "modelscope", "novita",
-		"coding-plan", "alibaba-coding", "qwen-coding":
-		// These protocols all go through the OpenAI-compatible or Azure provider path in
-		// providers.CreateProviderFromConfig, so they are the only ones that can supply
-		// the audio media payload shape expected by NewAudioModelTranscriber.
+		"coding-plan", "alibaba-coding", "qwen-coding", "codex-cli", "codexcli":
+		// These protocols can receive the audio media payload shape used by
+		// NewAudioModelTranscriber. HTTP-compatible providers serialize audio as
+		// input_audio; the Codex CLI provider stages audio into local files and
+		// references those files from the prompt.
 
 		// TODO: Further restrict this by modelID, since not every model under these
 		// protocols supports audio transcription.
@@ -51,6 +52,15 @@ func DetectTranscriber(cfg *config.Config) Transcriber {
 		}
 		if supportsAudioTranscription(modelCfg.Model) {
 			return NewAudioModelTranscriber(modelCfg)
+		}
+	}
+
+	if modelName := strings.TrimSpace(cfg.Agents.Defaults.GetModelName()); modelName != "" {
+		modelCfg, err := cfg.GetModelConfig(modelName)
+		if err == nil && supportsAudioTranscription(modelCfg.Model) {
+			if transcriber := NewAudioModelTranscriber(modelCfg); transcriber != nil {
+				return transcriber
+			}
 		}
 	}
 

@@ -51,10 +51,15 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		proxy := h.createWsProxy()
 		proxyReq := r.Clone(r.Context())
+		isWebConsole := strings.HasPrefix(proxyReq.URL.Path, "/jame/ws")
 		if strings.HasPrefix(proxyReq.URL.Path, "/extension/ws") {
 			proxyReq.URL.Path = "/jame/ws"
 			proxyReq.URL.RawPath = "/jame/ws"
 			proxyReq.Header.Set("Origin", extensionGatewayOrigin)
+		}
+		if isWebConsole {
+			h.activeJameWebSockets.Add(1)
+			defer h.activeJameWebSockets.Add(-1)
 		}
 		proxy.ServeHTTP(w, proxyReq)
 	}

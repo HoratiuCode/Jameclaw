@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
 )
@@ -19,6 +20,7 @@ type Handler struct {
 	oauthState           map[string]string
 	fileSearchMu         sync.Mutex
 	fileSearchCache      fileSearchCache
+	activeJameWebSockets atomic.Int64
 }
 
 // NewHandler creates an instance of the API handler.
@@ -88,4 +90,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // Shutdown gracefully shuts down the handler, stopping the gateway if it was started by this handler.
 func (h *Handler) Shutdown() {
 	h.StopGateway()
+}
+
+// WebActivityActive reports whether the local web console is actively connected
+// to the Jame gateway through the launcher WebSocket proxy.
+func (h *Handler) WebActivityActive() bool {
+	return h.activeJameWebSockets.Load() > 0
 }

@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -32,7 +35,13 @@ func (p *CodexCliProvider) Chat(
 		return nil, fmt.Errorf("codex command not configured")
 	}
 
-	prompt := p.buildPrompt(messages, tools)
+	preparedMessages, cleanup, extraDirs, err := p.prepareMediaMessages(messages)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	prompt := p.buildPrompt(preparedMessages, tools)
 
 	args := []string{
 		"exec",
@@ -47,6 +56,9 @@ func (p *CodexCliProvider) Chat(
 	if p.workspace != "" {
 		args = append(args, "-C", p.workspace)
 	}
+	for _, dir := range extraDirs {
+		args = append(args, "--add-dir", dir)
+	}
 	args = append(args, "-") // read prompt from stdin
 
 	cmd := exec.CommandContext(ctx, p.command, args...)
@@ -56,7 +68,7 @@ func (p *CodexCliProvider) Chat(
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 
 	// Parse JSONL from stdout even if exit code is non-zero,
 	// because codex writes diagnostic noise to stderr (e.g. rollout errors)
@@ -79,6 +91,130 @@ func (p *CodexCliProvider) Chat(
 	}
 
 	return p.parseJSONLEvents(stdout.String())
+}
+
+type stagedCodexMedia struct {
+	MediaType string
+	Path      string
+}
+
+// prepareMediaMessages materializes data URL media into local files so the Codex
+// CLI can inspect them during the run. The current CLI only has native --image
+// attachments; file staging gives audio transcription requests a usable path.
+func (p *CodexCliProvider) prepareMediaMessages(messages []Message) ([]Message, func(), []string, error) {
+	prepared := make([]Message, len(messages))
+	copy(prepared, messages)
+
+	var tempDirs []string
+	for i := range prepared {
+		if len(prepared[i].Media) == 0 {
+			continue
+		}
+
+		staged := make([]stagedCodexMedia, 0, len(prepared[i].Media))
+		for mediaIndex, mediaURL := range prepared[i].Media {
+			mediaType, data, ok := parseDataMediaURL(mediaURL)
+			if !ok {
+				staged = append(staged, stagedCodexMedia{MediaType: "media", Path: mediaURL})
+				continue
+			}
+
+			tmpDir, err := os.MkdirTemp("", "jameclaw-codex-cli-media-*")
+			if err != nil {
+				cleanupTempDirs(tempDirs)
+				return nil, func() {}, nil, fmt.Errorf("staging codex cli media: %w", err)
+			}
+			tempDirs = append(tempDirs, tmpDir)
+
+			ext := mediaExtension(mediaType)
+			path := filepath.Join(tmpDir, fmt.Sprintf("media-%d%s", mediaIndex+1, ext))
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				cleanupTempDirs(tempDirs)
+				return nil, func() {}, nil, fmt.Errorf("writing codex cli media: %w", err)
+			}
+			staged = append(staged, stagedCodexMedia{MediaType: mediaType, Path: path})
+		}
+
+		prepared[i].Content = appendCodexMediaReferences(prepared[i].Content, staged)
+		prepared[i].Media = nil
+	}
+
+	cleanup := func() {
+		cleanupTempDirs(tempDirs)
+	}
+	return prepared, cleanup, tempDirs, nil
+}
+
+func parseDataMediaURL(mediaURL string) (string, []byte, bool) {
+	if !strings.HasPrefix(mediaURL, "data:") {
+		return "", nil, false
+	}
+
+	header, encoded, found := strings.Cut(strings.TrimPrefix(mediaURL, "data:"), ",")
+	if !found || !strings.Contains(header, ";base64") {
+		return "", nil, false
+	}
+
+	mediaType, _, _ := strings.Cut(header, ";")
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", nil, false
+	}
+	return mediaType, data, true
+}
+
+func mediaExtension(mediaType string) string {
+	switch strings.ToLower(mediaType) {
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return ".wav"
+	case "audio/mpeg", "audio/mp3":
+		return ".mp3"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/webm":
+		return ".webm"
+	case "audio/mp4", "audio/m4a":
+		return ".m4a"
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".bin"
+	}
+}
+
+func appendCodexMediaReferences(content string, media []stagedCodexMedia) string {
+	if len(media) == 0 {
+		return content
+	}
+
+	var sb strings.Builder
+	sb.WriteString(strings.TrimSpace(content))
+	if sb.Len() > 0 {
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("Attached media files:\n")
+	for _, item := range media {
+		sb.WriteString("- ")
+		sb.WriteString(item.MediaType)
+		sb.WriteString(": ")
+		sb.WriteString(item.Path)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nUse these attached media files when answering.")
+	return sb.String()
+}
+
+func cleanupTempDirs(dirs []string) {
+	for _, dir := range dirs {
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // GetDefaultModel returns the default model identifier.

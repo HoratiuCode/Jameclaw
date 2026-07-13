@@ -90,6 +90,28 @@ func TestDetectTranscriber(t *testing.T) {
 			wantName: "audio-model",
 		},
 		{
+			name: "voice model name selects codex cli audio model transcriber",
+			cfg: &config.Config{
+				Voice: config.VoiceConfig{ModelName: "voice-codex-cli"},
+				ModelList: []*config.ModelConfig{
+					{ModelName: "voice-codex-cli", Model: "codex-cli/gpt-5.4"},
+				},
+			},
+			wantName: "audio-model",
+		},
+		{
+			name: "default codex cli model is used when voice model name is empty",
+			cfg: &config.Config{
+				Agents: config.AgentsConfig{
+					Defaults: config.AgentDefaults{ModelName: "codex-cli"},
+				},
+				ModelList: []*config.ModelConfig{
+					{ModelName: "codex-cli", Model: "codex-cli/gpt-5.4"},
+				},
+			},
+			wantName: "audio-model",
+		},
+		{
 			name: "voice model name with non openai compatible protocol does not select audio model transcriber",
 			cfg: (&config.Config{
 				Voice: config.VoiceConfig{ModelName: "voice-anthropic"},
@@ -149,6 +171,19 @@ func TestDetectTranscriber(t *testing.T) {
 			name: "elevenlabs voice config key",
 			cfg: &config.Config{
 				Voice: config.VoiceConfig{ElevenLabsAPIKey: "sk_elevenlabs_test"},
+			},
+			wantName: "elevenlabs",
+		},
+		{
+			name: "uncreatable default model does not block elevenlabs",
+			cfg: &config.Config{
+				Agents: config.AgentsConfig{
+					Defaults: config.AgentDefaults{ModelName: "default-openai"},
+				},
+				Voice: config.VoiceConfig{ElevenLabsAPIKey: "sk_elevenlabs_test"},
+				ModelList: []*config.ModelConfig{
+					{ModelName: "default-openai", Model: "openai/gpt-4o-audio-preview"},
+				},
 			},
 			wantName: "elevenlabs",
 		},
