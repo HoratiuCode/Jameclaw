@@ -323,7 +323,8 @@ func setupAndStartServices(
 		return agentLoop.GetActiveTurn() != nil
 	})
 	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, agentLoop, msgBus.PublishOutbound)
-	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
+	automationRegistrar := createAutomationRegistrar(cfg, runningServices.CronService)
+	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar, automationRegistrar)
 
 	if err = runningServices.ChannelManager.StartAll(context.Background()); err != nil {
 		return nil, fmt.Errorf("error starting channels: %w", err)
@@ -522,7 +523,8 @@ func restartServices(
 		return al.GetActiveTurn() != nil
 	})
 	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, al, msgBus.PublishOutbound)
-	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar)
+	automationRegistrar := createAutomationRegistrar(cfg, runningServices.CronService)
+	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar, automationRegistrar)
 
 	if err = runningServices.ChannelManager.Reload(context.Background(), cfg); err != nil {
 		return fmt.Errorf("error reload channels: %w", err)

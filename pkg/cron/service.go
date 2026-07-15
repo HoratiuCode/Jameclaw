@@ -638,6 +638,56 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 	return enabled
 }
 
+// RunNow queues an enabled job for immediate execution using the service's
+// configured handler. The caller can read the job state to follow completion.
+func (cs *CronService) RunNow(jobID string) error {
+	cs.mu.Lock()
+
+	var job *CronJob
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == jobID {
+			job = &cs.store.Jobs[i]
+			break
+		}
+	}
+	if job == nil {
+		cs.mu.Unlock()
+		return fmt.Errorf("job not found")
+	}
+	if !job.Enabled {
+		cs.mu.Unlock()
+		return fmt.Errorf("job is disabled")
+	}
+	if job.State.RunningAtMS != nil {
+		cs.mu.Unlock()
+		return fmt.Errorf("job is already running")
+	}
+	if cs.onJob == nil {
+		cs.mu.Unlock()
+		return fmt.Errorf("job execution is unavailable")
+	}
+
+	now := time.Now().UnixMilli()
+	job.State.NextRunAtMS = nil
+	job.State.RunningAtMS = cronInt64Ptr(now)
+	job.State.RunClaimExpiresAtMS = cronInt64Ptr(now + runClaimTTL.Milliseconds())
+	if err := cs.saveStoreUnsafe(); err != nil {
+		cs.mu.Unlock()
+		return err
+	}
+	cs.mu.Unlock()
+
+	cs.parallelWaitGroup.Add(1)
+	go func() {
+		defer cs.parallelWaitGroup.Done()
+		cs.parallelSem <- struct{}{}
+		defer func() { <-cs.parallelSem }()
+		cs.executeJobByID(jobID)
+	}()
+
+	return nil
+}
+
 func (cs *CronService) Status() map[string]any {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()

@@ -3,7 +3,10 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -42,6 +45,7 @@ type automationItem struct {
 	LastRunAtMS      *int64 `json:"last_run_at_ms,omitempty"`
 	LastStatus       string `json:"last_status,omitempty"`
 	LastError        string `json:"last_error,omitempty"`
+	Running          bool   `json:"running"`
 	CreatedAtMS      int64  `json:"created_at_ms"`
 	UpdatedAtMS      int64  `json:"updated_at_ms"`
 	DeleteAfterRun   bool   `json:"delete_after_run"`
@@ -49,8 +53,101 @@ type automationItem struct {
 
 func (h *Handler) registerAutomationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/automation", h.handleAutomationList)
+	mux.HandleFunc("GET /api/automation/{id}/output", h.handleAutomationOutput)
+	mux.HandleFunc("POST /api/automation/{id}/run", h.handleAutomationRun)
 	mux.HandleFunc("GET /api/automation/blueprints", h.handleAutomationBlueprintList)
 	mux.HandleFunc("POST /api/automation/blueprints/instantiate", h.handleAutomationBlueprintInstantiate)
+}
+
+func (h *Handler) handleAutomationRun(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		http.Error(w, "automation id is required", http.StatusBadRequest)
+		return
+	}
+
+	gatewayURL := h.gatewayProxyURL()
+	gatewayURL.Path = "/automation/run/" + url.PathEscape(id)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, gatewayURL.String(), nil)
+	if err != nil {
+		http.Error(w, "failed to create gateway request", http.StatusInternalServerError)
+		return
+	}
+	token := strings.TrimSpace(cfg.Channels.Jame.Token())
+	if token == "" {
+		http.Error(w, "Jame gateway access token is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		http.Error(w, "gateway is unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		http.Error(w, strings.TrimSpace(string(message)), resp.StatusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+}
+
+func (h *Handler) handleAutomationOutput(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+
+	id := strings.TrimSpace(r.PathValue("id"))
+	service := cron.NewCronService(filepath.Join(cfg.WorkspacePath(), "cron", "jobs.json"), nil)
+	var job *cron.CronJob
+	for _, candidate := range service.ListJobs(true) {
+		if candidate.ID == id {
+			jobCopy := candidate
+			job = &jobCopy
+			break
+		}
+	}
+	if job == nil {
+		http.Error(w, "automation not found", http.StatusNotFound)
+		return
+	}
+	if job.State.LastOutputPath == "" {
+		http.Error(w, "no output has been recorded yet", http.StatusNotFound)
+		return
+	}
+
+	outputRoot := filepath.Join(cfg.WorkspacePath(), "cron", "output")
+	relPath, err := filepath.Rel(outputRoot, job.State.LastOutputPath)
+	if err != nil || relPath == "." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || filepath.IsAbs(relPath) {
+		http.Error(w, "invalid automation output path", http.StatusInternalServerError)
+		return
+	}
+	content, err := os.ReadFile(job.State.LastOutputPath)
+	if err != nil {
+		http.Error(w, "automation output is unavailable", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"automation_id": id,
+		"status":        job.State.LastStatus,
+		"ran_at_ms":     job.State.LastRunAtMS,
+		"content":       string(content),
+	})
 }
 
 func (h *Handler) handleAutomationList(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +231,7 @@ func automationFromCronJob(job cron.CronJob) automationItem {
 		LastRunAtMS:      job.State.LastRunAtMS,
 		LastStatus:       job.State.LastStatus,
 		LastError:        job.State.LastError,
+		Running:          job.State.RunningAtMS != nil,
 		CreatedAtMS:      job.CreatedAtMS,
 		UpdatedAtMS:      job.UpdatedAtMS,
 		DeleteAfterRun:   job.DeleteAfterRun,

@@ -2,8 +2,11 @@ import {
   IconAlertCircle,
   IconCalendarTime,
   IconClockHour4,
+  IconFileText,
+  IconLoader2,
   IconMessageCircle,
   IconPlus,
+  IconPlayerPlay,
   IconSparkles,
 } from "@tabler/icons-react"
 import { Link } from "@tanstack/react-router"
@@ -14,9 +17,12 @@ import {
   type AutomationBlueprint,
   type AutomationBlueprintField,
   type AutomationItem,
+  type AutomationOutput,
   getAutomationBlueprints,
   getAutomations,
+  getAutomationOutput,
   instantiateAutomationBlueprint,
+  runAutomation,
 } from "@/api/automation"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
@@ -41,6 +47,8 @@ export function AutomationPage() {
   const { data, error, isLoading } = useQuery({
     queryKey: ["automation"],
     queryFn: getAutomations,
+    refetchInterval: (query) =>
+      query.state.data?.some((automation) => automation.running) ? 2_000 : false,
   })
   const { data: blueprints } = useQuery({
     queryKey: ["automation-blueprints"],
@@ -301,6 +309,28 @@ function MetricCard({
 }
 
 function AutomationCard({ automation }: { automation: AutomationItem }) {
+  const queryClient = useQueryClient()
+  const [output, setOutput] = useState<AutomationOutput | null>(null)
+  const [outputError, setOutputError] = useState<string | null>(null)
+
+  const runMutation = useMutation({
+    mutationFn: () => runAutomation(automation.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["automation"] })
+    },
+  })
+  const outputMutation = useMutation({
+    mutationFn: () => getAutomationOutput(automation.id),
+    onSuccess: (data) => {
+      setOutput(data)
+      setOutputError(null)
+    },
+    onError: (err) => {
+      setOutput(null)
+      setOutputError(err instanceof Error ? err.message : "Could not load automation output")
+    },
+  })
+
   return (
     <Card
       className={cn(
@@ -319,7 +349,27 @@ function AutomationCard({ automation }: { automation: AutomationItem }) {
               {automation.schedule}
             </CardDescription>
           </div>
-          <StatusBadge status={automation.status} enabled={automation.enabled} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="gap-2"
+              disabled={!automation.enabled || automation.running || runMutation.isPending}
+              onClick={() => runMutation.mutate()}
+            >
+              {automation.running || runMutation.isPending ? (
+                <IconLoader2 className="size-4 animate-spin" />
+              ) : (
+                <IconPlayerPlay className="size-4" />
+              )}
+              {automation.running ? "Running" : "Run now"}
+            </Button>
+            <StatusBadge
+              status={automation.running ? "running" : automation.status}
+              enabled={automation.enabled}
+            />
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -359,6 +409,46 @@ function AutomationCard({ automation }: { automation: AutomationItem }) {
             <span className="break-words">{automation.last_error}</span>
           </div>
         ) : null}
+        {runMutation.error ? (
+          <div className="text-destructive text-sm">
+            {runMutation.error instanceof Error
+              ? runMutation.error.message
+              : "Could not run automation."}
+          </div>
+        ) : null}
+        <div className="border-t pt-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={!automation.last_run_at_ms || outputMutation.isPending}
+            onClick={() => outputMutation.mutate()}
+          >
+            {outputMutation.isPending ? (
+              <IconLoader2 className="size-4 animate-spin" />
+            ) : (
+              <IconFileText className="size-4" />
+            )}
+            View last output
+          </Button>
+          {outputError ? (
+            <div className="text-destructive mt-3 text-sm">{outputError}</div>
+          ) : null}
+          {output ? (
+            <div className="mt-3 overflow-hidden rounded-md border">
+              <div className="bg-muted/50 flex items-center justify-between gap-3 border-b px-3 py-2 text-xs">
+                <span className="font-medium">Last run output</span>
+                <span className="text-muted-foreground">
+                  {output.ran_at_ms ? formatDateTime(output.ran_at_ms) : "Unknown time"}
+                </span>
+              </div>
+              <pre className="max-h-96 overflow-auto p-3 text-xs leading-5 whitespace-pre-wrap break-words">
+                {output.content}
+              </pre>
+            </div>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   )
@@ -387,6 +477,7 @@ function StatusBadge({
         "w-fit shrink-0 rounded-md px-2 py-1 text-xs font-medium",
         label === "scheduled" && "bg-emerald-100 text-emerald-700",
         label === "waiting" && "bg-blue-100 text-blue-700",
+        label === "running" && "bg-amber-100 text-amber-700",
         label === "disabled" && "bg-muted text-muted-foreground",
         label === "error" && "bg-destructive/10 text-destructive",
       )}
