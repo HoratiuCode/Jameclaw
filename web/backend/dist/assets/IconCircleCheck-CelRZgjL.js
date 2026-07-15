@@ -1,1 +1,0 @@
-import{c}from"./index-BdMBJDQ5.js";const e=[["path",{d:"M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0",key:"svg-0"}],["path",{d:"M9 12l2 2l4 -4",key:"svg-1"}]],t=c("outline","circle-check","CircleCheck",e);export{t as I};

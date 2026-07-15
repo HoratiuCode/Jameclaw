@@ -55,7 +55,7 @@ interface NavGroup {
   items: NavItem[]
 }
 
-const fallbackVersion = "707I"
+const fallbackVersion = "157M"
 
 function extractVersionNumber(version: string | undefined): number | null {
   if (!version) {
