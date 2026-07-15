@@ -22,6 +22,7 @@ import { Route as CronRouteImport } from './routes/cron'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as ConfigRouteImport } from './routes/config'
 import { Route as AutomationRouteImport } from './routes/automation'
+import { Route as AspirineRouteImport } from './routes/aspirine'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AgentRouteImport } from './routes/agent'
@@ -98,6 +99,11 @@ const AutomationRoute = AutomationRouteImport.update({
   path: '/automation',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AspirineRoute = AspirineRouteImport.update({
+  id: '/aspirine',
+  path: '/aspirine',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -155,6 +161,7 @@ export interface FileRoutesByFullPath {
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
   '/analytics': typeof AnalyticsRoute
+  '/aspirine': typeof AspirineRoute
   '/automation': typeof AutomationRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
@@ -180,6 +187,7 @@ export interface FileRoutesByTo {
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
   '/analytics': typeof AnalyticsRoute
+  '/aspirine': typeof AspirineRoute
   '/automation': typeof AutomationRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
@@ -206,6 +214,7 @@ export interface FileRoutesById {
   '/agent': typeof AgentRouteWithChildren
   '/agents': typeof AgentsRoute
   '/analytics': typeof AnalyticsRoute
+  '/aspirine': typeof AspirineRoute
   '/automation': typeof AutomationRoute
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
@@ -233,6 +242,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/agents'
     | '/analytics'
+    | '/aspirine'
     | '/automation'
     | '/config'
     | '/credentials'
@@ -258,6 +268,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/agents'
     | '/analytics'
+    | '/aspirine'
     | '/automation'
     | '/config'
     | '/credentials'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/agents'
     | '/analytics'
+    | '/aspirine'
     | '/automation'
     | '/config'
     | '/credentials'
@@ -309,6 +321,7 @@ export interface RootRouteChildren {
   AgentRoute: typeof AgentRouteWithChildren
   AgentsRoute: typeof AgentsRoute
   AnalyticsRoute: typeof AnalyticsRoute
+  AspirineRoute: typeof AspirineRoute
   AutomationRoute: typeof AutomationRoute
   ConfigRoute: typeof ConfigRouteWithChildren
   CredentialsRoute: typeof CredentialsRoute
@@ -415,6 +428,13 @@ declare module '@tanstack/react-router' {
       path: '/automation'
       fullPath: '/automation'
       preLoaderRoute: typeof AutomationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/aspirine': {
+      id: '/aspirine'
+      path: '/aspirine'
+      fullPath: '/aspirine'
+      preLoaderRoute: typeof AspirineRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/analytics': {
@@ -533,6 +553,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentRoute: AgentRouteWithChildren,
   AgentsRoute: AgentsRoute,
   AnalyticsRoute: AnalyticsRoute,
+  AspirineRoute: AspirineRoute,
   AutomationRoute: AutomationRoute,
   ConfigRoute: ConfigRouteWithChildren,
   CredentialsRoute: CredentialsRoute,

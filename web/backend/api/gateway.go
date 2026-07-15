@@ -481,81 +481,28 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 //
 //	POST /api/gateway/start
 func (h *Handler) handleGatewayStart(w http.ResponseWriter, r *http.Request) {
-	// Prevent duplicate starts by checking health endpoint
-	cfg, cfgErr := config.LoadConfig(h.configPath)
-	if cfgErr == nil && cfg != nil {
-		healthResp, statusCode, err := h.getGatewayHealth(cfg, 2*time.Second)
-		if err == nil && statusCode == http.StatusOK {
-			// Gateway is already running, attach to the existing process
-			pid := healthResp.Pid
-			gateway.mu.Lock()
-			ready, reason, err := h.gatewayStartReady()
-			if err != nil {
-				gateway.mu.Unlock()
-				http.Error(
-					w,
-					fmt.Sprintf("Failed to validate gateway start conditions: %v", err),
-					http.StatusInternalServerError,
-				)
-				return
-			}
-			if !ready {
-				gateway.mu.Unlock()
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]any{
-					"status":  "precondition_failed",
-					"message": reason,
-				})
-				return
-			}
-			_, err = h.startGatewayLocked("starting", pid)
-			gateway.mu.Unlock()
-			if err != nil {
-				logger.ErrorC("gateway", fmt.Sprintf("Failed to attach to running gateway (PID: %d): %v", pid, err))
-				http.Error(w, fmt.Sprintf("Failed to attach to gateway: %v", err), http.StatusInternalServerError)
-				return
-			}
+	pid, err := h.StartGateway()
+	if err != nil {
+		var precondErr *preconditionFailedError
+		if errors.As(err, &precondErr) {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]any{
-				"status": "ok",
-				"pid":    pid,
+				"status":  "precondition_failed",
+				"message": precondErr.reason,
 			})
 			return
 		}
-	}
-
-	gateway.mu.Lock()
-	defer gateway.mu.Unlock()
-
-	if gateway.cmd != nil && gateway.cmd.Process != nil {
-		gateway.cmd = nil
-		setGatewayRuntimeStatusLocked("stopped")
-	}
-
-	ready, reason, err := h.gatewayStartReady()
-	if err != nil {
-		http.Error(
-			w,
-			fmt.Sprintf("Failed to validate gateway start conditions: %v", err),
-			http.StatusInternalServerError,
-		)
-		return
-	}
-	if !ready {
+		if strings.Contains(err.Error(), "validate gateway start conditions") {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]any{
-			"status":  "precondition_failed",
-			"message": reason,
+			"status":  "failed",
+			"message": fmt.Sprintf("Failed to start gateway: %v", err),
 		})
-		return
-	}
-
-	pid, err := h.startGatewayLocked("starting", 0)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to start gateway: %v", err), http.StatusInternalServerError)
 		return
 	}
 

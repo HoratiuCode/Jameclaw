@@ -29,6 +29,22 @@ export interface AgentsResponse {
   configured_models: number
 }
 
+export interface AgentDailyNote {
+  date: string
+  path: string
+  content: string
+}
+
+export interface AgentMemory {
+  agent_id: string
+  workspace: string
+  memory_path: string
+  long_term: string
+  daily_notes: AgentDailyNote[]
+  human_notes?: string
+  files_checked: Record<string, string>
+}
+
 export async function getAgents(): Promise<AgentsResponse> {
   const res = await fetch("/api/agents")
   if (!res.ok) {
@@ -49,6 +65,19 @@ export async function getAgents(): Promise<AgentsResponse> {
     })),
     enabled_channels: data.enabled_channels ?? 0,
     configured_models: data.configured_models ?? 0,
+  }
+}
+
+export async function getAgentMemory(id: string): Promise<AgentMemory> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(id)}/memory`)
+  if (!res.ok) {
+    throw new Error(`Failed to fetch agent memory: ${res.status}`)
+  }
+  const data = (await res.json()) as AgentMemory
+  return {
+    ...data,
+    daily_notes: data.daily_notes ?? [],
+    files_checked: data.files_checked ?? {},
   }
 }
 

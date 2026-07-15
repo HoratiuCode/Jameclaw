@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/sipeed/jameclaw/pkg/config"
 )
@@ -36,8 +39,25 @@ type human struct {
 	StatusStyle    string `json:"status_style"`
 }
 
+type agentMemoryResponse struct {
+	AgentID      string            `json:"agent_id"`
+	Workspace    string            `json:"workspace"`
+	MemoryPath   string            `json:"memory_path"`
+	LongTerm     string            `json:"long_term"`
+	DailyNotes   []agentDailyNote  `json:"daily_notes"`
+	HumanNotes   string            `json:"human_notes,omitempty"`
+	FilesChecked map[string]string `json:"files_checked"`
+}
+
+type agentDailyNote struct {
+	Date    string `json:"date"`
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
 func (h *Handler) registerAgentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents", h.handleListAgents)
+	mux.HandleFunc("GET /api/agents/{id}/memory", h.handleGetAgentMemory)
 	mux.HandleFunc("POST /api/agents", h.handleCreateAgent)
 	mux.HandleFunc("PATCH /api/agents/{id}", h.handlePatchAgent)
 }
@@ -158,6 +178,119 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		"enabled_channels":  countEnabledChannels(cfg.Channels),
 		"configured_models": len(cfg.ModelList),
 	})
+}
+
+func (h *Handler) handleGetAgentMemory(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimSpace(r.PathValue("id"))
+	if agentID == "" {
+		http.Error(w, "missing agent id", http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+
+	workspace, humanNotes, ok := resolveAgentMemoryWorkspace(cfg, agentID)
+	if !ok {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	memoryDir := filepath.Join(workspace, "memory")
+	memoryPath := filepath.Join(memoryDir, "MEMORY.md")
+	longTerm := readOptionalTextFile(memoryPath)
+
+	dailyNotes := make([]agentDailyNote, 0, 7)
+	filesChecked := map[string]string{"long_term": memoryPath}
+	for i := range 7 {
+		date := time.Now().AddDate(0, 0, -i)
+		compactDate := date.Format("20060102")
+		notePath := filepath.Join(memoryDir, compactDate[:6], compactDate+".md")
+		filesChecked[date.Format("2006-01-02")] = notePath
+		if content := readOptionalTextFile(notePath); strings.TrimSpace(content) != "" {
+			dailyNotes = append(dailyNotes, agentDailyNote{
+				Date:    date.Format("2006-01-02"),
+				Path:    notePath,
+				Content: content,
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agentMemoryResponse{
+		AgentID:      agentID,
+		Workspace:    workspace,
+		MemoryPath:   memoryPath,
+		LongTerm:     longTerm,
+		DailyNotes:   dailyNotes,
+		HumanNotes:   humanNotes,
+		FilesChecked: filesChecked,
+	})
+}
+
+func resolveAgentMemoryWorkspace(cfg *config.Config, agentID string) (string, string, bool) {
+	defaultWorkspace := cfg.WorkspacePath()
+	if agentID == "main" {
+		for _, agent := range cfg.Agents.List {
+			if agent.ID == "main" {
+				workspace := strings.TrimSpace(agent.Workspace)
+				if workspace == "" {
+					workspace = defaultWorkspace
+				}
+				humanNotes := ""
+				if agent.Human != nil {
+					humanNotes = agent.Human.MemoryNotes
+				}
+				return expandAgentWorkspace(workspace), humanNotes, true
+			}
+		}
+		return expandAgentWorkspace(defaultWorkspace), "", true
+	}
+
+	for _, agent := range cfg.Agents.List {
+		if agent.ID != agentID {
+			continue
+		}
+		workspace := strings.TrimSpace(agent.Workspace)
+		if workspace == "" {
+			workspace = defaultWorkspace
+		}
+		humanNotes := ""
+		if agent.Human != nil {
+			humanNotes = agent.Human.MemoryNotes
+		}
+		return expandAgentWorkspace(workspace), humanNotes, true
+	}
+	return "", "", false
+}
+
+func expandAgentWorkspace(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return path
+	}
+	if path[0] != '~' {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if len(path) > 1 && path[1] == '/' {
+		return home + path[1:]
+	}
+	return home
+}
+
+func readOptionalTextFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func summarizeHuman(value *config.HumanConfig) human {
