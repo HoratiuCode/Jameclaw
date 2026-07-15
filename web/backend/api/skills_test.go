@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -301,7 +303,7 @@ func TestHandleImportSkill(t *testing.T) {
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", "Plain Skill.md")
+	part, err := writer.CreateFormFile("file", "Plain Skill.skill")
 	if err != nil {
 		t.Fatalf("CreateFormFile() error = %v", err)
 	}
@@ -355,6 +357,42 @@ func TestHandleImportSkill(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("plain-skill should be listed after import, got %#v", listResp.Skills)
+	}
+}
+
+func TestImportedSkillArchiveFiles(t *testing.T) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	skill, err := writer.Create("example-skill/SKILL.md")
+	if err != nil {
+		t.Fatalf("Create(SKILL.md) error = %v", err)
+	}
+	if _, err := io.WriteString(skill, "---\nname: example-skill\ndescription: Example archive skill\n---\n\n# Example\n"); err != nil {
+		t.Fatalf("WriteString(SKILL.md) error = %v", err)
+	}
+	reference, err := writer.Create("example-skill/references/guide.md")
+	if err != nil {
+		t.Fatalf("Create(reference) error = %v", err)
+	}
+	if _, err := io.WriteString(reference, "Supporting guidance.\n"); err != nil {
+		t.Fatalf("WriteString(reference) error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	name, files, err := importedSkillFiles("example-skill.skill", archive.Bytes())
+	if err != nil {
+		t.Fatalf("importedSkillFiles() error = %v", err)
+	}
+	if name != "example-skill" {
+		t.Fatalf("name = %q, want example-skill", name)
+	}
+	if got := string(files["references/guide.md"]); got != "Supporting guidance.\n" {
+		t.Fatalf("reference content = %q", got)
+	}
+	if got := string(files["SKILL.md"]); !strings.Contains(got, "name: example-skill") {
+		t.Fatalf("SKILL.md did not retain normalized frontmatter: %q", got)
 	}
 }
 

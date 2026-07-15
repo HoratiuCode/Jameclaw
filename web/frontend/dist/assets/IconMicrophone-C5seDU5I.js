@@ -1,1 +1,0 @@
-import{f as o}from"./index-D-0HGs90.js";const e=[["path",{d:"M9 5a3 3 0 0 1 3 -3a3 3 0 0 1 3 3v5a3 3 0 0 1 -3 3a3 3 0 0 1 -3 -3l0 -5",key:"svg-0"}],["path",{d:"M5 10a7 7 0 0 0 14 0",key:"svg-1"}],["path",{d:"M8 21l8 0",key:"svg-2"}],["path",{d:"M12 17l0 4",key:"svg-3"}]],t=o("outline","microphone","Microphone",e);export{t as I};

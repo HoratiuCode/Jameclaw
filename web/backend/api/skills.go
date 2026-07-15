@@ -1,6 +1,8 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -163,12 +165,11 @@ func (h *Handler) handleImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	skillName, err := normalizeImportedSkillName(fileHeader.Filename, content)
+	skillName, skillFiles, err := importedSkillFiles(fileHeader.Filename, content)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	content = normalizeImportedSkillContent(content, skillName)
 
 	workspace := cfg.WorkspacePath()
 	skillDir := filepath.Join(workspace, "skills", skillName)
@@ -182,9 +183,16 @@ func (h *Handler) handleImportSkill(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to create skill directory: %v", err), http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(skillFile, content, 0o644); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save skill: %v", err), http.StatusInternalServerError)
-		return
+	for relativePath, fileContent := range skillFiles {
+		path := filepath.Join(skillDir, relativePath)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to create skill directory: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if err := os.WriteFile(path, fileContent, 0o644); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save skill: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	loader := newSkillsLoader(workspace)
@@ -201,6 +209,107 @@ func (h *Handler) handleImportSkill(w http.ResponseWriter, r *http.Request) {
 		"name": skillName,
 		"path": skillFile,
 	})
+}
+
+const maxImportedSkillArchiveSize = 10 << 20
+
+// importedSkillFiles accepts both a plain Markdown skill and a .skill ZIP package.
+// ZIP packages store SKILL.md and optional supporting files under one root directory.
+func importedSkillFiles(filename string, content []byte) (string, map[string][]byte, error) {
+	if strings.EqualFold(filepath.Ext(filename), ".skill") && bytes.HasPrefix(content, []byte("PK")) {
+		return importedSkillArchiveFiles(filename, content)
+	}
+
+	skillName, err := normalizeImportedSkillName(filename, content)
+	if err != nil {
+		return "", nil, err
+	}
+	return skillName, map[string][]byte{
+		"SKILL.md": normalizeImportedSkillContent(content, skillName),
+	}, nil
+}
+
+func importedSkillArchiveFiles(filename string, content []byte) (string, map[string][]byte, error) {
+	archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid .skill archive: %w", err)
+	}
+
+	var skillFile *zip.File
+	var root string
+	for _, file := range archive.File {
+		name, ok := safeImportedSkillArchivePath(file.Name)
+		if !ok || file.FileInfo().IsDir() || filepath.Base(name) != "SKILL.md" {
+			continue
+		}
+		if skillFile != nil {
+			return "", nil, fmt.Errorf(".skill archive must contain exactly one SKILL.md")
+		}
+		skillFile = file
+		root = filepath.Dir(name)
+	}
+	if skillFile == nil {
+		return "", nil, fmt.Errorf(".skill archive does not contain SKILL.md")
+	}
+
+	skillContent, err := readImportedSkillArchiveFile(skillFile)
+	if err != nil {
+		return "", nil, err
+	}
+	skillName, err := normalizeImportedSkillName(filename, skillContent)
+	if err != nil {
+		return "", nil, err
+	}
+
+	files := map[string][]byte{"SKILL.md": normalizeImportedSkillContent(skillContent, skillName)}
+	prefix := ""
+	if root != "." {
+		prefix = root + "/"
+	}
+	for _, file := range archive.File {
+		archivePath, ok := safeImportedSkillArchivePath(file.Name)
+		if !ok || file.FileInfo().IsDir() || !strings.HasPrefix(archivePath, prefix) {
+			continue
+		}
+		relativePath := strings.TrimPrefix(archivePath, prefix)
+		if relativePath == "SKILL.md" {
+			continue
+		}
+		fileContent, err := readImportedSkillArchiveFile(file)
+		if err != nil {
+			return "", nil, err
+		}
+		files[relativePath] = fileContent
+	}
+	return skillName, files, nil
+}
+
+func safeImportedSkillArchivePath(name string) (string, bool) {
+	path := strings.TrimPrefix(filepath.ToSlash(name), "./")
+	path = strings.TrimPrefix(path, "/")
+	if path == "" || strings.HasPrefix(path, "../") || strings.Contains(path, "/../") {
+		return "", false
+	}
+	return path, true
+}
+
+func readImportedSkillArchiveFile(file *zip.File) ([]byte, error) {
+	if file.UncompressedSize64 > maxImportedSkillArchiveSize {
+		return nil, fmt.Errorf(".skill archive contains a file larger than 10MB")
+	}
+	reader, err := file.Open()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read .skill archive: %w", err)
+	}
+	defer reader.Close()
+	content, err := io.ReadAll(io.LimitReader(reader, maxImportedSkillArchiveSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read .skill archive: %w", err)
+	}
+	if len(content) > maxImportedSkillArchiveSize {
+		return nil, fmt.Errorf(".skill archive contains a file larger than 10MB")
+	}
+	return content, nil
 }
 
 func (h *Handler) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {

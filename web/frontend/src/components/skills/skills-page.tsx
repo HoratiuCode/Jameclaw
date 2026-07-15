@@ -128,7 +128,7 @@ export function SkillsPage() {
             <input
               ref={importInputRef}
               type="file"
-              accept=".md,text/markdown,text/plain"
+              accept=".md,.skill,text/markdown,text/plain"
               className="hidden"
               onChange={handleImportFileChange}
             />

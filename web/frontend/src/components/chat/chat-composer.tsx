@@ -100,10 +100,25 @@ export function ChatComposer({
   const [isMentionMenuOpen, setIsMentionMenuOpen] = useState(false)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [mentionSearchError, setMentionSearchError] = useState(false)
+  const [skillSlashItems, setSkillSlashItems] = useState<MentionItem[]>([])
+  const [isSkillSlashMenuOpen, setIsSkillSlashMenuOpen] = useState(false)
+  const [selectedSkillSlashIndex, setSelectedSkillSlashIndex] = useState(0)
+  const [skillSlashSearchError, setSkillSlashSearchError] = useState(false)
 
   const activeMention = useMemo(() => {
     const beforeCaret = input.slice(0, caretPosition)
     const match = /(^|\s)@([^\s@"]*)$/.exec(beforeCaret)
+    if (!match) return null
+    return {
+      start: beforeCaret.length - match[2].length - 1,
+      end: caretPosition,
+      query: match[2],
+    }
+  }, [caretPosition, input])
+
+  const activeSkillSlash = useMemo(() => {
+    const beforeCaret = input.slice(0, caretPosition)
+    const match = /(^|\s)\/([^\s/]*)$/.exec(beforeCaret)
     if (!match) return null
     return {
       start: beforeCaret.length - match[2].length - 1,
@@ -240,6 +255,58 @@ export function ChatComposer({
     }
   }, [activeMention, canInput])
 
+  useEffect(() => {
+    if (!canInput || !activeSkillSlash || activeMention) {
+      setIsSkillSlashMenuOpen(false)
+      setSkillSlashItems([])
+      setSelectedSkillSlashIndex(0)
+      setSkillSlashSearchError(false)
+      return
+    }
+
+    let cancelled = false
+    const timeoutId = window.setTimeout(() => {
+      getLearnedSkills()
+        .then(({ skills }) => {
+          if (cancelled) return
+          setSkillSlashItems(
+            skills
+              .filter((skill) =>
+                matchesMentionQuery(activeSkillSlash.query, [
+                  skill.name,
+                  skill.description,
+                  skill.source,
+                ]),
+              )
+              .slice(0, 8)
+              .map((skill) => ({
+                id: `skill:${skill.name}`,
+                type: "skill" as const,
+                title: skill.name,
+                subtitle: skill.description || `${skill.source} skill`,
+                insertText: `@skill:${skill.name} `,
+                skill,
+              })),
+          )
+          setIsSkillSlashMenuOpen(true)
+          setSelectedSkillSlashIndex(0)
+          setSkillSlashSearchError(false)
+        })
+        .catch(() => {
+          if (cancelled) return
+          setSkillSlashItems([])
+          setIsSkillSlashMenuOpen(true)
+          setSelectedSkillSlashIndex(0)
+          setSkillSlashSearchError(true)
+        })
+    }, 120)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [activeMention, activeSkillSlash, canInput])
+
   const syncCaretPosition = () => {
     setCaretPosition(textareaRef.current?.selectionStart ?? input.length)
   }
@@ -254,6 +321,24 @@ export function ChatComposer({
     setIsMentionMenuOpen(false)
     setMentionItems([])
     setSelectedMentionIndex(0)
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(nextCaret, nextCaret)
+      setCaretPosition(nextCaret)
+    })
+  }
+
+  const insertSkillSlash = (item: MentionItem) => {
+    if (!activeSkillSlash) return
+    const nextInput =
+      input.slice(0, activeSkillSlash.start) +
+      item.insertText +
+      input.slice(activeSkillSlash.end)
+    const nextCaret = activeSkillSlash.start + item.insertText.length
+    onInputChange(nextInput)
+    setIsSkillSlashMenuOpen(false)
+    setSkillSlashItems([])
+    setSelectedSkillSlashIndex(0)
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus()
       textareaRef.current?.setSelectionRange(nextCaret, nextCaret)
@@ -288,6 +373,36 @@ export function ChatComposer({
       if (e.key === "Enter" && mentionItems[selectedMentionIndex]) {
         e.preventDefault()
         insertMention(mentionItems[selectedMentionIndex])
+        return
+      }
+    }
+    if (isSkillSlashMenuOpen && activeSkillSlash) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setSelectedSkillSlashIndex((index) =>
+          skillSlashItems.length === 0
+            ? 0
+            : (index + 1) % skillSlashItems.length,
+        )
+        return
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setSelectedSkillSlashIndex((index) =>
+          skillSlashItems.length === 0
+            ? 0
+            : (index - 1 + skillSlashItems.length) % skillSlashItems.length,
+        )
+        return
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
+        setIsSkillSlashMenuOpen(false)
+        return
+      }
+      if (e.key === "Enter" && skillSlashItems[selectedSkillSlashIndex]) {
+        e.preventDefault()
+        insertSkillSlash(skillSlashItems[selectedSkillSlashIndex])
         return
       }
     }
@@ -363,6 +478,57 @@ export function ChatComposer({
             )}
           </div>
         )}
+        {isSkillSlashMenuOpen && activeSkillSlash && (
+          <div className="bg-popover border-border absolute right-3 bottom-[calc(100%+0.5rem)] left-3 z-20 overflow-hidden rounded-lg border shadow-lg">
+            <div className="border-border bg-muted/50 flex items-center justify-between border-b px-3 py-2 text-xs">
+              <span className="text-muted-foreground">Call a skill with /</span>
+              <span className="text-muted-foreground font-mono">
+                /{activeSkillSlash.query}
+              </span>
+            </div>
+            {skillSlashSearchError ? (
+              <div className="text-muted-foreground px-3 py-3 text-sm">
+                Could not load skills.
+              </div>
+            ) : skillSlashItems.length === 0 ? (
+              <div className="text-muted-foreground px-3 py-3 text-sm">
+                No matching skills found.
+              </div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto py-1">
+                {skillSlashItems.map((item, index) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
+                      index === selectedSkillSlashIndex
+                        ? "bg-accent text-accent-foreground"
+                        : "hover:bg-accent/70",
+                    )}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      insertSkillSlash(item)
+                    }}
+                  >
+                    <IconSparkles className="text-muted-foreground size-4 shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">
+                        {item.title}
+                      </span>
+                      <span className="text-muted-foreground block truncate text-xs">
+                        {item.subtitle}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase">
+                      skill
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <TextareaAutosize
           ref={textareaRef}
           value={input}
@@ -391,7 +557,7 @@ export function ChatComposer({
             )}
             {!disabledReason && (
               <p className="text-muted-foreground text-xs">
-                Type @ to call files, tools, skills, or automations. Try @skill:agent-browser for Chrome help.
+                Type / to call a skill, or @ for files, tools, skills, and automations.
               </p>
             )}
           </div>
