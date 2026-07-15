@@ -18,6 +18,7 @@ import { Route as ModelsRouteImport } from './routes/models'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as LandingRouteImport } from './routes/landing'
 import { Route as ExtensionRouteImport } from './routes/extension'
+import { Route as DocsRouteImport } from './routes/docs'
 import { Route as CronRouteImport } from './routes/cron'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as ConfigRouteImport } from './routes/config'
@@ -78,6 +79,11 @@ const LandingRoute = LandingRouteImport.update({
 const ExtensionRoute = ExtensionRouteImport.update({
   id: '/extension',
   path: '/extension',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CronRoute = CronRouteImport.update({
@@ -172,6 +178,7 @@ export interface FileRoutesByFullPath {
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/cron': typeof CronRoute
+  '/docs': typeof DocsRoute
   '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
@@ -199,6 +206,7 @@ export interface FileRoutesByTo {
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/cron': typeof CronRoute
+  '/docs': typeof DocsRoute
   '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
@@ -227,6 +235,7 @@ export interface FileRoutesById {
   '/config': typeof ConfigRouteWithChildren
   '/credentials': typeof CredentialsRoute
   '/cron': typeof CronRoute
+  '/docs': typeof DocsRoute
   '/extension': typeof ExtensionRoute
   '/landing': typeof LandingRoute
   '/logs': typeof LogsRoute
@@ -256,6 +265,7 @@ export interface FileRouteTypes {
     | '/config'
     | '/credentials'
     | '/cron'
+    | '/docs'
     | '/extension'
     | '/landing'
     | '/logs'
@@ -283,6 +293,7 @@ export interface FileRouteTypes {
     | '/config'
     | '/credentials'
     | '/cron'
+    | '/docs'
     | '/extension'
     | '/landing'
     | '/logs'
@@ -310,6 +321,7 @@ export interface FileRouteTypes {
     | '/config'
     | '/credentials'
     | '/cron'
+    | '/docs'
     | '/extension'
     | '/landing'
     | '/logs'
@@ -338,6 +350,7 @@ export interface RootRouteChildren {
   ConfigRoute: typeof ConfigRouteWithChildren
   CredentialsRoute: typeof CredentialsRoute
   CronRoute: typeof CronRoute
+  DocsRoute: typeof DocsRoute
   ExtensionRoute: typeof ExtensionRoute
   LandingRoute: typeof LandingRoute
   LogsRoute: typeof LogsRoute
@@ -413,6 +426,13 @@ declare module '@tanstack/react-router' {
       path: '/extension'
       fullPath: '/extension'
       preLoaderRoute: typeof ExtensionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cron': {
@@ -578,6 +598,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConfigRoute: ConfigRouteWithChildren,
   CredentialsRoute: CredentialsRoute,
   CronRoute: CronRoute,
+  DocsRoute: DocsRoute,
   ExtensionRoute: ExtensionRoute,
   LandingRoute: LandingRoute,
   LogsRoute: LogsRoute,

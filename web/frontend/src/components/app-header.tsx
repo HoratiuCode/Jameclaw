@@ -250,12 +250,16 @@ export function AppHeader() {
           </Link>
         </Button>
 
-        {/* Docs Link */}
-        <Button variant="ghost" size="icon" className="size-8" asChild>
-          <a href="https://docs.jameclaw.io" target="_blank" rel="noreferrer">
-            <IconBook className="size-4.5" />
-          </a>
-        </Button>
+        <Tooltip delayDuration={700}>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8" asChild>
+              <Link to="/docs" aria-label="Agent documentation">
+                <IconBook className="size-4.5" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Agent documentation</TooltipContent>
+        </Tooltip>
 
         <Button variant="ghost" size="icon" className="size-8" asChild>
           <Link to="/agent/learned" aria-label="Learned">
