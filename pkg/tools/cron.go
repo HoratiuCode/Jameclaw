@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/sipeed/jameclaw/pkg/bus"
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/constants"
@@ -445,8 +447,11 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return "Error: proactive delivery was requested but not approved by the user"
 	}
 
-	// For deliver=false, process through agent (for complex tasks)
-	sessionKey := fmt.Sprintf("cron-%s", job.ID)
+	// Every agent-backed automation run is a new Jame chat. The web console
+	// recognizes this session-key format and keeps each run in chat history.
+	sessionKey := fmt.Sprintf("agent:main:jame:direct:jame:%s", uuid.NewString())
+	channel = "jame"
+	chatID = "direct"
 
 	// Call agent with job's message
 	response, err := t.executor.ProcessDirectWithChannel(
