@@ -1,6 +1,7 @@
 import {
   IconBrain,
   IconDatabase,
+  IconExternalLink,
   IconLoader2,
   IconPlus,
   IconRefresh,
@@ -12,10 +13,8 @@ import { toast } from "sonner"
 
 import {
   createAgent,
-  getAgentMemory,
   getAgents,
   updateAgent,
-  type AgentMemory,
   type AgentSummary,
 } from "@/api/agents"
 import { PageHeader } from "@/components/page-header"
@@ -196,7 +195,6 @@ function AgentPanels({
   const [humanMode, setHumanMode] = useState(selected?.human.discussion_mode ?? "")
   const [humanStatus, setHumanStatus] = useState(selected?.human.status_style ?? "")
   const [humanNotes, setHumanNotes] = useState(selected?.human.memory_notes ?? "")
-  const [memoryOpen, setMemoryOpen] = useState(false)
 
   useEffect(() => {
     setModel(selected?.model ?? "")
@@ -207,14 +205,7 @@ function AgentPanels({
     setHumanMode(selected?.human.discussion_mode ?? "")
     setHumanStatus(selected?.human.status_style ?? "")
     setHumanNotes(selected?.human.memory_notes ?? "")
-    setMemoryOpen(false)
   }, [selected])
-
-  const memoryQuery = useQuery({
-    queryKey: ["agent-memory", selected?.id],
-    queryFn: () => getAgentMemory(selected!.id),
-    enabled: Boolean(selected?.id && memoryOpen),
-  })
 
   if (!selected) {
     return (
@@ -239,27 +230,23 @@ function AgentPanels({
             value={selectedFallbacks.length > 0 ? selectedFallbacks.join(", ") : "None"}
           />
           <Button
-            type="button"
+            asChild
             variant="outline"
             size="sm"
             className="mt-2"
-            onClick={() => setMemoryOpen((value) => !value)}
           >
-            <IconDatabase className="size-4" />
-            {memoryOpen ? "Hide memory" : "View memory"}
+            <a
+              href={`/agent-memory/${encodeURIComponent(selected.id)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <IconDatabase className="size-4" />
+              View memory
+              <IconExternalLink className="size-3.5" />
+            </a>
           </Button>
         </CardContent>
       </Card>
-
-      {memoryOpen ? (
-        <AgentMemoryCard
-          memory={memoryQuery.data}
-          error={memoryQuery.error}
-          isLoading={memoryQuery.isLoading}
-          isFetching={memoryQuery.isFetching}
-          onRefresh={() => void memoryQuery.refetch()}
-        />
-      ) : null}
 
       <Card>
         <CardHeader>
@@ -421,96 +408,6 @@ function AgentPanels({
         </CardContent>
       </Card>
     </div>
-  )
-}
-
-function AgentMemoryCard({
-  memory,
-  error,
-  isLoading,
-  isFetching,
-  onRefresh,
-}: {
-  memory?: AgentMemory
-  error: unknown
-  isLoading: boolean
-  isFetching: boolean
-  onRefresh: () => void
-}) {
-  const hasLongTerm = Boolean(memory?.long_term.trim())
-  const hasHumanNotes = Boolean(memory?.human_notes?.trim())
-  const hasDailyNotes = Boolean(memory?.daily_notes.length)
-  const isEmpty = memory && !hasLongTerm && !hasHumanNotes && !hasDailyNotes
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle>Agent Memory</CardTitle>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onRefresh}
-            disabled={isFetching}
-          >
-            <IconRefresh className={`size-4 ${isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        {isLoading ? (
-          <div className="text-muted-foreground flex items-center gap-2">
-            <IconLoader2 className="size-4 animate-spin" />
-            Loading memory
-          </div>
-        ) : error ? (
-          <div className="text-destructive bg-destructive/10 rounded-md px-3 py-2">
-            {error instanceof Error ? error.message : "Agent memory failed to load"}
-          </div>
-        ) : memory ? (
-          <>
-            <Field label="Workspace" value={memory.workspace || "Default workspace"} mono />
-            <Field label="Long-term memory file" value={memory.memory_path} mono />
-            {isEmpty ? (
-              <div className="text-muted-foreground rounded-md border border-dashed px-3 py-4">
-                No memory has been written for this agent yet.
-              </div>
-            ) : null}
-            {hasHumanNotes ? (
-              <MemoryBlock title="Configured human memory notes" content={memory.human_notes ?? ""} />
-            ) : null}
-            {hasLongTerm ? (
-              <MemoryBlock title="Long-term memory" content={memory.long_term} />
-            ) : null}
-            {hasDailyNotes ? (
-              <div className="space-y-3">
-                <div className="text-muted-foreground text-xs">Recent daily notes</div>
-                {memory.daily_notes.map((note) => (
-                  <MemoryBlock
-                    key={note.path}
-                    title={`${note.date} · ${note.path}`}
-                    content={note.content}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </>
-        ) : null}
-      </CardContent>
-    </Card>
-  )
-}
-
-function MemoryBlock({ title, content }: { title: string; content: string }) {
-  return (
-    <section className="space-y-2">
-      <div className="text-muted-foreground text-xs">{title}</div>
-      <pre className="border-border/70 bg-muted/40 max-h-80 overflow-auto rounded-md border p-3 text-xs whitespace-pre-wrap">
-        {content}
-      </pre>
-    </section>
   )
 }
 

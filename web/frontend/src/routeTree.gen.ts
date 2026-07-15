@@ -33,6 +33,7 @@ import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
 import { Route as AgentToolsRouteImport } from './routes/agent/tools'
 import { Route as AgentSkillsRouteImport } from './routes/agent/skills'
 import { Route as AgentLearnedRouteImport } from './routes/agent/learned'
+import { Route as AgentMemoryIdRouteImport } from './routes/agent-memory/$id'
 
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
@@ -154,6 +155,11 @@ const AgentLearnedRoute = AgentLearnedRouteImport.update({
   path: '/learned',
   getParentRoute: () => AgentRoute,
 } as any)
+const AgentMemoryIdRoute = AgentMemoryIdRouteImport.update({
+  id: '/agent-memory/$id',
+  path: '/agent-memory/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -175,6 +181,7 @@ export interface FileRoutesByFullPath {
   '/profiles': typeof ProfilesRoute
   '/sessions': typeof SessionsRoute
   '/usage': typeof UsageRoute
+  '/agent-memory/$id': typeof AgentMemoryIdRoute
   '/agent/learned': typeof AgentLearnedRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
@@ -201,6 +208,7 @@ export interface FileRoutesByTo {
   '/profiles': typeof ProfilesRoute
   '/sessions': typeof SessionsRoute
   '/usage': typeof UsageRoute
+  '/agent-memory/$id': typeof AgentMemoryIdRoute
   '/agent/learned': typeof AgentLearnedRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
@@ -228,6 +236,7 @@ export interface FileRoutesById {
   '/profiles': typeof ProfilesRoute
   '/sessions': typeof SessionsRoute
   '/usage': typeof UsageRoute
+  '/agent-memory/$id': typeof AgentMemoryIdRoute
   '/agent/learned': typeof AgentLearnedRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
@@ -256,6 +265,7 @@ export interface FileRouteTypes {
     | '/profiles'
     | '/sessions'
     | '/usage'
+    | '/agent-memory/$id'
     | '/agent/learned'
     | '/agent/skills'
     | '/agent/tools'
@@ -282,6 +292,7 @@ export interface FileRouteTypes {
     | '/profiles'
     | '/sessions'
     | '/usage'
+    | '/agent-memory/$id'
     | '/agent/learned'
     | '/agent/skills'
     | '/agent/tools'
@@ -308,6 +319,7 @@ export interface FileRouteTypes {
     | '/profiles'
     | '/sessions'
     | '/usage'
+    | '/agent-memory/$id'
     | '/agent/learned'
     | '/agent/skills'
     | '/agent/tools'
@@ -335,6 +347,7 @@ export interface RootRouteChildren {
   ProfilesRoute: typeof ProfilesRoute
   SessionsRoute: typeof SessionsRoute
   UsageRoute: typeof UsageRoute
+  AgentMemoryIdRoute: typeof AgentMemoryIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -507,6 +520,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentLearnedRouteImport
       parentRoute: typeof AgentRoute
     }
+    '/agent-memory/$id': {
+      id: '/agent-memory/$id'
+      path: '/agent-memory/$id'
+      fullPath: '/agent-memory/$id'
+      preLoaderRoute: typeof AgentMemoryIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -567,6 +587,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfilesRoute: ProfilesRoute,
   SessionsRoute: SessionsRoute,
   UsageRoute: UsageRoute,
+  AgentMemoryIdRoute: AgentMemoryIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

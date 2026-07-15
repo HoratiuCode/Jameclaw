@@ -1,1 +1,0 @@
-import{j as o}from"./index-DI5k53uE.js";import{D as t}from"./dashboard-page-Cn1ICIF9.js";import"./page-header-DLgdba8C.js";const s=()=>o.jsx(t,{title:"Cron",kind:"cron",empty:"No scheduled jobs are configured."});export{s as component};
