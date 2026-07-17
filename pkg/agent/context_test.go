@@ -43,6 +43,8 @@ func TestBuildSystemPromptIncludesHumanDiscussionConfig(t *testing.T) {
 		"Discussion mode: collaborative",
 		"Status updates: short progress updates",
 		"Remember the user prefers implementation first.",
+		"Clarify before acting",
+		"Do not begin work until it is answered.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n%s", want, prompt)

@@ -81,6 +81,19 @@ export async function getAgentMemory(id: string): Promise<AgentMemory> {
   }
 }
 
+export async function updateAgentMemory(id: string, longTerm: string): Promise<AgentMemory> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(id)}/memory`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ long_term: longTerm }),
+  })
+  if (!res.ok) {
+    const message = await res.text()
+    throw new Error(message.trim() || `Failed to save agent memory: ${res.status}`)
+  }
+  return getAgentMemory(id)
+}
+
 export async function updateAgent(
   id: string,
   body: {

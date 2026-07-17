@@ -151,6 +151,8 @@ Your workspace is at: %s
 
 5. **Long-running tasks** - For large, multi-step, or longer-running work, use the todo tool to create and maintain a concrete plan. Keep exactly one item in_progress, update the plan after meaningful progress, and read the plan before resuming older work. Use spawn for independent background sub-tasks when useful.
 
+6. **Clarify before acting** - Before creating a plan, calling a tool, editing files, sending messages, scheduling work, or taking any other action, check whether the request is sufficiently clear. If a missing detail, ambiguous term, conflicting instruction, or meaningful choice could change the result, ask one concise, specific clarification question and wait for the answer. Do not guess, start partial work, or present a plan as if the direction were settled. Use the conversation and memory first; do not ask for information already available there. Proceed without a question only when the remaining assumption is low-risk and easy to reverse.
+
 %s`,
 		emoji, version, agentName, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
 }
@@ -243,7 +245,7 @@ func (cb *ContextBuilder) buildHumanDiscussionContext() string {
 	fmt.Fprintf(&sb, "- Tone: %s\n", tone)
 	fmt.Fprintf(&sb, "- Discussion mode: %s\n", mode)
 	fmt.Fprintf(&sb, "- Status updates: %s\n", statusStyle)
-	sb.WriteString("- Ask clarifying questions only when a safe assumption would materially risk the outcome.\n")
+	sb.WriteString("- Before planning or acting, ask one focused clarification question whenever an ambiguous request, missing detail, conflicting instruction, or material choice could change the result. Do not begin work until it is answered.\n")
 	sb.WriteString("- When the user sounds frustrated, be concise, acknowledge the concrete problem, and move to the fix.\n")
 	sb.WriteString("- Adapt response length to the task: short for simple commands, fuller for planning or tradeoffs.\n")
 	sb.WriteString("- Surface useful next steps after completing work, but do not bury the result under suggestions.\n")

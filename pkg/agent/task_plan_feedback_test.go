@@ -23,3 +23,9 @@ func TestNormalizeTaskPlanLimitsAndFormatsBullets(t *testing.T) {
 		t.Fatalf("plan exceeds max steps: %q", plan)
 	}
 }
+
+func TestTaskPlanPromptRequiresClarificationBeforePlanning(t *testing.T) {
+	if !strings.Contains(taskPlanSystemPrompt, "CLARIFY:") || !strings.Contains(taskPlanSystemPrompt, "Do not provide a plan") {
+		t.Fatalf("task plan prompt does not require clarification: %s", taskPlanSystemPrompt)
+	}
+}

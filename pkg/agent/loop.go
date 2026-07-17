@@ -1858,7 +1858,21 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 	})
 
 	activeCandidates, activeModel := al.selectCandidates(ts.agent, ts.userMessage, messages)
-	al.publishTaskPlan(turnCtx, ts, activeModel)
+	if question := al.publishTaskPlan(turnCtx, ts, activeModel); question != "" {
+		finalContent = question
+		ts.setFinalContent(finalContent)
+		if !ts.opts.NoHistory {
+			clarification := providers.Message{Role: "assistant", Content: finalContent}
+			ts.agent.Sessions.AddFullMessage(ts.sessionKey, clarification)
+			ts.recordPersistedMessage(clarification)
+			if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
+				turnStatus = TurnEndStatusError
+				return turnResult{}, err
+			}
+		}
+		ts.setPhase(TurnPhaseCompleted)
+		return turnResult{finalContent: finalContent, status: turnStatus}, nil
+	}
 	pendingMessages := append([]providers.Message(nil), ts.opts.InitialSteeringMessages...)
 	finalContent = ""
 

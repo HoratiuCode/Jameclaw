@@ -1,16 +1,29 @@
-import { IconArrowLeft, IconLoader2, IconRefresh } from "@tabler/icons-react"
+import { IconArrowLeft, IconDeviceFloppy, IconLoader2, IconRefresh } from "@tabler/icons-react"
 import { Link } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import { toast } from "sonner"
 
-import { getAgentMemory, type AgentMemory } from "@/api/agents"
+import { getAgentMemory, updateAgentMemory, type AgentMemory } from "@/api/agents"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export function AgentMemoryPage({ agentID }: { agentID: string }) {
+  const queryClient = useQueryClient()
   const memoryQuery = useQuery({
     queryKey: ["agent-memory", agentID],
     queryFn: () => getAgentMemory(agentID),
+  })
+  const saveMutation = useMutation({
+    mutationFn: (longTerm: string) => updateAgentMemory(agentID, longTerm),
+    onSuccess: async (memory) => {
+      queryClient.setQueryData(["agent-memory", agentID], memory)
+      toast.success("Long-term memory saved")
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not save memory")
+    },
   })
 
   return (
@@ -42,6 +55,8 @@ export function AgentMemoryPage({ agentID }: { agentID: string }) {
             memory={memoryQuery.data}
             error={memoryQuery.error}
             isLoading={memoryQuery.isLoading}
+            isSaving={saveMutation.isPending}
+            onSave={(longTerm) => saveMutation.mutate(longTerm)}
           />
         </div>
       </div>
@@ -53,10 +68,14 @@ function AgentMemoryCard({
   memory,
   error,
   isLoading,
+  isSaving,
+  onSave,
 }: {
   memory?: AgentMemory
   error: unknown
   isLoading: boolean
+  isSaving: boolean
+  onSave: (longTerm: string) => void
 }) {
   const hasLongTerm = Boolean(memory?.long_term.trim())
   const hasHumanNotes = Boolean(memory?.human_notes?.trim())
@@ -99,9 +118,11 @@ function AgentMemoryCard({
                 content={memory.human_notes ?? ""}
               />
             ) : null}
-            {hasLongTerm ? (
-              <MemoryBlock title="Long-term memory" content={memory.long_term} />
-            ) : null}
+            <LongTermMemoryEditor
+              value={memory.long_term}
+              isSaving={isSaving}
+              onSave={onSave}
+            />
             {hasDailyNotes ? (
               <div className="space-y-3">
                 <div className="text-muted-foreground text-xs">
@@ -120,6 +141,48 @@ function AgentMemoryCard({
         ) : null}
       </CardContent>
     </Card>
+  )
+}
+
+export function LongTermMemoryEditor({
+  value,
+  isSaving,
+  onSave,
+}: {
+  value: string
+  isSaving: boolean
+  onSave: (longTerm: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  const dirty = draft !== value
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-muted-foreground text-xs">Long-term memory</div>
+          <div className="text-muted-foreground mt-1 text-xs">
+            Stable preferences, project facts, and standing instructions. Saved locally for this agent.
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={!dirty || isSaving}
+          onClick={() => onSave(draft)}
+        >
+          {isSaving ? <IconLoader2 className="size-4 animate-spin" /> : <IconDeviceFloppy className="size-4" />}
+          Save memory
+        </Button>
+      </div>
+      <textarea
+        className="border-input bg-background min-h-64 w-full rounded-md border p-3 font-mono text-xs leading-5"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="# Memory\n\n- User prefers concise status updates."
+      />
+    </section>
   )
 }
 

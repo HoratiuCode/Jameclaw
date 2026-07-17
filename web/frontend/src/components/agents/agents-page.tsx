@@ -13,10 +13,13 @@ import { toast } from "sonner"
 
 import {
   createAgent,
+	getAgentMemory,
   getAgents,
+	updateAgentMemory,
   updateAgent,
   type AgentSummary,
 } from "@/api/agents"
+import { LongTermMemoryEditor } from "@/components/agents/agent-memory-page"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -248,6 +251,8 @@ function AgentPanels({
         </CardContent>
       </Card>
 
+      <AgentMemoryPanel agentID={selected.id} />
+
       <Card>
         <CardHeader>
           <CardTitle>Model Assignment</CardTitle>
@@ -408,6 +413,48 @@ function AgentPanels({
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+function AgentMemoryPanel({ agentID }: { agentID: string }) {
+  const queryClient = useQueryClient()
+  const memoryQuery = useQuery({
+    queryKey: ["agent-memory", agentID],
+    queryFn: () => getAgentMemory(agentID),
+  })
+  const saveMutation = useMutation({
+    mutationFn: (longTerm: string) => updateAgentMemory(agentID, longTerm),
+    onSuccess: async (memory) => {
+      queryClient.setQueryData(["agent-memory", agentID], memory)
+      toast.success("Long-term memory saved")
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not save memory")
+    },
+  })
+
+  return (
+    <Card className="xl:col-span-2">
+      <CardHeader>
+        <CardTitle>Long-term Memory</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {memoryQuery.isLoading ? (
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <IconLoader2 className="size-4 animate-spin" />
+            Loading memory
+          </div>
+        ) : memoryQuery.error ? (
+          <div className="text-destructive text-sm">Could not load this agent’s memory.</div>
+        ) : memoryQuery.data ? (
+          <LongTermMemoryEditor
+            value={memoryQuery.data.long_term}
+            isSaving={saveMutation.isPending}
+            onSave={(longTerm) => saveMutation.mutate(longTerm)}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
   )
 }
 

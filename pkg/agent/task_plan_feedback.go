@@ -12,9 +12,9 @@ import (
 	"github.com/sipeed/jameclaw/pkg/utils"
 )
 
-const taskPlanSystemPrompt = `Create a concise, user-visible execution plan for the request below.
-Return only 3-4 Markdown bullets. Describe concrete outcomes and checks, not private reasoning.
-Do not perform the task, make claims of completion, ask questions, or mention tools unless useful to the user.`
+const taskPlanSystemPrompt = `Decide whether the request is clear enough to begin work.
+If a missing detail, ambiguous term, conflicting instruction, or material choice could change the outcome, return exactly "CLARIFY: " followed by one concise question. Do not provide a plan and do not start work.
+Otherwise, return only a concise, user-visible execution plan of 3-4 Markdown bullets. Describe concrete outcomes and checks, not private reasoning. Do not perform the task, make claims of completion, or mention tools unless useful to the user.`
 
 const (
 	taskPlanTimeout        = 20 * time.Second
@@ -23,9 +23,9 @@ const (
 
 // publishTaskPlan sends a transparent plan before the first task execution.
 // It is best-effort: planning must never prevent the actual request from running.
-func (al *AgentLoop) publishTaskPlan(ctx context.Context, ts *turnState, model string) {
+func (al *AgentLoop) publishTaskPlan(ctx context.Context, ts *turnState, model string) string {
 	if !al.shouldPublishTaskPlan(ts) {
-		return
+		return ""
 	}
 	maxSteps := al.cfg.Agents.Defaults.GetTaskPlanMaxSteps()
 	planCtx, cancel := context.WithTimeout(ctx, taskPlanTimeout)
@@ -35,11 +35,14 @@ func (al *AgentLoop) publishTaskPlan(ctx context.Context, ts *turnState, model s
 		{Role: "user", Content: "Request:\n" + ts.userMessage},
 	}, nil, model, map[string]any{"max_tokens": 350, "temperature": 0.2})
 	if err != nil || response == nil || strings.TrimSpace(response.Content) == "" {
-		return
+		return ""
+	}
+	if question, ok := strings.CutPrefix(strings.TrimSpace(response.Content), "CLARIFY:"); ok {
+		return strings.TrimSpace(question)
 	}
 	plan := normalizeTaskPlan(response.Content, maxSteps)
 	if plan == "" {
-		return
+		return ""
 	}
 	pubCtx, pubCancel := context.WithTimeout(ctx, taskPlanPublishTimeout)
 	defer pubCancel()
@@ -48,9 +51,10 @@ func (al *AgentLoop) publishTaskPlan(ctx context.Context, ts *turnState, model s
 		ChatID:  ts.chatID,
 		Content: "🧭 **Plan**\n\n" + plan,
 	}); err != nil {
-		return
+		return ""
 	}
 	al.emitReasoningStep(ts, "share_plan", "Shared the execution plan with the user before starting work.", nil)
+	return ""
 }
 
 func (al *AgentLoop) shouldPublishTaskPlan(ts *turnState) bool {

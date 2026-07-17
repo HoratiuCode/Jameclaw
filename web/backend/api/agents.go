@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/fileutil"
 )
 
 type agentSummary struct {
@@ -58,6 +59,7 @@ type agentDailyNote struct {
 func (h *Handler) registerAgentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents", h.handleListAgents)
 	mux.HandleFunc("GET /api/agents/{id}/memory", h.handleGetAgentMemory)
+	mux.HandleFunc("PUT /api/agents/{id}/memory", h.handlePutAgentMemory)
 	mux.HandleFunc("POST /api/agents", h.handleCreateAgent)
 	mux.HandleFunc("PATCH /api/agents/{id}", h.handlePatchAgent)
 }
@@ -229,6 +231,43 @@ func (h *Handler) handleGetAgentMemory(w http.ResponseWriter, r *http.Request) {
 		HumanNotes:   humanNotes,
 		FilesChecked: filesChecked,
 	})
+}
+
+func (h *Handler) handlePutAgentMemory(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimSpace(r.PathValue("id"))
+	if agentID == "" {
+		http.Error(w, "missing agent id", http.StatusBadRequest)
+		return
+	}
+	var request struct {
+		LongTerm string `json:"long_term"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid memory payload", http.StatusBadRequest)
+		return
+	}
+	if decoder.More() {
+		http.Error(w, "invalid memory payload", http.StatusBadRequest)
+		return
+	}
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+	workspace, _, ok := resolveAgentMemoryWorkspace(cfg, agentID)
+	if !ok {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	memoryPath := filepath.Join(workspace, "memory", "MEMORY.md")
+	if err := fileutil.WriteFileAtomic(memoryPath, []byte(request.LongTerm), 0o600); err != nil {
+		http.Error(w, "failed to save memory", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "saved", "memory_path": memoryPath})
 }
 
 func resolveAgentMemoryWorkspace(cfg *config.Config, agentID string) (string, string, bool) {
