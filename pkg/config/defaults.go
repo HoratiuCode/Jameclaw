@@ -42,6 +42,11 @@ func DefaultConfig() *Config {
 					Enabled:       true,
 					MaxArgsLength: 300,
 				},
+				TaskPlanFeedback: TaskPlanFeedbackConfig{
+					Enabled:       true,
+					MinTaskLength: 80,
+					MaxSteps:      4,
+				},
 			},
 		},
 		Bindings: []AgentBinding{},
@@ -503,6 +508,9 @@ func DefaultConfig() *Config {
 				Enabled: true,
 			},
 			FindSkills: ToolConfig{
+				Enabled: true,
+			},
+			ImageGeneration: ToolConfig{
 				Enabled: true,
 			},
 			I2C: ToolConfig{

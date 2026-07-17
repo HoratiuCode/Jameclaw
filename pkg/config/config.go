@@ -352,26 +352,36 @@ type ToolFeedbackConfig struct {
 	MaxArgsLength int  `json:"max_args_length" env:"JAMECLAW_AGENTS_DEFAULTS_TOOL_FEEDBACK_MAX_ARGS_LENGTH"`
 }
 
+// TaskPlanFeedbackConfig controls the user-visible plan sent before the agent
+// starts substantial work. It is deliberately separate from tool_feedback:
+// this describes the approach, while tool_feedback reports individual actions.
+type TaskPlanFeedbackConfig struct {
+	Enabled       bool `json:"enabled"        env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_ENABLED"`
+	MinTaskLength int  `json:"min_task_length" env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_MIN_TASK_LENGTH"`
+	MaxSteps      int  `json:"max_steps"       env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_MAX_STEPS"`
+}
+
 type AgentDefaults struct {
-	Workspace                 string             `json:"workspace"                       env:"JAMECLAW_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace       bool               `json:"restrict_to_workspace"           env:"JAMECLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	AllowReadOutsideWorkspace bool               `json:"allow_read_outside_workspace"    env:"JAMECLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
-	Provider                  string             `json:"provider"                        env:"JAMECLAW_AGENTS_DEFAULTS_PROVIDER"`
-	ModelName                 string             `json:"model_name"                      env:"JAMECLAW_AGENTS_DEFAULTS_MODEL_NAME"`
-	ModelFallbacks            []string           `json:"model_fallbacks,omitempty"`
-	ImageModel                string             `json:"image_model,omitempty"           env:"JAMECLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks       []string           `json:"image_model_fallbacks,omitempty"`
-	MaxTokens                 int                `json:"max_tokens"                      env:"JAMECLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
-	ContextWindow             int                `json:"context_window,omitempty"        env:"JAMECLAW_AGENTS_DEFAULTS_CONTEXT_WINDOW"`
-	Temperature               *float64           `json:"temperature,omitempty"           env:"JAMECLAW_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations         int                `json:"max_tool_iterations"             env:"JAMECLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	SummarizeMessageThreshold int                `json:"summarize_message_threshold"     env:"JAMECLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
-	SummarizeTokenPercent     int                `json:"summarize_token_percent"         env:"JAMECLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
-	MaxMediaSize              int                `json:"max_media_size,omitempty"        env:"JAMECLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
-	Routing                   *RoutingConfig     `json:"routing,omitempty"`
-	SteeringMode              string             `json:"steering_mode,omitempty"         env:"JAMECLAW_AGENTS_DEFAULTS_STEERING_MODE"` // "one-at-a-time" (default) or "all"
-	SubTurn                   SubTurnConfig      `json:"subturn"                                                                                     envPrefix:"JAMECLAW_AGENTS_DEFAULTS_SUBTURN_"`
-	ToolFeedback              ToolFeedbackConfig `json:"tool_feedback,omitempty"`
+	Workspace                 string                 `json:"workspace"                       env:"JAMECLAW_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace       bool                   `json:"restrict_to_workspace"           env:"JAMECLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	AllowReadOutsideWorkspace bool                   `json:"allow_read_outside_workspace"    env:"JAMECLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
+	Provider                  string                 `json:"provider"                        env:"JAMECLAW_AGENTS_DEFAULTS_PROVIDER"`
+	ModelName                 string                 `json:"model_name"                      env:"JAMECLAW_AGENTS_DEFAULTS_MODEL_NAME"`
+	ModelFallbacks            []string               `json:"model_fallbacks,omitempty"`
+	ImageModel                string                 `json:"image_model,omitempty"           env:"JAMECLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks       []string               `json:"image_model_fallbacks,omitempty"`
+	MaxTokens                 int                    `json:"max_tokens"                      env:"JAMECLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
+	ContextWindow             int                    `json:"context_window,omitempty"        env:"JAMECLAW_AGENTS_DEFAULTS_CONTEXT_WINDOW"`
+	Temperature               *float64               `json:"temperature,omitempty"           env:"JAMECLAW_AGENTS_DEFAULTS_TEMPERATURE"`
+	MaxToolIterations         int                    `json:"max_tool_iterations"             env:"JAMECLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	SummarizeMessageThreshold int                    `json:"summarize_message_threshold"     env:"JAMECLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
+	SummarizeTokenPercent     int                    `json:"summarize_token_percent"         env:"JAMECLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
+	MaxMediaSize              int                    `json:"max_media_size,omitempty"        env:"JAMECLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
+	Routing                   *RoutingConfig         `json:"routing,omitempty"`
+	SteeringMode              string                 `json:"steering_mode,omitempty"         env:"JAMECLAW_AGENTS_DEFAULTS_STEERING_MODE"` // "one-at-a-time" (default) or "all"
+	SubTurn                   SubTurnConfig          `json:"subturn"                                                                                     envPrefix:"JAMECLAW_AGENTS_DEFAULTS_SUBTURN_"`
+	ToolFeedback              ToolFeedbackConfig     `json:"tool_feedback,omitempty"`
+	TaskPlanFeedback          TaskPlanFeedbackConfig `json:"task_plan_feedback,omitempty"`
 }
 
 const (
@@ -397,6 +407,20 @@ func (d *AgentDefaults) GetToolFeedbackMaxArgsLength() int {
 // IsToolFeedbackEnabled returns true when tool feedback messages should be sent to the chat.
 func (d *AgentDefaults) IsToolFeedbackEnabled() bool {
 	return d.ToolFeedback.Enabled
+}
+
+func (d *AgentDefaults) GetTaskPlanMinLength() int {
+	if d.TaskPlanFeedback.MinTaskLength > 0 {
+		return d.TaskPlanFeedback.MinTaskLength
+	}
+	return 80
+}
+
+func (d *AgentDefaults) GetTaskPlanMaxSteps() int {
+	if d.TaskPlanFeedback.MaxSteps > 0 {
+		return d.TaskPlanFeedback.MaxSteps
+	}
+	return 4
 }
 
 // GetModelName returns the effective model name for the agent defaults.
@@ -1311,6 +1335,7 @@ type ToolsConfig struct {
 	CreatePDF       ToolConfig            `json:"create_pdf"                                               envPrefix:"JAMECLAW_TOOLS_CREATE_PDF_"`
 	EditFile        ToolConfig            `json:"edit_file"                                                envPrefix:"JAMECLAW_TOOLS_EDIT_FILE_"`
 	FindSkills      ToolConfig            `json:"find_skills"                                              envPrefix:"JAMECLAW_TOOLS_FIND_SKILLS_"`
+	ImageGeneration ToolConfig            `json:"image_generation"                                        envPrefix:"JAMECLAW_TOOLS_IMAGE_GENERATION_"`
 	I2C             ToolConfig            `json:"i2c"                                                      envPrefix:"JAMECLAW_TOOLS_I2C_"`
 	InstallSkill    ToolConfig            `json:"install_skill"                                            envPrefix:"JAMECLAW_TOOLS_INSTALL_SKILL_"`
 	ListDir         ToolConfig            `json:"list_dir"                                                 envPrefix:"JAMECLAW_TOOLS_LIST_DIR_"`
@@ -2284,6 +2309,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.EditFile.Enabled
 	case "find_skills":
 		return t.FindSkills.Enabled
+	case "image_generation":
+		return t.ImageGeneration.Enabled
 	case "i2c":
 		return t.I2C.Enabled
 	case "install_skill":

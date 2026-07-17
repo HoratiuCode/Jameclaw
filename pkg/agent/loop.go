@@ -274,6 +274,13 @@ func registerSharedTools(
 			)
 			agent.Tools.Register(createPDFTool)
 		}
+		if cfg.Tools.IsToolEnabled("image_generation") {
+			agent.Tools.Register(tools.NewImageGenerationTool(
+				cfg,
+				cfg.Agents.Defaults.GetMaxMediaSize(),
+				nil,
+			))
+		}
 		if cfg.Tools.IsToolEnabled("screenshot") {
 			agent.Tools.Register(tools.NewScreenshotTool(
 				cfg.Agents.Defaults.GetMaxMediaSize(),
@@ -1129,6 +1136,11 @@ func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 			pt.SetMediaStore(s)
 		}
 	})
+	registry.ForEachTool("image_generation", func(t tools.Tool) {
+		if it, ok := t.(*tools.ImageGenerationTool); ok {
+			it.SetMediaStore(s)
+		}
+	})
 }
 
 // SetTranscriber injects a voice transcriber for agent-level audio transcription.
@@ -1846,6 +1858,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 	})
 
 	activeCandidates, activeModel := al.selectCandidates(ts.agent, ts.userMessage, messages)
+	al.publishTaskPlan(turnCtx, ts, activeModel)
 	pendingMessages := append([]providers.Message(nil), ts.opts.InitialSteeringMessages...)
 	finalContent = ""
 
