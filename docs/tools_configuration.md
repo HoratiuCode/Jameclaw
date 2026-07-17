@@ -240,12 +240,22 @@ as containers, VMs, or an approval flow around build-and-run commands.
 
 ## Cron Tool
 
-The cron tool is used for scheduling periodic tasks.
+The cron tool schedules reminders, recurring work, and event-triggered automations. Jobs are persistent, have a Run now action in the Automations page, and record their last output/status.
 
 | Config                 | Type | Default | Description                                    |
 |------------------------|------|---------|------------------------------------------------|
 | `exec_timeout_minutes` | int  | 5       | Execution timeout in minutes, 0 means no limit |
 | `allow_command`        | bool | false   | Allow cron tasks to execute shell commands      |
+
+For each automation, the agent can also set:
+
+- `timezone` — an IANA timezone such as `Europe/Bucharest`; cron expressions run in that local time.
+- `retry_attempts` and `retry_delay_seconds` — exponential-backoff retries for failed runs.
+- `quiet_hours_start` / `quiet_hours_end` — defer runs during a local quiet window.
+- `max_runs_per_day` — a daily execution budget to prevent runaway automation.
+- `add_event` with an event name such as `github.ci_failed` — run when the gateway receives an authenticated `POST /automation/event/{event}` request.
+
+Event endpoint requests require the same bearer token used by the local Jame gateway. The endpoint responds with the number of matched automations and never exposes job configuration.
 
 ## MCP Tool
 

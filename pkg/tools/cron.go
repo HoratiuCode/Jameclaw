@@ -72,7 +72,7 @@ func (t *CronTool) Name() string {
 
 // Description returns the tool description
 func (t *CronTool) Description() string {
-	return "Schedule reminders, tasks, automation blueprints, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Prefer action=add_blueprint for common recurring automations such as morning brief, important mail, weekly review, news digest, habit nudges, meal planning, or daily learning. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for custom recurring schedules. Use 'command' to execute shell commands directly."
+	return "Schedule reminders, recurring tasks, event-triggered automations, or approved system commands. Prefer add_blueprint for common recurring automations and add_event for webhook/event triggers. Ask for explicit approval before proactive delivery; use timezone, retries, quiet hours, and a daily run budget when the user specifies them."
 }
 
 // Parameters returns the tool parameters schema
@@ -82,7 +82,7 @@ func (t *CronTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"add", "add_blueprint", "list_blueprints", "list", "remove", "enable", "disable"},
+				"enum":        []string{"add", "add_event", "add_blueprint", "list_blueprints", "list", "run_now", "remove", "enable", "disable"},
 				"description": "Action to perform. Use add_blueprint for ready-made automation templates; use add for custom reminders/tasks.",
 			},
 			"blueprint": map[string]any{
@@ -117,6 +117,13 @@ func (t *CronTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Cron expression for complex recurring schedules (e.g., '0 9 * * *' for daily at 9am). Use this for complex recurring schedules.",
 			},
+			"event":               map[string]any{"type": "string", "description": "Event name for add_event, e.g. github.ci_failed or invoice.received."},
+			"timezone":            map[string]any{"type": "string", "description": "IANA timezone for a cron schedule, e.g. Europe/Bucharest."},
+			"retry_attempts":      map[string]any{"type": "integer", "description": "Optional retry count after a failed run."},
+			"retry_delay_seconds": map[string]any{"type": "integer", "description": "Initial retry delay in seconds; retries use exponential backoff."},
+			"quiet_hours_start":   map[string]any{"type": "string", "description": "Optional quiet-hours start in HH:MM."},
+			"quiet_hours_end":     map[string]any{"type": "string", "description": "Optional quiet-hours end in HH:MM."},
+			"max_runs_per_day":    map[string]any{"type": "integer", "description": "Optional daily execution budget."},
 			"job_id": map[string]any{
 				"type":        "string",
 				"description": "Job ID (for remove/enable/disable)",
@@ -144,12 +151,16 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 	switch action {
 	case "add":
 		return t.addJob(ctx, args)
+	case "add_event":
+		return t.addEventJob(ctx, args)
 	case "add_blueprint":
 		return t.addBlueprintJob(ctx, args)
 	case "list_blueprints":
 		return t.listBlueprints()
 	case "list":
 		return t.listJobs()
+	case "run_now":
+		return t.runNow(args)
 	case "remove":
 		return t.removeJob(args)
 	case "enable":
@@ -179,6 +190,33 @@ func (t *CronTool) listBlueprints() *ToolResult {
 		}
 	}
 	return SilentResult(result.String())
+}
+
+func (t *CronTool) addEventJob(ctx context.Context, args map[string]any) *ToolResult {
+	message := strings.TrimSpace(getStringArg(args, "message"))
+	event := strings.TrimSpace(getStringArg(args, "event"))
+	if message == "" || event == "" {
+		return ErrorResult("message and event are required for add_event")
+	}
+	channel, chatID := ToolChannel(ctx), ToolChatID(ctx)
+	if channel == "" || chatID == "" {
+		return ErrorResult("no session context (channel/chat_id not set). Use this tool in an active conversation.")
+	}
+	tz := strings.TrimSpace(getStringArg(args, "timezone"))
+	if tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			return ErrorResult(fmt.Sprintf("invalid timezone %q: %v", tz, err))
+		}
+	}
+	job, err := t.cronService.AddJob(utils.Truncate(message, 30), cron.CronSchedule{Kind: "event", Expr: event, TZ: tz}, message, false, false, channel, chatID)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("Error adding event automation: %v", err))
+	}
+	job.Policy = automationPolicyFromArgs(args)
+	if err := t.cronService.UpdateJob(job); err != nil {
+		return ErrorResult(fmt.Sprintf("Error saving automation policy: %v", err))
+	}
+	return SilentResult(fmt.Sprintf("Event automation added: %s (event: %s, id: %s)", job.Name, event, job.ID))
 }
 
 func (t *CronTool) addBlueprintJob(ctx context.Context, args map[string]any) *ToolResult {
@@ -257,9 +295,16 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 			EveryMS: &everyMS,
 		}
 	} else if hasCron {
+		tz := strings.TrimSpace(getStringArg(args, "timezone"))
+		if tz != "" {
+			if _, err := time.LoadLocation(tz); err != nil {
+				return ErrorResult(fmt.Sprintf("invalid timezone %q: %v", tz, err))
+			}
+		}
 		schedule = cron.CronSchedule{
 			Kind: "cron",
 			Expr: cronExpr,
+			TZ:   tz,
 		}
 	} else {
 		return ErrorResult("one of at_seconds, every_seconds, or cron_expr is required")
@@ -314,8 +359,39 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 		// Need to save the updated payload
 		t.cronService.UpdateJob(job)
 	}
+	job.Policy = automationPolicyFromArgs(args)
+	if err := t.cronService.UpdateJob(job); err != nil {
+		return ErrorResult(fmt.Sprintf("Error saving automation policy: %v", err))
+	}
 
 	return SilentResult(fmt.Sprintf("Cron job added: %s (id: %s)", job.Name, job.ID))
+}
+
+func (t *CronTool) runNow(args map[string]any) *ToolResult {
+	jobID := strings.TrimSpace(getStringArg(args, "job_id"))
+	if jobID == "" {
+		return ErrorResult("job_id is required for run_now")
+	}
+	if err := t.cronService.RunNow(jobID); err != nil {
+		return ErrorResult(err.Error())
+	}
+	return SilentResult("Automation started: " + jobID)
+}
+
+func automationPolicyFromArgs(args map[string]any) cron.AutomationPolicy {
+	integer := func(name string) int {
+		if value, ok := args[name].(float64); ok && value > 0 {
+			return int(value)
+		}
+		return 0
+	}
+	return cron.AutomationPolicy{
+		RetryAttempts:     integer("retry_attempts"),
+		RetryDelaySeconds: integer("retry_delay_seconds"),
+		QuietHoursStart:   strings.TrimSpace(getStringArg(args, "quiet_hours_start")),
+		QuietHoursEnd:     strings.TrimSpace(getStringArg(args, "quiet_hours_end")),
+		MaxRunsPerDay:     integer("max_runs_per_day"),
+	}
 }
 
 func (t *CronTool) listJobs() *ToolResult {

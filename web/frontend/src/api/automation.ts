@@ -15,6 +15,13 @@ export interface AutomationItem {
   created_at_ms: number
   updated_at_ms: number
   delete_after_run: boolean
+  timezone?: string
+  retry_attempts?: number
+  retry_delay_seconds?: number
+  quiet_hours_start?: string
+  quiet_hours_end?: string
+  max_runs_per_day?: number
+  runs_today?: number
 }
 
 export interface AutomationBlueprintField {

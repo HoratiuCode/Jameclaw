@@ -114,6 +114,47 @@ func TestCronService_ComputeNextRun(t *testing.T) {
 	}
 }
 
+func TestCronService_ComputeNextRunUsesTimezone(t *testing.T) {
+	cs, path := setupService(t, nil)
+	defer os.Remove(path)
+	now := time.Date(2024, 1, 1, 7, 30, 0, 0, time.UTC).UnixMilli()
+	next := cs.computeNextRun(&CronSchedule{Kind: "cron", Expr: "0 10 * * *", TZ: "Europe/Bucharest"}, now)
+	if next == nil {
+		t.Fatal("expected next timezone-aware run")
+	}
+	got := time.UnixMilli(*next).In(time.FixedZone("EET", 2*60*60))
+	if got.Hour() != 10 || got.Minute() != 0 {
+		t.Fatalf("next run local time = %s, want 10:00", got)
+	}
+}
+
+func TestCronService_EventTriggerAndPolicy(t *testing.T) {
+	cs, path := setupService(t, nil)
+	defer os.Remove(path)
+	job, err := cs.AddJob("CI alert", CronSchedule{Kind: "event", Expr: "github.ci_failed"}, "summarize failure", false, false, "cli", "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Policy.MaxRunsPerDay = 1
+	if err := cs.UpdateJob(job); err != nil {
+		t.Fatal(err)
+	}
+	if got := cs.TriggerEvent("github.ci_failed"); got != 1 {
+		t.Fatalf("matched events = %d, want 1", got)
+	}
+	if got := cs.TriggerEvent("github.ci_failed"); got != 0 {
+		t.Fatalf("budget should prevent second event run, got %d", got)
+	}
+}
+
+func TestQuietHoursEnd(t *testing.T) {
+	now := time.Date(2024, 1, 1, 22, 30, 0, 0, time.UTC)
+	end, quiet := quietHoursEnd(now, AutomationPolicy{QuietHoursStart: "22:00", QuietHoursEnd: "08:00"})
+	if !quiet || end.Hour() != 8 || end.Day() != 2 {
+		t.Fatalf("quiet result = %v at %s", quiet, end)
+	}
+}
+
 // 3. Test Execution Flow
 func TestCronService_ExecutionFlow(t *testing.T) {
 	var mu sync.Mutex

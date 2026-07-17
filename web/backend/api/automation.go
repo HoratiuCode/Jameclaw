@@ -33,22 +33,29 @@ type automationBlueprintInstantiateResponse struct {
 }
 
 type automationItem struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Enabled          bool   `json:"enabled"`
-	Status           string `json:"status"`
-	Schedule         string `json:"schedule"`
-	Prompt           string `json:"prompt"`
-	Delivery         string `json:"delivery"`
-	DeliveryApproved bool   `json:"delivery_approved"`
-	NextRunAtMS      *int64 `json:"next_run_at_ms,omitempty"`
-	LastRunAtMS      *int64 `json:"last_run_at_ms,omitempty"`
-	LastStatus       string `json:"last_status,omitempty"`
-	LastError        string `json:"last_error,omitempty"`
-	Running          bool   `json:"running"`
-	CreatedAtMS      int64  `json:"created_at_ms"`
-	UpdatedAtMS      int64  `json:"updated_at_ms"`
-	DeleteAfterRun   bool   `json:"delete_after_run"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Enabled           bool   `json:"enabled"`
+	Status            string `json:"status"`
+	Schedule          string `json:"schedule"`
+	Prompt            string `json:"prompt"`
+	Delivery          string `json:"delivery"`
+	DeliveryApproved  bool   `json:"delivery_approved"`
+	NextRunAtMS       *int64 `json:"next_run_at_ms,omitempty"`
+	LastRunAtMS       *int64 `json:"last_run_at_ms,omitempty"`
+	LastStatus        string `json:"last_status,omitempty"`
+	LastError         string `json:"last_error,omitempty"`
+	Running           bool   `json:"running"`
+	CreatedAtMS       int64  `json:"created_at_ms"`
+	UpdatedAtMS       int64  `json:"updated_at_ms"`
+	DeleteAfterRun    bool   `json:"delete_after_run"`
+	Timezone          string `json:"timezone,omitempty"`
+	RetryAttempts     int    `json:"retry_attempts,omitempty"`
+	RetryDelaySeconds int    `json:"retry_delay_seconds,omitempty"`
+	QuietHoursStart   string `json:"quiet_hours_start,omitempty"`
+	QuietHoursEnd     string `json:"quiet_hours_end,omitempty"`
+	MaxRunsPerDay     int    `json:"max_runs_per_day,omitempty"`
+	RunsToday         int    `json:"runs_today,omitempty"`
 }
 
 func (h *Handler) registerAutomationRoutes(mux *http.ServeMux) {
@@ -219,22 +226,29 @@ func automationFromCronJob(job cron.CronJob) automationItem {
 	}
 
 	return automationItem{
-		ID:               job.ID,
-		Name:             firstNonEmpty(job.Name, "Untitled automation"),
-		Enabled:          job.Enabled,
-		Status:           status,
-		Schedule:         formatAutomationSchedule(job.Schedule),
-		Prompt:           job.Payload.Message,
-		Delivery:         formatAutomationDelivery(job.Payload),
-		DeliveryApproved: job.Payload.DeliveryApproved,
-		NextRunAtMS:      job.State.NextRunAtMS,
-		LastRunAtMS:      job.State.LastRunAtMS,
-		LastStatus:       job.State.LastStatus,
-		LastError:        job.State.LastError,
-		Running:          job.State.RunningAtMS != nil,
-		CreatedAtMS:      job.CreatedAtMS,
-		UpdatedAtMS:      job.UpdatedAtMS,
-		DeleteAfterRun:   job.DeleteAfterRun,
+		ID:                job.ID,
+		Name:              firstNonEmpty(job.Name, "Untitled automation"),
+		Enabled:           job.Enabled,
+		Status:            status,
+		Schedule:          formatAutomationSchedule(job.Schedule),
+		Prompt:            job.Payload.Message,
+		Delivery:          formatAutomationDelivery(job.Payload),
+		DeliveryApproved:  job.Payload.DeliveryApproved,
+		NextRunAtMS:       job.State.NextRunAtMS,
+		LastRunAtMS:       job.State.LastRunAtMS,
+		LastStatus:        job.State.LastStatus,
+		LastError:         job.State.LastError,
+		Running:           job.State.RunningAtMS != nil,
+		CreatedAtMS:       job.CreatedAtMS,
+		UpdatedAtMS:       job.UpdatedAtMS,
+		DeleteAfterRun:    job.DeleteAfterRun,
+		Timezone:          job.Schedule.TZ,
+		RetryAttempts:     job.Policy.RetryAttempts,
+		RetryDelaySeconds: job.Policy.RetryDelaySeconds,
+		QuietHoursStart:   job.Policy.QuietHoursStart,
+		QuietHoursEnd:     job.Policy.QuietHoursEnd,
+		MaxRunsPerDay:     job.Policy.MaxRunsPerDay,
+		RunsToday:         job.State.RunsToday,
 	}
 }
 
@@ -251,7 +265,13 @@ func formatAutomationSchedule(schedule cron.CronSchedule) string {
 		}
 		return "Every " + formatDuration(time.Duration(*schedule.EveryMS)*time.Millisecond)
 	case "cron":
-		return formatCronExpression(schedule.Expr)
+		formatted := formatCronExpression(schedule.Expr)
+		if schedule.TZ != "" {
+			formatted += " (" + schedule.TZ + ")"
+		}
+		return formatted
+	case "event":
+		return "On event: " + firstNonEmpty(schedule.Expr, "unnamed")
 	default:
 		return firstNonEmpty(schedule.Kind, "Scheduled")
 	}

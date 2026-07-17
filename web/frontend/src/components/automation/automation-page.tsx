@@ -403,6 +403,22 @@ function AutomationCard({ automation }: { automation: AutomationItem }) {
             value={formatDateTime(automation.created_at_ms)}
           />
         </div>
+        {automation.retry_attempts || automation.quiet_hours_start || automation.max_runs_per_day ? (
+          <div className="grid gap-3 text-sm md:grid-cols-3">
+            <Field
+              label="Retries"
+              value={automation.retry_attempts ? `${automation.retry_attempts} attempts${automation.retry_delay_seconds ? `, from ${automation.retry_delay_seconds}s` : ""}` : "None"}
+            />
+            <Field
+              label="Quiet hours"
+              value={automation.quiet_hours_start && automation.quiet_hours_end ? `${automation.quiet_hours_start}–${automation.quiet_hours_end}` : "None"}
+            />
+            <Field
+              label="Daily run budget"
+              value={automation.max_runs_per_day ? `${automation.runs_today ?? 0}/${automation.max_runs_per_day} used` : "Unlimited"}
+            />
+          </div>
+        ) : null}
         {automation.last_error ? (
           <div className="text-destructive flex items-start gap-2 rounded-md border border-destructive/30 px-3 py-2 text-sm">
             <IconAlertCircle className="mt-0.5 h-4 w-4 shrink-0" />

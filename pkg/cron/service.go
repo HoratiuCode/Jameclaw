@@ -35,6 +35,16 @@ type CronPayload struct {
 	To               string `json:"to,omitempty"`
 }
 
+// AutomationPolicy constrains a job so recurring work remains predictable and
+// respectful of the user's time and API budget.
+type AutomationPolicy struct {
+	RetryAttempts     int    `json:"retry_attempts,omitempty"`
+	RetryDelaySeconds int    `json:"retry_delay_seconds,omitempty"`
+	QuietHoursStart   string `json:"quiet_hours_start,omitempty"` // HH:MM
+	QuietHoursEnd     string `json:"quiet_hours_end,omitempty"`   // HH:MM
+	MaxRunsPerDay     int    `json:"max_runs_per_day,omitempty"`
+}
+
 type CronJobState struct {
 	NextRunAtMS         *int64 `json:"nextRunAtMs,omitempty"`
 	LastRunAtMS         *int64 `json:"lastRunAtMs,omitempty"`
@@ -44,18 +54,22 @@ type CronJobState struct {
 	LastError           string `json:"lastError,omitempty"`
 	LastOutputPath      string `json:"lastOutputPath,omitempty"`
 	LastDurationMS      int64  `json:"lastDurationMs,omitempty"`
+	RetryCount          int    `json:"retryCount,omitempty"`
+	RunsToday           int    `json:"runsToday,omitempty"`
+	RunsDate            string `json:"runsDate,omitempty"`
 }
 
 type CronJob struct {
-	ID             string       `json:"id"`
-	Name           string       `json:"name"`
-	Enabled        bool         `json:"enabled"`
-	Schedule       CronSchedule `json:"schedule"`
-	Payload        CronPayload  `json:"payload"`
-	State          CronJobState `json:"state"`
-	CreatedAtMS    int64        `json:"createdAtMs"`
-	UpdatedAtMS    int64        `json:"updatedAtMs"`
-	DeleteAfterRun bool         `json:"deleteAfterRun"`
+	ID             string           `json:"id"`
+	Name           string           `json:"name"`
+	Enabled        bool             `json:"enabled"`
+	Schedule       CronSchedule     `json:"schedule"`
+	Payload        CronPayload      `json:"payload"`
+	Policy         AutomationPolicy `json:"policy,omitempty"`
+	State          CronJobState     `json:"state"`
+	CreatedAtMS    int64            `json:"createdAtMs"`
+	UpdatedAtMS    int64            `json:"updatedAtMs"`
+	DeleteAfterRun bool             `json:"deleteAfterRun"`
 }
 
 type CronStore struct {
@@ -220,6 +234,9 @@ func (cs *CronService) checkJobs() {
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
 		if job.Enabled && job.State.RunningAtMS == nil && job.State.NextRunAtMS != nil && *job.State.NextRunAtMS <= now {
+			if !cs.admitRun(job, now) {
+				continue
+			}
 			dueJobIDs = append(dueJobIDs, job.ID)
 		}
 	}
@@ -316,6 +333,7 @@ func (cs *CronService) executeJobByID(jobID string) {
 	} else {
 		job.State.LastStatus = "ok"
 		job.State.LastError = ""
+		job.State.RetryCount = 0
 	}
 	if outputPath, outputErr := cs.saveJobOutput(callbackJob, output, err, startTime, execDuration); outputErr != nil {
 		log.Printf("[cron] failed to save output for job '%s': %v", job.Name, outputErr)
@@ -323,9 +341,17 @@ func (cs *CronService) executeJobByID(jobID string) {
 		job.State.LastOutputPath = outputPath
 	}
 
-	// Compute next run time
+	// Retry failures before returning to the regular schedule. This makes
+	// transient provider/network errors recover without creating duplicate jobs.
 	var nextRunStr string
-	if job.Schedule.Kind == "at" {
+	if err != nil && job.State.RetryCount < job.Policy.RetryAttempts {
+		job.State.RetryCount++
+		delay := retryDelay(job.Policy, job.State.RetryCount)
+		next := time.Now().Add(delay).UnixMilli()
+		job.State.NextRunAtMS = &next
+		nextRunStr = "retry in " + delay.String()
+		job.State.LastStatus = "retrying"
+	} else if job.Schedule.Kind == "at" {
 		if job.DeleteAfterRun {
 			cs.removeJobUnsafe(job.ID)
 			nextRunStr = "(deleted)"
@@ -373,6 +399,14 @@ func (cs *CronService) computeNextRun(schedule *CronSchedule, nowMS int64) *int6
 
 		// Use gronx to calculate next run time
 		now := time.UnixMilli(nowMS)
+		if schedule.TZ != "" {
+			location, err := time.LoadLocation(schedule.TZ)
+			if err != nil {
+				log.Printf("[cron] invalid timezone %q: %v", schedule.TZ, err)
+				return nil
+			}
+			now = now.In(location)
+		}
 		nextTime, err := gronx.NextTickAfter(schedule.Expr, now, false)
 		if err != nil {
 			log.Printf("[cron] failed to compute next run for expr '%s': %v", schedule.Expr, err)
@@ -385,6 +419,98 @@ func (cs *CronService) computeNextRun(schedule *CronSchedule, nowMS int64) *int6
 		log.Printf("[cron] unknown schedule kind '%s'", schedule.Kind)
 		return nil
 	}
+}
+
+// TriggerEvent runs matching event-driven automations immediately. Events are
+// named strings (for example "github.ci_failed" or "invoice.received") and
+// are safe to call from webhook/channel integrations.
+func (cs *CronService) TriggerEvent(event string) int {
+	event = strings.TrimSpace(event)
+	if event == "" {
+		return 0
+	}
+	cs.mu.Lock()
+	now := time.Now().UnixMilli()
+	count := 0
+	for i := range cs.store.Jobs {
+		job := &cs.store.Jobs[i]
+		if job.Enabled && job.Schedule.Kind == "event" && job.Schedule.Expr == event && job.State.RunningAtMS == nil {
+			if !cs.admitRun(job, now) {
+				continue
+			}
+			job.State.NextRunAtMS = cronInt64Ptr(now)
+			count++
+		}
+	}
+	if count > 0 {
+		_ = cs.saveStoreUnsafe()
+		cs.notify()
+	}
+	cs.mu.Unlock()
+	return count
+}
+
+func retryDelay(policy AutomationPolicy, retryCount int) time.Duration {
+	seconds := policy.RetryDelaySeconds
+	if seconds <= 0 {
+		seconds = 60
+	}
+	if retryCount > 1 {
+		seconds *= 1 << min(retryCount-1, 6)
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (cs *CronService) admitRun(job *CronJob, nowMS int64) bool {
+	location := time.Local
+	if job.Schedule.TZ != "" {
+		if loaded, err := time.LoadLocation(job.Schedule.TZ); err == nil {
+			location = loaded
+		}
+	}
+	now := time.UnixMilli(nowMS).In(location)
+	date := now.Format("2006-01-02")
+	if job.State.RunsDate != date {
+		job.State.RunsDate, job.State.RunsToday = date, 0
+	}
+	if job.Policy.MaxRunsPerDay > 0 && job.State.RunsToday >= job.Policy.MaxRunsPerDay {
+		job.State.LastStatus, job.State.LastError = "budget_limited", "daily run budget reached"
+		job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, nowMS)
+		return false
+	}
+	if quietUntil, quiet := quietHoursEnd(now, job.Policy); quiet {
+		untilMS := quietUntil.UnixMilli()
+		job.State.LastStatus, job.State.LastError, job.State.NextRunAtMS = "quiet_hours", "deferred until quiet hours end", &untilMS
+		return false
+	}
+	job.State.RunsToday++
+	return true
+}
+
+func quietHoursEnd(now time.Time, policy AutomationPolicy) (time.Time, bool) {
+	start, okStart := parseClock(policy.QuietHoursStart)
+	end, okEnd := parseClock(policy.QuietHoursEnd)
+	if !okStart || !okEnd || start == end {
+		return time.Time{}, false
+	}
+	minute := now.Hour()*60 + now.Minute()
+	inQuiet := start < end && minute >= start && minute < end || start > end && (minute >= start || minute < end)
+	if !inQuiet {
+		return time.Time{}, false
+	}
+	day := now
+	if start > end && minute >= start {
+		day = day.AddDate(0, 0, 1)
+	}
+	return time.Date(day.Year(), day.Month(), day.Day(), end/60, end%60, 0, 0, now.Location()), true
+}
+
+func parseClock(value string) (int, bool) {
+	parsed, err := time.Parse("15:04", strings.TrimSpace(value))
+	if err != nil {
+		return 0, false
+	}
+	return parsed.Hour()*60 + parsed.Minute(), true
 }
 
 // wake up the loop to re-evaluate next wake time immediately (e.g. after add/update/remove jobs)

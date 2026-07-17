@@ -749,7 +749,7 @@ JameClaw supports cron-style scheduled tasks via the `cron` tool. The agent can 
 }
 ```
 
-Scheduled tasks persist across restarts and are stored in `~/.jameclaw/workspace/cron/`.
+Scheduled tasks persist across restarts and are stored in `~/.jameclaw/workspace/cron/`. Each job can use an IANA timezone, retry/backoff policy, quiet hours, and a daily run budget. The authenticated gateway can also trigger event-based jobs through `POST /automation/event/{event}`.
 
 ### Advanced Topics
 

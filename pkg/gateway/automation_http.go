@@ -14,13 +14,19 @@ import (
 // cron handler are available.
 func createAutomationRegistrar(cfg *config.Config, service *cron.CronService) func(*http.ServeMux) {
 	return func(mux *http.ServeMux) {
-		mux.HandleFunc("POST /automation/run/{id}", func(w http.ResponseWriter, r *http.Request) {
+		authorized := func(w http.ResponseWriter, r *http.Request) bool {
 			token := ""
 			if cfg != nil {
 				token = strings.TrimSpace(cfg.Channels.Jame.Token())
 			}
 			if token == "" || r.Header.Get("Authorization") != "Bearer "+token {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return false
+			}
+			return true
+		}
+		mux.HandleFunc("POST /automation/run/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if !authorized(w, r) {
 				return
 			}
 
@@ -32,6 +38,14 @@ func createAutomationRegistrar(cfg *config.Config, service *cron.CronService) fu
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+		})
+		mux.HandleFunc("POST /automation/event/{event}", func(w http.ResponseWriter, r *http.Request) {
+			if !authorized(w, r) {
+				return
+			}
+			count := service.TriggerEvent(r.PathValue("event"))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted", "matched_jobs": count})
 		})
 	}
 }
