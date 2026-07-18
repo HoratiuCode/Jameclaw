@@ -93,6 +93,16 @@ function setDockEnabled(enabled, sendResponse) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+	if (message?.type === "jameclaw-extension-browser-client") {
+		const tabID = _sender.tab?.id
+		if (!Number.isInteger(tabID)) {
+			sendResponse({ ok: false, error: "No tab is available." })
+			return false
+		}
+		sendResponse({ ok: true, clientId: `chrome-tab-${tabID}` })
+		return false
+	}
+
   if (message?.type === "jameclaw-extension-request-context") {
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const tab = tabs[0]

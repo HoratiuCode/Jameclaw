@@ -7,6 +7,7 @@ export interface CoreConfigForm {
   toolFeedbackMaxArgsLength: string
   execEnabled: boolean
   allowRemote: boolean
+  macControlAllowOpenApps: boolean
   enableDenyPatterns: boolean
   customDenyPatternsText: string
   customAllowPatternsText: string
@@ -72,6 +73,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   toolFeedbackMaxArgsLength: "300",
   execEnabled: true,
   allowRemote: true,
+  macControlAllowOpenApps: false,
   enableDenyPatterns: true,
   customDenyPatternsText: "",
   customAllowPatternsText: "",
@@ -135,6 +137,7 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
   const tools = asRecord(root.tools)
   const cron = asRecord(tools.cron)
   const exec = asRecord(tools.exec)
+  const macControl = asRecord(tools.mac_control)
   const toolFeedback = asRecord(defaults.tool_feedback)
   const webExtension = asRecord(root.web_extension)
 
@@ -160,6 +163,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       exec.allow_remote === undefined
         ? EMPTY_FORM.allowRemote
         : asBool(exec.allow_remote),
+    macControlAllowOpenApps:
+      macControl.allow_open_apps === undefined
+        ? EMPTY_FORM.macControlAllowOpenApps
+        : asBool(macControl.allow_open_apps),
     enableDenyPatterns:
       exec.enable_deny_patterns === undefined
         ? EMPTY_FORM.enableDenyPatterns
@@ -187,7 +194,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       EMPTY_FORM.cronExecTimeoutMinutes,
     ),
     maxTokens: asNumberString(defaults.max_tokens, EMPTY_FORM.maxTokens),
-    contextWindow: asNumberString(defaults.context_window, EMPTY_FORM.contextWindow),
+    contextWindow: asNumberString(
+      defaults.context_window,
+      EMPTY_FORM.contextWindow,
+    ),
     maxToolIterations: asNumberString(
       defaults.max_tool_iterations,
       EMPTY_FORM.maxToolIterations,
@@ -220,8 +230,7 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
     webExtensionModelSize:
       asString(webExtension.model_size) || EMPTY_FORM.webExtensionModelSize,
     webExtensionPackageName:
-      asString(webExtension.package_name) ||
-      EMPTY_FORM.webExtensionPackageName,
+      asString(webExtension.package_name) || EMPTY_FORM.webExtensionPackageName,
     webExtensionUsageNotes:
       asString(webExtension.usage_notes) || EMPTY_FORM.webExtensionUsageNotes,
   }

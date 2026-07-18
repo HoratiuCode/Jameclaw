@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -18,6 +19,7 @@ func testMacControlTool(calls *[]macCommandCall) *MacControlTool {
 		goos: "darwin",
 		cfg: config.MacControlToolsConfig{
 			ToolConfig:        config.ToolConfig{Enabled: true},
+			AllowOpenApps:     true,
 			AllowUIAutomation: true,
 			AllowTyping:       true,
 			AllowShortcuts:    true,
@@ -28,6 +30,23 @@ func testMacControlTool(calls *[]macCommandCall) *MacControlTool {
 			*calls = append(*calls, macCommandCall{command: command, args: append([]string{}, args...)})
 			return "", nil
 		},
+	}
+}
+
+func TestMacControlToolBlocksOpeningAppsUntilEnabled(t *testing.T) {
+	var calls []macCommandCall
+	tool := testMacControlTool(&calls)
+	tool.cfg.AllowOpenApps = false
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"action": "open_app",
+		"app":    "Notes",
+	})
+	if !result.IsError || !strings.Contains(result.ForLLM, "allow_open_apps") {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("open app ran unexpectedly: %#v", calls)
 	}
 }
 
@@ -43,6 +62,36 @@ func TestMacControlToolOpenApp(t *testing.T) {
 		t.Fatalf("Execute() error = %v", result.Err)
 	}
 	assertMacCommand(t, calls, "open", []string{"-g", "-a", "Notes"})
+}
+
+func TestMacControlToolBlocksRemoteChannelByDefault(t *testing.T) {
+	var calls []macCommandCall
+	tool := testMacControlTool(&calls)
+	result := tool.Execute(WithToolContext(context.Background(), "telegram", "chat-1"), map[string]any{
+		"action": "open_app",
+		"app":    "Safari",
+	})
+	if !result.IsError || !strings.Contains(result.ForLLM, "restricted to internal channels") {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("remote action ran unexpectedly: %#v", calls)
+	}
+}
+
+func TestMacControlToolAllowsExplicitTelegramRemoteAccess(t *testing.T) {
+	var calls []macCommandCall
+	tool := testMacControlTool(&calls)
+	tool.cfg.AllowRemote = true
+	tool.cfg.RemoteChannels = []string{"telegram"}
+	result := tool.Execute(WithToolContext(context.Background(), "telegram", "chat-1"), map[string]any{
+		"action": "open_url",
+		"url":    "https://example.com",
+	})
+	if result.IsError {
+		t.Fatalf("Execute() error = %v", result.Err)
+	}
+	assertMacCommand(t, calls, "open", []string{"-g", "https://example.com"})
 }
 
 func TestMacControlToolSearchWithBrowserApp(t *testing.T) {

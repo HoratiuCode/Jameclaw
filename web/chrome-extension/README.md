@@ -33,8 +33,10 @@ Developer/source folder:
 - the header `Dock` action opens a floating JameClaw panel in the corner of the page so it stays visible while you work
 - when docked, the panel is restored on the next page you open in the same tab
 - it talks to JameClaw through a local extension bootstrap endpoint and websocket proxy on `localhost:18800`
+- when an extension-enabled Chrome tab is open, the agent can inspect the page and use structured browser actions: navigate, click CSS selectors, type into form controls, scroll, go back, and reload
 
 ## Notes
 
 - if you want JameClaw to focus on one part of a website, select that text before opening the extension
+- keep the target Chrome tab open and visible while the agent is controlling it; the extension never exposes arbitrary JavaScript execution
 - if `Dock` is used, the extension opens a floating corner panel instead of a separate window

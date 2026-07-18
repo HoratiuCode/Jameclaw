@@ -238,6 +238,42 @@ as containers, VMs, or an approval flow around build-and-run commands.
 }
 ```
 
+## macOS Control from Telegram
+
+`mac_control` can open a local browser, open URLs, search the web, and perform the desktop actions that you enable. For safety, it is available only from the internal chat by default. To let a Telegram conversation use it, explicitly enable remote access and allow only Telegram:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "allow_from": ["your-telegram-user-id"]
+    }
+  },
+  "tools": {
+    "mac_control": {
+      "enabled": true,
+      "allow_remote": true,
+      "remote_channels": ["telegram"],
+		"allow_open_apps": true,
+      "allow_ui_automation": true,
+      "allow_typing": true,
+      "allow_shortcuts": true,
+      "allow_screenshots": true,
+      "allow_applescript": false
+    },
+    "web": { "enabled": true },
+    "web_fetch": { "enabled": true }
+  }
+}
+```
+
+Keep Telegram's `allow_from` restricted to your own account. On the Mac running JameClaw, grant the host app (for example Terminal or the JameClaw app) **Accessibility** permission in macOS Privacy & Security so that typing, mouse, and keyboard actions can work. macOS may also request permission to automate Chrome or Safari. Keep `allow_applescript` disabled unless you specifically need it.
+
+Once enabled, a Telegram user can ask the agent to open a URL in Chrome or search for something. The agent can use the browser controls on that Mac; `web` and `web_fetch` enable web searching and page fetching as well.
+
+With the JameClaw Companion Chrome extension loaded, the same permission also enables structured control of the active Chrome tab: inspect the page, navigate, click page controls, type into form fields, scroll, go back, and reload. The extension accepts structured actions only and does not run arbitrary JavaScript.
+
 ## Cron Tool
 
 The cron tool schedules reminders, recurring work, and event-triggered automations. Jobs are persistent, have a Run now action in the Automations page, and record their last output/status.

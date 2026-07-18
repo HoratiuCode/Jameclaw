@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/constants"
 )
 
 type macCommandRunner func(ctx context.Context, command string, args ...string) (string, error)
@@ -110,6 +111,9 @@ func (t *MacControlTool) Execute(ctx context.Context, args map[string]any) *Tool
 	if t.run == nil {
 		t.run = runMacCommand
 	}
+	if err := t.checkChannelAccess(ctx); err != nil {
+		return ErrorResult(err.Error()).WithError(err)
+	}
 
 	action := strings.TrimSpace(getStringArg(args, "action"))
 	output, message, err := t.execute(ctx, action, args)
@@ -122,6 +126,25 @@ func (t *MacControlTool) Execute(ctx context.Context, args map[string]any) *Tool
 	return NewToolResult(message)
 }
 
+// checkChannelAccess keeps desktop control local by default. Remote channels
+// must opt in explicitly and be named in RemoteChannels; this prevents a
+// public or accidentally broad chat integration from controlling the Mac.
+func (t *MacControlTool) checkChannelAccess(ctx context.Context) error {
+	channel := strings.TrimSpace(ToolChannel(ctx))
+	if channel == "" || constants.IsInternalChannel(channel) {
+		return nil
+	}
+	if !t.cfg.AllowRemote {
+		return fmt.Errorf("mac_control is restricted to internal channels; set tools.mac_control.allow_remote=true and allow the channel explicitly")
+	}
+	for _, allowed := range t.cfg.RemoteChannels {
+		if strings.EqualFold(strings.TrimSpace(allowed), channel) {
+			return nil
+		}
+	}
+	return fmt.Errorf("mac_control is not allowed from remote channel %q; add it to tools.mac_control.remote_channels", channel)
+}
+
 func (t *MacControlTool) execute(ctx context.Context, action string, args map[string]any) (string, string, error) {
 	app := cleanMacControlValue(getStringArg(args, "app"))
 	path := cleanMacControlValue(getStringArg(args, "path"))
@@ -129,6 +152,9 @@ func (t *MacControlTool) execute(ctx context.Context, action string, args map[st
 
 	switch action {
 	case "open_app":
+		if err := t.requireOpenApps(); err != nil {
+			return "", "", err
+		}
 		if app == "" {
 			return "", "", fmt.Errorf("app is required for action=open_app")
 		}
@@ -168,27 +194,42 @@ end tell`, "Read front window title")
 	end if
 end tell`, "Read front window bounds")
 	case "open_url":
+		if err := t.requireOpenApps(); err != nil {
+			return "", "", err
+		}
 		rawURL := cleanMacControlValue(getStringArg(args, "url"))
 		if err := validateBrowserURL(rawURL); err != nil {
 			return "", "", err
 		}
 		return t.runWithMessage(ctx, "open", "Opened "+rawURL, openTargetArgs(background, app, rawURL)...)
 	case "open_path":
+		if err := t.requireOpenApps(); err != nil {
+			return "", "", err
+		}
 		if path == "" {
 			return "", "", fmt.Errorf("path is required for action=open_path")
 		}
 		return t.runWithMessage(ctx, "open", "Opened "+path, openTargetArgs(background, app, path)...)
 	case "open_finder":
+		if err := t.requireOpenApps(); err != nil {
+			return "", "", err
+		}
 		if path == "" {
 			path = "."
 		}
 		return t.runWithMessage(ctx, "open", "Opened Finder at "+path, path)
 	case "reveal_path":
+		if err := t.requireOpenApps(); err != nil {
+			return "", "", err
+		}
 		if path == "" {
 			return "", "", fmt.Errorf("path is required for action=reveal_path")
 		}
 		return t.runWithMessage(ctx, "open", "Revealed "+path, "-R", path)
 	case "search":
+		if err := t.requireOpenApps(); err != nil {
+			return "", "", err
+		}
 		query := strings.TrimSpace(getStringArg(args, "query"))
 		if query == "" {
 			return "", "", fmt.Errorf("query is required for action=search")
@@ -267,6 +308,13 @@ end tell`, "Read front window bounds")
 	default:
 		return "", "", fmt.Errorf("unsupported mac_control action %q", action)
 	}
+}
+
+func (t *MacControlTool) requireOpenApps() error {
+	if t.cfg.AllowOpenApps {
+		return nil
+	}
+	return fmt.Errorf("opening Mac apps is disabled by tools.mac_control.allow_open_apps; enable Allow opening Mac apps in the Web Console System Configuration")
 }
 
 func (t *MacControlTool) runAppleScript(ctx context.Context, script, message string) (string, string, error) {

@@ -501,6 +501,7 @@ func DefaultConfig() *Config {
 			AppendFile: ToolConfig{
 				Enabled: true,
 			},
+			ChromeExtension: ToolConfig{Enabled: true},
 			CreatePDF: ToolConfig{
 				Enabled: true,
 			},
@@ -527,6 +528,9 @@ func DefaultConfig() *Config {
 					Enabled: true,
 				},
 				AllowUIAutomation: true,
+				AllowRemote:       false,
+				RemoteChannels:    []string{},
+				AllowOpenApps:     false,
 				AllowTyping:       true,
 				AllowShortcuts:    true,
 				AllowScreenshots:  true,

@@ -513,6 +513,35 @@ export function ExecSection({ form, onFieldChange }: ExecSectionProps) {
   )
 }
 
+interface MacControlSectionProps {
+  form: CoreConfigForm
+  onFieldChange: UpdateCoreField
+}
+
+export function MacControlSection({
+  form,
+  onFieldChange,
+}: MacControlSectionProps) {
+  const { t } = useTranslation()
+
+  return (
+    <ConfigSectionCard
+      title={t("pages.config.sections.mac_control")}
+      description={t("pages.config.mac_control_description")}
+    >
+      <SwitchCardField
+        label={t("pages.config.allow_open_mac_apps")}
+        hint={t("pages.config.allow_open_mac_apps_hint")}
+        layout="setting-row"
+        checked={form.macControlAllowOpenApps}
+        onCheckedChange={(checked) =>
+          onFieldChange("macControlAllowOpenApps", checked)
+        }
+      />
+    </ConfigSectionCard>
+  )
+}
+
 interface RuntimeSectionProps {
   form: CoreConfigForm
   onFieldChange: UpdateCoreField

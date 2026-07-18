@@ -1307,11 +1307,14 @@ type ReadFileToolConfig struct {
 
 type MacControlToolsConfig struct {
 	ToolConfig        `                         envPrefix:"JAMECLAW_TOOLS_MAC_CONTROL_"`
-	AllowUIAutomation bool `json:"allow_ui_automation" env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_UI_AUTOMATION"`
-	AllowTyping       bool `json:"allow_typing"        env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_TYPING"`
-	AllowShortcuts    bool `json:"allow_shortcuts"     env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SHORTCUTS"`
-	AllowScreenshots  bool `json:"allow_screenshots"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SCREENSHOTS"`
-	AllowAppleScript  bool `json:"allow_applescript"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_APPLESCRIPT"`
+	AllowRemote       bool     `json:"allow_remote"         env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_REMOTE"`
+	RemoteChannels    []string `json:"remote_channels"      env:"JAMECLAW_TOOLS_MAC_CONTROL_REMOTE_CHANNELS"`
+	AllowOpenApps     bool     `json:"allow_open_apps"      env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_OPEN_APPS"`
+	AllowUIAutomation bool     `json:"allow_ui_automation" env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_UI_AUTOMATION"`
+	AllowTyping       bool     `json:"allow_typing"        env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_TYPING"`
+	AllowShortcuts    bool     `json:"allow_shortcuts"     env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SHORTCUTS"`
+	AllowScreenshots  bool     `json:"allow_screenshots"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SCREENSHOTS"`
+	AllowAppleScript  bool     `json:"allow_applescript"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_APPLESCRIPT"`
 }
 
 type ToolsConfig struct {
@@ -1332,6 +1335,7 @@ type ToolsConfig struct {
 	MediaCleanup    MediaCleanupConfig    `json:"media_cleanup"`
 	MCP             MCPConfig             `json:"mcp"`
 	AppendFile      ToolConfig            `json:"append_file"                                              envPrefix:"JAMECLAW_TOOLS_APPEND_FILE_"`
+	ChromeExtension ToolConfig            `json:"chrome_extension"                                         envPrefix:"JAMECLAW_TOOLS_CHROME_EXTENSION_"`
 	CreatePDF       ToolConfig            `json:"create_pdf"                                               envPrefix:"JAMECLAW_TOOLS_CREATE_PDF_"`
 	EditFile        ToolConfig            `json:"edit_file"                                                envPrefix:"JAMECLAW_TOOLS_EDIT_FILE_"`
 	FindSkills      ToolConfig            `json:"find_skills"                                              envPrefix:"JAMECLAW_TOOLS_FIND_SKILLS_"`
@@ -2305,6 +2309,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.AppendFile.Enabled
 	case "create_pdf":
 		return t.CreatePDF.Enabled
+	case "chrome_extension":
+		return t.ChromeExtension.Enabled
 	case "edit_file":
 		return t.EditFile.Enabled
 	case "find_skills":

@@ -8,6 +8,45 @@ const DOCK_URL = chrome.runtime.getURL("sidepanel.html?mode=dock")
 const DOCK_WIDTH = 420
 const DOCK_HEIGHT = 620
 let lastSelectionText = ""
+let browserClientID = ""
+
+function getBrowserClientID() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "jameclaw-extension-browser-client" }, (response) => {
+      resolve(response?.ok ? response.clientId : "")
+    })
+  })
+}
+
+async function sendBrowserResult(id, result) {
+  await fetch("http://127.0.0.1:18800/api/extension/browser/result", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...result }) })
+}
+
+function pageMap() {
+  const controls = Array.from(document.querySelectorAll("a, button, input, textarea, select")).slice(0, 80).map((element) => ({ tag: element.tagName.toLowerCase(), text: trimText((element.innerText || element.value || element.getAttribute("aria-label") || "").trim(), 160), id: element.id || "", name: element.getAttribute("name") || "", href: element instanceof HTMLAnchorElement ? element.href : "" }))
+  return JSON.stringify({ title: document.title, url: location.href, text: getPageText(), controls })
+}
+
+async function runBrowserCommand(command) {
+  try {
+    const args = command.args || {}
+    switch (command.action) {
+      case "inspect": return { content: pageMap() }
+      case "navigate": if (!/^https?:/i.test(args.url || "")) throw new Error("Only http and https URLs are allowed."); location.assign(args.url); return { content: `Navigating to ${args.url}` }
+      case "click": { const element = document.querySelector(args.selector); if (!element) throw new Error(`No element matches ${args.selector}`); element.click(); return { content: `Clicked ${args.selector}` } }
+      case "type": { const element = document.querySelector(args.selector); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error(`Selector is not a form field: ${args.selector}`); element.focus(); element.value = String(args.text || ""); element.dispatchEvent(new Event("input", { bubbles: true })); element.dispatchEvent(new Event("change", { bubbles: true })); return { content: `Typed text into ${args.selector}` } }
+      case "scroll": window.scrollBy(Number(args.x) || 0, Number(args.y) || 600); return { content: "Scrolled page" }
+      case "go_back": history.back(); return { content: "Navigating back" }
+      case "reload": location.reload(); return { content: "Reloading page" }
+      default: throw new Error("Unsupported browser action")
+    }
+  } catch (error) { return { content: "", error: error instanceof Error ? error.message : String(error) } }
+}
+
+async function pollBrowserCommands() {
+  if (!browserClientID || document.visibilityState !== "visible") return
+  try { const response = await fetch("http://127.0.0.1:18800/api/extension/browser/next", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: browserClientID }) }); if (response.status === 204 || !response.ok) return; const command = await response.json(); if (command?.id) await sendBrowserResult(command.id, await runBrowserCommand(command)) } catch { }
+}
 
 function getSelectionText() {
   const selection = window.getSelection()
@@ -178,3 +217,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 })
 
 syncDockFromStorage()
+getBrowserClientID().then((id) => { browserClientID = id; void pollBrowserCommands(); setInterval(() => void pollBrowserCommands(), 1000) })

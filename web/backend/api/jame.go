@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sipeed/jameclaw/pkg/browserbridge"
 	"github.com/sipeed/jameclaw/pkg/config"
 )
 
@@ -27,12 +29,55 @@ func (h *Handler) registerJameRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/extension/sessions", h.handleExtensionSessions)
 	mux.HandleFunc("OPTIONS /api/extension/sessions/{id}", h.handleExtensionBootstrapOptions)
 	mux.HandleFunc("GET /api/extension/sessions/{id}", h.handleExtensionSession)
+	mux.HandleFunc("POST /api/extension/browser/next", h.handleExtensionBrowserNext)
+	mux.HandleFunc("POST /api/extension/browser/result", h.handleExtensionBrowserResult)
 
 	// WebSocket proxy: forward /jame/ws to gateway
 	// This allows the frontend to connect via the same port as the web UI,
 	// avoiding the need to expose extra ports for WebSocket communication.
 	mux.HandleFunc("GET /jame/ws", h.handleWebSocketProxy())
 	mux.HandleFunc("GET /extension/ws", h.handleWebSocketProxy())
+}
+
+func (h *Handler) handleExtensionBrowserNext(w http.ResponseWriter, r *http.Request) {
+	if !setExtensionCORSHeaders(w, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var request struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&request); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	command, err := browserbridge.Default.Next(ctx, strings.TrimSpace(request.ClientID))
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(command)
+}
+
+func (h *Handler) handleExtensionBrowserResult(w http.ResponseWriter, r *http.Request) {
+	if !setExtensionCORSHeaders(w, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var request struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+		Error   string `json:"error"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&request); err != nil || strings.TrimSpace(request.ID) == "" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	browserbridge.Default.Complete(request.ID, browserbridge.Result{Content: request.Content, Error: request.Error})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // createWsProxy creates a reverse proxy to the current gateway WebSocket endpoint.
@@ -321,7 +366,7 @@ func setExtensionCORSHeaders(w http.ResponseWriter, r *http.Request) bool {
 	if strings.HasPrefix(origin, "chrome-extension://") || origin == "null" {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 	}
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Set("Vary", "Origin")
 	return true

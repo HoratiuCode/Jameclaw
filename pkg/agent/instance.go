@@ -107,6 +107,9 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("mac_control") {
 		toolsRegistry.Register(tools.NewMacControlTool(cfg.Tools.MacControl))
 	}
+	if cfg.Tools.IsToolEnabled("chrome_extension") {
+		toolsRegistry.Register(tools.NewChromeExtensionTool(nil, cfg.Tools.MacControl))
+	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessions := initSessionStore(sessionsDir)

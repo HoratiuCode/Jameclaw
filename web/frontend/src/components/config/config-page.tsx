@@ -22,6 +22,7 @@ import {
   DevicesSection,
   ExecSection,
   LauncherSection,
+  MacControlSection,
   RuntimeSection,
   SystemSection,
   WebExtensionSection,
@@ -254,6 +255,9 @@ export function ConfigPage() {
               exec_timeout_minutes: cronExecTimeoutMinutes,
             },
             exec: execConfigPatch,
+            mac_control: {
+              allow_open_apps: form.macControlAllowOpenApps,
+            },
           },
           heartbeat: {
             enabled: form.heartbeatEnabled,
@@ -357,6 +361,8 @@ export function ConfigPage() {
               <RuntimeSection form={form} onFieldChange={updateField} />
 
               <ExecSection form={form} onFieldChange={updateField} />
+
+              <MacControlSection form={form} onFieldChange={updateField} />
 
               <CronSection form={form} onFieldChange={updateField} />
 
