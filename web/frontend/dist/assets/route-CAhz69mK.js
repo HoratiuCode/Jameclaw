@@ -1,1 +1,0 @@
-import{a8 as t,j as a,ae as n,a9 as s}from"./index-BlfkXf9q.js";function r(){return t({select:e=>e.location.pathname})==="/channels"?a.jsx(n,{to:"/channels/$name",params:{name:"telegram"}}):a.jsx(s,{})}export{r as component};

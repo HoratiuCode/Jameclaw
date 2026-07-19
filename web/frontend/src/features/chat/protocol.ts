@@ -1,3 +1,7 @@
+import {
+  addActivityFromContent,
+  isActivityOnlyContent,
+} from "@/features/chat/activity"
 import { normalizeUnixTimestamp } from "@/features/chat/state"
 import type { ChatMediaAttachment } from "@/store/chat"
 import { updateChatStore } from "@/store/chat"
@@ -38,6 +42,11 @@ export function handleJameMessage(
             role: "assistant",
             content,
             timestamp,
+            activity: addActivityFromContent(
+              { id: messageId, role: "assistant", content, timestamp },
+              content,
+              timestamp,
+            ),
           },
         ],
         isTyping: false,
@@ -54,7 +63,18 @@ export function handleJameMessage(
 
       updateChatStore((prev) => ({
         messages: prev.messages.map((msg) =>
-          msg.id === messageId ? { ...msg, content } : msg,
+          msg.id === messageId
+            ? {
+                ...msg,
+                // Keep the initial placeholder out of the final transcript.
+                content:
+                  isActivityOnlyContent(content) &&
+                  isActivityOnlyContent(msg.content)
+                    ? ""
+                    : content,
+                activity: addActivityFromContent(msg, content),
+              }
+            : msg,
         ),
       }))
       break

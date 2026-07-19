@@ -11,6 +11,16 @@ export interface ChatMessage {
   content: string
   timestamp: number | string
   media?: ChatMediaAttachment[]
+  activity?: ChatActivity[]
+}
+
+// These are deliberately high-level, user-facing status updates. They describe
+// what the agent is doing without exposing private model reasoning.
+export interface ChatActivity {
+  id: string
+  label: string
+  kind: "context" | "plan" | "tool" | "verify"
+  timestamp: number
 }
 
 export interface ChatMediaAttachment {

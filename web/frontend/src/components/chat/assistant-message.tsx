@@ -1,18 +1,22 @@
 import {
+  IconBrain,
   IconCheck,
+  IconChevronDown,
+  IconCircle,
   IconCircleCheck,
   IconCopy,
   IconLoader2,
 } from "@tabler/icons-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
+import { isActivityOnlyContent } from "@/features/chat/activity"
 import { formatMessageTime } from "@/hooks/use-jame-chat"
-import type { ChatMediaAttachment } from "@/store/chat"
+import type { ChatActivity, ChatMediaAttachment } from "@/store/chat"
 
 interface AssistantMessageProps {
   content: string
@@ -20,6 +24,7 @@ interface AssistantMessageProps {
   timestamp?: string | number
   isTyping?: boolean
   media?: ChatMediaAttachment[]
+  activity?: ChatActivity[]
 }
 
 export function AssistantMessage({
@@ -28,10 +33,12 @@ export function AssistantMessage({
   timestamp = "",
   isTyping = false,
   media = [],
+  activity = [],
 }: AssistantMessageProps) {
   const [isCopied, setIsCopied] = useState(false)
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
+  const displayContent = isActivityOnlyContent(content) ? "" : content
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -55,8 +62,11 @@ export function AssistantMessage({
       </div>
 
       <div className="bg-card text-card-foreground relative overflow-hidden rounded-xl border">
+        {activity.length > 0 && (
+          <ActivityTimeline activities={activity} isActive={isTyping} />
+        )}
         <div className="prose dark:prose-invert prose-p:my-2 prose-pre:my-2 prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-950 prose-pre:p-3 max-w-none p-4 text-[15px] leading-relaxed">
-          {content.trim() && (
+          {displayContent.trim() && (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw, rehypeSanitize]}
@@ -108,7 +118,7 @@ export function AssistantMessage({
                 },
               }}
             >
-              {content}
+              {displayContent}
             </ReactMarkdown>
           )}
           {media.length > 0 && (
@@ -135,6 +145,71 @@ export function AssistantMessage({
           )}
         </Button>
       </div>
+    </div>
+  )
+}
+
+function ActivityTimeline({
+  activities,
+  isActive,
+}: {
+  activities: ChatActivity[]
+  isActive: boolean
+}) {
+  const [isOpen, setIsOpen] = useState(isActive)
+
+  useEffect(() => {
+    setIsOpen(isActive)
+  }, [isActive])
+
+  const latest = activities.at(-1)
+
+  return (
+    <div className="not-prose border-b bg-violet-500/[0.035] px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        className="flex w-full items-center gap-2 text-left text-xs font-medium text-violet-800 dark:text-violet-200"
+      >
+        <IconBrain className="size-4" />
+        <span>
+          {isActive ? "Working live" : "How JameClaw approached this"}
+        </span>
+        {isActive && (
+          <span className="text-violet-600/70 dark:text-violet-300/70">
+            · live updates
+          </span>
+        )}
+        <IconChevronDown
+          className={`ml-auto size-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {isOpen && (
+        <ol className="mt-3 space-y-2 border-l border-violet-200/80 pl-3 dark:border-violet-800/60">
+          {activities.map((activity, index) => {
+            const current = isActive && index === activities.length - 1
+            return (
+              <li
+                key={activity.id}
+                className="text-muted-foreground relative flex items-center gap-2 text-xs"
+              >
+                {current ? (
+                  <IconLoader2 className="absolute -left-[19px] size-3.5 animate-spin text-violet-500" />
+                ) : (
+                  <IconCircle className="absolute -left-[18px] size-3 text-violet-400" />
+                )}
+                <span className={current ? "text-foreground font-medium" : ""}>
+                  {activity.label}
+                </span>
+                {current && latest?.kind === "tool" && (
+                  <span className="text-violet-500">in progress</span>
+                )}
+              </li>
+            )
+          })}
+        </ol>
+      )}
     </div>
   )
 }

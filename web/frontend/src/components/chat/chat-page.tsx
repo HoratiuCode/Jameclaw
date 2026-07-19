@@ -350,6 +350,7 @@ export function ChatPage() {
                   timestamp={msg.timestamp}
                   isTyping={isTyping && index === messages.length - 1}
                   media={msg.media}
+                  activity={msg.activity}
                 />
               ) : (
                 <UserMessage content={msg.content} />
