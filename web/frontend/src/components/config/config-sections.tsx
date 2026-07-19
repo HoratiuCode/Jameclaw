@@ -49,6 +49,7 @@ import {
   buildChannelEnabledMap,
 } from "@/hooks/use-sidebar-channels"
 import {
+  DEFAULT_ACCENT_COLOR,
   type Font,
   type FontSize,
   type Theme,
@@ -999,7 +1000,7 @@ export function DesignSection() {
   return (
     <ConfigSectionCard
       title={t("pages.config.sections.design")}
-      description="Customize the typography, theme, and text scaling of the web console."
+      description="Customize the typography, theme, accent color, and text scaling of the web console."
     >
       <Field
         label={t("pages.config.design_theme")}
@@ -1021,6 +1022,37 @@ export function DesignSection() {
             ))}
           </SelectContent>
         </Select>
+      </Field>
+
+      <Field
+        label="Agent activity color"
+        hint="Used for the send button, your chat bubbles, and JameClaw’s live activity panel."
+        layout="setting-row"
+      >
+        <div className="flex w-full items-center gap-2">
+          <Input
+            type="color"
+            value={design.accentColor}
+            onChange={(event) =>
+              updateDesignStore({ accentColor: event.target.value })
+            }
+            className="h-9 w-12 cursor-pointer p-1"
+            aria-label="Agent activity color"
+          />
+          <Input
+            value={design.accentColor}
+            onChange={(event) => {
+              const value = event.target.value
+              if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+                updateDesignStore({ accentColor: value })
+              }
+            }}
+            className="font-mono"
+            placeholder={DEFAULT_ACCENT_COLOR}
+            maxLength={7}
+            aria-label="Agent activity color hex value"
+          />
+        </div>
       </Field>
 
       <Field

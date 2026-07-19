@@ -1,13 +1,23 @@
 import { atom, getDefaultStore } from "jotai"
 
-export type Theme = "light" | "dark" | "nord" | "sepia" | "cyberpunk" | "forest" | "sunset"
+export type Theme =
+  | "light"
+  | "dark"
+  | "nord"
+  | "sepia"
+  | "cyberpunk"
+  | "forest"
+  | "sunset"
 export type Font = "inter" | "outfit" | "firacode" | "playfair" | "spacegrotesk"
 export type FontSize = "sm" | "md" | "lg" | "xl"
+
+export const DEFAULT_ACCENT_COLOR = "#8b5cf6"
 
 export interface DesignState {
   theme: Theme
   font: Font
   fontSize: FontSize
+  accentColor: string
 }
 
 const getStoredTheme = (): Theme => {
@@ -25,10 +35,19 @@ const getStoredFontSize = (): FontSize => {
   return (localStorage.getItem("font-size") as FontSize) || "md"
 }
 
+const getStoredAccentColor = () => {
+  if (typeof window === "undefined") return DEFAULT_ACCENT_COLOR
+  const stored = localStorage.getItem("accent-color")
+  return /^#[0-9a-fA-F]{6}$/.test(stored ?? "")
+    ? (stored ?? DEFAULT_ACCENT_COLOR)
+    : DEFAULT_ACCENT_COLOR
+}
+
 const DEFAULT_DESIGN_STATE: DesignState = {
   theme: getStoredTheme(),
   font: getStoredFont(),
   fontSize: getStoredFontSize(),
+  accentColor: getStoredAccentColor(),
 }
 
 export const designAtom = atom<DesignState>(DEFAULT_DESIGN_STATE)
@@ -73,7 +92,7 @@ export function applyDesignToDOM(state: DesignState) {
   } else {
     root.classList.remove("dark")
   }
-  
+
   // Add the specific theme class
   root.classList.add(`theme-${state.theme}`)
 
@@ -90,6 +109,18 @@ export function applyDesignToDOM(state: DesignState) {
 
   // 3. Handle Font Size
   root.style.setProperty("--base-font-size", fontSizeMap[state.fontSize])
+
+  // One accent ties together the actions the user takes and the live agent
+  // activity panel, regardless of the selected theme.
+  root.style.setProperty("--jame-accent", state.accentColor)
+  root.style.setProperty(
+    "--jame-accent-soft",
+    `color-mix(in srgb, ${state.accentColor} 8%, transparent)`,
+  )
+  root.style.setProperty(
+    "--jame-accent-muted",
+    `color-mix(in srgb, ${state.accentColor} 55%, transparent)`,
+  )
 }
 
 // Apply initially
@@ -98,7 +129,9 @@ if (typeof window !== "undefined") {
 }
 
 export function updateDesignStore(
-  patch: Partial<DesignState> | ((prev: DesignState) => Partial<DesignState> | DesignState)
+  patch:
+    | Partial<DesignState>
+    | ((prev: DesignState) => Partial<DesignState> | DesignState),
 ) {
   store.set(designAtom, (prev) => {
     const nextPatch = typeof patch === "function" ? patch(prev) : patch
@@ -106,9 +139,14 @@ export function updateDesignStore(
 
     if (typeof window !== "undefined") {
       if (next.theme !== prev.theme) localStorage.setItem("theme", next.theme)
-      if (next.font !== prev.font) localStorage.setItem("font-family", next.font)
-      if (next.fontSize !== prev.fontSize) localStorage.setItem("font-size", next.fontSize)
-      
+      if (next.font !== prev.font)
+        localStorage.setItem("font-family", next.font)
+      if (next.fontSize !== prev.fontSize)
+        localStorage.setItem("font-size", next.fontSize)
+      if (next.accentColor !== prev.accentColor) {
+        localStorage.setItem("accent-color", next.accentColor)
+      }
+
       applyDesignToDOM(next)
     }
 

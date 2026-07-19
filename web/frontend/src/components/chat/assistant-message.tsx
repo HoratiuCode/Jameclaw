@@ -165,18 +165,18 @@ function ActivityTimeline({
   const latest = activities.at(-1)
 
   return (
-    <div className="not-prose border-b bg-violet-500/[0.035] px-4 py-3">
+    <div className="not-prose border-b bg-[var(--jame-accent-soft)] px-4 py-3">
       <button
         type="button"
         onClick={() => setIsOpen((open) => !open)}
-        className="flex w-full items-center gap-2 text-left text-xs font-medium text-violet-800 dark:text-violet-200"
+        className="flex w-full items-center gap-2 text-left text-xs font-medium text-[var(--jame-accent)]"
       >
         <IconBrain className="size-4" />
         <span>
           {isActive ? "Working live" : "How JameClaw approached this"}
         </span>
         {isActive && (
-          <span className="text-violet-600/70 dark:text-violet-300/70">
+          <span className="text-[var(--jame-accent-muted)]">
             · live updates
           </span>
         )}
@@ -186,7 +186,7 @@ function ActivityTimeline({
       </button>
 
       {isOpen && (
-        <ol className="mt-3 space-y-2 border-l border-violet-200/80 pl-3 dark:border-violet-800/60">
+        <ol className="mt-3 space-y-2 border-l border-[var(--jame-accent-muted)] pl-3">
           {activities.map((activity, index) => {
             const current = isActive && index === activities.length - 1
             return (
@@ -195,15 +195,15 @@ function ActivityTimeline({
                 className="text-muted-foreground relative flex items-center gap-2 text-xs"
               >
                 {current ? (
-                  <IconLoader2 className="absolute -left-[19px] size-3.5 animate-spin text-violet-500" />
+                  <IconLoader2 className="absolute -left-[19px] size-3.5 animate-spin text-[var(--jame-accent)]" />
                 ) : (
-                  <IconCircle className="absolute -left-[18px] size-3 text-violet-400" />
+                  <IconCircle className="absolute -left-[18px] size-3 text-[var(--jame-accent-muted)]" />
                 )}
                 <span className={current ? "text-foreground font-medium" : ""}>
                   {activity.label}
                 </span>
                 {current && latest?.kind === "tool" && (
-                  <span className="text-violet-500">in progress</span>
+                  <span className="text-[var(--jame-accent)]">in progress</span>
                 )}
               </li>
             )

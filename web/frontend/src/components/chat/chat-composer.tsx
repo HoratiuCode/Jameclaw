@@ -14,10 +14,10 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
 
-import { getAutomations, type AutomationItem } from "@/api/automation"
+import { type AutomationItem, getAutomations } from "@/api/automation"
 import { type LocalFileSearchItem, searchLocalFiles } from "@/api/files"
-import { getLearnedSkills, type LearnedSkillItem } from "@/api/skills"
-import { getTools, type ToolSupportItem } from "@/api/tools"
+import { type LearnedSkillItem, getLearnedSkills } from "@/api/skills"
+import { type ToolSupportItem, getTools } from "@/api/tools"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -145,99 +145,104 @@ export function ChatComposer({
         getLearnedSkills(),
       ])
         .then(
-          ([filesResult, toolsResult, automationsResult, learnedSkillsResult]) => {
-          if (cancelled) return
-          const nextItems: MentionItem[] = []
+          ([
+            filesResult,
+            toolsResult,
+            automationsResult,
+            learnedSkillsResult,
+          ]) => {
+            if (cancelled) return
+            const nextItems: MentionItem[] = []
 
-          if (filesResult.status === "fulfilled") {
-            nextItems.push(
-              ...filesResult.value.map((file) => ({
-                id: `file:${file.path}`,
-                type: "file" as const,
-                title: file.name,
-                subtitle: file.directory,
-                insertText: `@${quoteMention(file.path)} `,
-                file,
-              })),
-            )
-          }
-
-          if (toolsResult.status === "fulfilled") {
-            nextItems.push(
-              ...toolsResult.value.tools
-                .filter((tool) => tool.status === "enabled")
-                .filter((tool) =>
-                  matchesMentionQuery(activeMention.query, [
-                    tool.name,
-                    tool.description,
-                    tool.category,
-                  ]),
-                )
-                .slice(0, 8)
-                .map((tool) => ({
-                  id: `tool:${tool.name}`,
-                  type: "tool" as const,
-                  title: tool.name,
-                  subtitle: `${tool.category} tool - ${tool.description}`,
-                  insertText: `@tool:${tool.name} `,
-                  tool,
+            if (filesResult.status === "fulfilled") {
+              nextItems.push(
+                ...filesResult.value.map((file) => ({
+                  id: `file:${file.path}`,
+                  type: "file" as const,
+                  title: file.name,
+                  subtitle: file.directory,
+                  insertText: `@${quoteMention(file.path)} `,
+                  file,
                 })),
-            )
-          }
+              )
+            }
 
-          if (automationsResult.status === "fulfilled") {
-            nextItems.push(
-              ...automationsResult.value
-                .filter((automation) =>
-                  matchesMentionQuery(activeMention.query, [
-                    automation.name,
-                    automation.prompt,
-                    automation.status,
-                  ]),
-                )
-                .slice(0, 6)
-                .map((automation) => ({
-                  id: `automation:${automation.id}`,
-                  type: "automation" as const,
-                  title: automation.name,
-                  subtitle: `${automation.status} - ${automation.schedule}`,
-                  insertText: `@automation:${quoteMention(automation.name)} `,
-                  automation,
-                })),
-            )
-          }
+            if (toolsResult.status === "fulfilled") {
+              nextItems.push(
+                ...toolsResult.value.tools
+                  .filter((tool) => tool.status === "enabled")
+                  .filter((tool) =>
+                    matchesMentionQuery(activeMention.query, [
+                      tool.name,
+                      tool.description,
+                      tool.category,
+                    ]),
+                  )
+                  .slice(0, 8)
+                  .map((tool) => ({
+                    id: `tool:${tool.name}`,
+                    type: "tool" as const,
+                    title: tool.name,
+                    subtitle: `${tool.category} tool - ${tool.description}`,
+                    insertText: `@tool:${tool.name} `,
+                    tool,
+                  })),
+              )
+            }
 
-          if (learnedSkillsResult.status === "fulfilled") {
-            nextItems.push(
-              ...learnedSkillsResult.value.skills
-                .filter((skill) =>
-                  matchesMentionQuery(activeMention.query, [
-                    skill.name,
-                    skill.description,
-                    skill.source,
-                  ]),
-                )
-                .slice(0, 8)
-                .map((skill) => ({
-                  id: `skill:${skill.name}`,
-                  type: "skill" as const,
-                  title: skill.name,
-                  subtitle: skill.description || `${skill.source} skill`,
-                  insertText: `@skill:${skill.name} `,
-                  skill,
-                })),
-            )
-          }
+            if (automationsResult.status === "fulfilled") {
+              nextItems.push(
+                ...automationsResult.value
+                  .filter((automation) =>
+                    matchesMentionQuery(activeMention.query, [
+                      automation.name,
+                      automation.prompt,
+                      automation.status,
+                    ]),
+                  )
+                  .slice(0, 6)
+                  .map((automation) => ({
+                    id: `automation:${automation.id}`,
+                    type: "automation" as const,
+                    title: automation.name,
+                    subtitle: `${automation.status} - ${automation.schedule}`,
+                    insertText: `@automation:${quoteMention(automation.name)} `,
+                    automation,
+                  })),
+              )
+            }
 
-          setMentionItems(nextItems)
-          setIsMentionMenuOpen(true)
-          setSelectedMentionIndex(0)
-          setMentionSearchError(
-            filesResult.status === "rejected" &&
-              toolsResult.status === "rejected" &&
-              automationsResult.status === "rejected" &&
-              learnedSkillsResult.status === "rejected",
-          )
+            if (learnedSkillsResult.status === "fulfilled") {
+              nextItems.push(
+                ...learnedSkillsResult.value.skills
+                  .filter((skill) =>
+                    matchesMentionQuery(activeMention.query, [
+                      skill.name,
+                      skill.description,
+                      skill.source,
+                    ]),
+                  )
+                  .slice(0, 8)
+                  .map((skill) => ({
+                    id: `skill:${skill.name}`,
+                    type: "skill" as const,
+                    title: skill.name,
+                    subtitle: skill.description || `${skill.source} skill`,
+                    insertText: `@skill:${skill.name} `,
+                    skill,
+                  })),
+              )
+            }
+
+            setMentionItems(nextItems)
+            setIsMentionMenuOpen(true)
+            setSelectedMentionIndex(0)
+            setMentionSearchError(
+              filesResult.status === "rejected" &&
+                toolsResult.status === "rejected" &&
+                automationsResult.status === "rejected" &&
+                learnedSkillsResult.status === "rejected",
+            )
           },
         )
         .catch(() => {
@@ -315,7 +320,9 @@ export function ChatComposer({
     if (!activeMention) return
     const mention = item.insertText
     const nextInput =
-      input.slice(0, activeMention.start) + mention + input.slice(activeMention.end)
+      input.slice(0, activeMention.start) +
+      mention +
+      input.slice(activeMention.end)
     const nextCaret = activeMention.start + mention.length
     onInputChange(nextInput)
     setIsMentionMenuOpen(false)
@@ -439,11 +446,11 @@ export function ChatComposer({
                       ? IconTools
                       : item.type === "skill"
                         ? IconSparkles
-                      : item.type === "automation"
-                        ? IconCalendarTime
-                        : item.file.kind === "folder"
-                          ? IconFolder
-                          : IconFile
+                        : item.type === "automation"
+                          ? IconCalendarTime
+                          : item.file.kind === "folder"
+                            ? IconFolder
+                            : IconFile
                   return (
                     <button
                       key={item.id}
@@ -557,7 +564,8 @@ export function ChatComposer({
             )}
             {!disabledReason && (
               <p className="text-muted-foreground text-xs">
-                Type / to call a skill, or @ for files, tools, skills, and automations.
+                Type / to call a skill, or @ for files, tools, skills, and
+                automations.
               </p>
             )}
           </div>
@@ -611,7 +619,7 @@ export function ChatComposer({
 
             <Button
               size="icon"
-              className="size-8 rounded-full bg-violet-500 text-white transition-transform hover:bg-violet-600 active:scale-95"
+              className="size-8 rounded-full bg-[var(--jame-accent)] text-white transition-transform hover:brightness-90 active:scale-95"
               onClick={onSend}
               disabled={!input.trim() || !canInput}
               title={disabledReason ?? undefined}

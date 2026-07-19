@@ -243,6 +243,16 @@ func (c *JameChannel) StartTyping(ctx context.Context, chatID string) (func(), e
 	}, nil
 }
 
+// PublishActivity sends a high-level, non-sensitive work milestone directly to
+// Web Console clients. Unlike an editable placeholder, each update is its own
+// event, so rapid agent progress is never collapsed into a single message edit.
+func (c *JameChannel) PublishActivity(ctx context.Context, chatID, label string) error {
+	outMsg := newMessage(TypeActivityUpdate, map[string]any{
+		"label": label,
+	})
+	return c.broadcastToSession(chatID, outMsg)
+}
+
 // SendPlaceholder implements channels.PlaceholderCapable.
 // It sends a placeholder message via the Jame Protocol that will later be
 // edited to the actual response via EditMessage (channels.MessageEditor).

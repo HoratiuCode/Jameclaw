@@ -49,6 +49,13 @@ type StreamingCapable interface {
 	BeginStream(ctx context.Context, chatID string) (Streamer, error)
 }
 
+// ActivityCapable publishes safe, high-level agent progress to clients while a
+// turn is running. It is intentionally separate from message streaming so UI
+// clients can show live status without treating it as response text.
+type ActivityCapable interface {
+	PublishActivity(ctx context.Context, chatID, label string) error
+}
+
 // Streamer is defined in pkg/bus to avoid circular imports.
 // This alias keeps channel implementations using channels.Streamer unchanged.
 type Streamer = bus.Streamer

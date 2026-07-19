@@ -131,6 +131,27 @@ export function handleJameMessage(
       updateChatStore({ isTyping: false })
       break
 
+    case "activity.update": {
+      const label = (payload.label as string) || ""
+      if (!label) break
+
+      updateChatStore((prev) => {
+        const messageIndex = [...prev.messages]
+          .map((item) => item.role)
+          .lastIndexOf("assistant")
+        if (messageIndex < 0) return prev
+
+        const messages = [...prev.messages]
+        const message = messages[messageIndex]
+        messages[messageIndex] = {
+          ...message,
+          activity: addActivityFromContent(message, label),
+        }
+        return { messages }
+      })
+      break
+    }
+
     case "error":
       console.error("Jame error:", payload)
       updateChatStore({

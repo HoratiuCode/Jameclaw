@@ -2914,7 +2914,9 @@ func (al *AgentLoop) emitReasoningStep(ts *turnState, step, summary string, deta
 	if al == nil || ts == nil {
 		return
 	}
-	al.updateTurnPlaceholder(context.Background(), ts, placeholderStatusForReasoningStep(step, summary, details))
+	status := placeholderStatusForReasoningStep(step, summary, details)
+	al.updateTurnPlaceholder(context.Background(), ts, status)
+	al.publishTurnActivity(context.Background(), ts, status)
 	al.emitEvent(
 		EventKindReasoningStep,
 		ts.eventMeta("runTurn", "turn.reasoning."+step),
@@ -2924,6 +2926,23 @@ func (al *AgentLoop) emitReasoningStep(ts *turnState, step, summary string, deta
 			Details: details,
 		},
 	)
+}
+
+func (al *AgentLoop) publishTurnActivity(ctx context.Context, ts *turnState, label string) {
+	if al == nil || al.channelManager == nil || ts == nil || strings.TrimSpace(label) == "" {
+		return
+	}
+	channel, ok := al.channelManager.GetChannel(strings.TrimSpace(ts.channel))
+	if !ok {
+		return
+	}
+	activity, ok := channel.(channels.ActivityCapable)
+	if !ok {
+		return
+	}
+	publishCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_ = activity.PublishActivity(publishCtx, strings.TrimSpace(ts.chatID), label)
 }
 
 func (al *AgentLoop) updateTurnPlaceholder(ctx context.Context, ts *turnState, content string) {
