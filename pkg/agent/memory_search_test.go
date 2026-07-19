@@ -108,3 +108,35 @@ func TestMemoryFlushPersistsDailyNote(t *testing.T) {
 		t.Fatalf("daily memory was not persisted: %q", note)
 	}
 }
+
+func TestRememberResearchTurnPersistsWorkingKnowledge(t *testing.T) {
+	workspace := t.TempDir()
+	cb := NewContextBuilder(workspace)
+	loop := &AgentLoop{}
+
+	loop.rememberResearchTurn(&turnState{
+		agent:       &AgentInstance{ContextBuilder: cb},
+		userMessage: "Research Steve Jobs' product philosophy",
+	}, "Steve Jobs emphasized focus: saying no to many good ideas to protect a small number of great ones.")
+
+	note := cb.memory.ReadToday()
+	for _, want := range []string{"Working knowledge", "Steve Jobs", "saying no to many good ideas"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("research memory missing %q: %q", want, note)
+		}
+	}
+}
+
+func TestRememberResearchTurnSkipsOrdinaryChat(t *testing.T) {
+	cb := NewContextBuilder(t.TempDir())
+	loop := &AgentLoop{}
+
+	loop.rememberResearchTurn(&turnState{
+		agent:       &AgentInstance{ContextBuilder: cb},
+		userMessage: "Thanks, that helps.",
+	}, "You're welcome.")
+
+	if note := cb.memory.ReadToday(); note != "" {
+		t.Fatalf("ordinary chat should not become working knowledge: %q", note)
+	}
+}

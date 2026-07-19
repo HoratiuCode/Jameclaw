@@ -36,9 +36,11 @@ func TestBuildSystemPromptIncludesHumanDiscussionConfig(t *testing.T) {
 
 	prompt := builder.BuildSystemPrompt()
 	for _, want := range []string{
-		"You are Scout, a helpful AI assistant.",
+		"You are Scout, a capable local AI agent for practical, ambitious work.",
+		"Your name is **Scout**. Treat it as your identity, not a cosmetic label",
 		"## Human Discussion Style",
-		"Persona: Research partner",
+		"Identity: You are Scout. Keep this name distinct from your personality",
+		"Core personality: Research partner. Express this through your priorities",
 		"Tone: direct and warm",
 		"Discussion mode: collaborative",
 		"Status updates: short progress updates",

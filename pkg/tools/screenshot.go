@@ -72,7 +72,7 @@ func NewScreenshotTool(maxFileSize int, store media.MediaStore) *ScreenshotTool 
 func (t *ScreenshotTool) Name() string { return "screenshot" }
 
 func (t *ScreenshotTool) Description() string {
-	return "Take a screenshot and send the PNG image to the active chat. On macOS, supports JameClaw Screen targeting for screen/window/frontmost/area captures when the JameClaw Screen binary is available. Use only when the user asks to see or share the screen."
+	return "Take a screenshot and send the PNG image to the active chat. On macOS, supports JameClaw Screen targeting for screen/window/frontmost/area captures when the JameClaw Screen binary is available. For browser automation fallback, capture the Google Chrome window so a vision-capable model can inspect the current UI before choosing a mouse or keyboard action; capture another screenshot afterward to verify the outcome."
 }
 
 func (t *ScreenshotTool) Parameters() map[string]any {

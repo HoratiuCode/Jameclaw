@@ -34,8 +34,10 @@ func runTray() {
 
 // onReady is called when the system tray is ready
 func onReady() {
-	// Set icon and tooltip
-	systray.SetIcon(getIcon())
+	// A template icon lets macOS choose the correct foreground automatically:
+	// dark on light menu bars and white on dark menu bars. The source artwork is
+	// used as an alpha mask by AppKit, so it stays legible over wallpaper too.
+	setTrayIcon(getIcon())
 	systray.SetTooltip(fmt.Sprintf(T(AppTooltip), appName))
 	startTrayActivityIndicator()
 
@@ -175,12 +177,19 @@ func startTrayActivityIndicator() {
 func applyTrayActivityIcon(active bool) {
 	normal, activeIcon := trayIcons()
 	if active {
-		systray.SetIcon(activeIcon)
+		setTrayIcon(activeIcon)
 		systray.SetTooltip(fmt.Sprintf("%s - Agent active", fmt.Sprintf(T(AppTooltip), appName)))
 		return
 	}
-	systray.SetIcon(normal)
+	setTrayIcon(normal)
 	systray.SetTooltip(fmt.Sprintf(T(AppTooltip), appName))
+}
+
+// setTrayIcon uses the native template mode on macOS. Other platforms fall
+// back to the regular image through the systray library, so this remains
+// cross-platform while making the menu-bar icon appearance-aware on macOS.
+func setTrayIcon(icon []byte) {
+	systray.SetTemplateIcon(icon, icon)
 }
 
 func trayIcons() ([]byte, []byte) {

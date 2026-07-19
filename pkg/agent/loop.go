@@ -486,7 +486,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 				response, err := al.processMessage(ctx, msg)
 				if err != nil {
-					response = fmt.Sprintf("Error processing message: %v", err)
+					response = userFacingProcessingError(msg.Channel, err)
 				}
 				finalResponse := response
 
@@ -571,6 +571,44 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// userFacingProcessingError turns infrastructure errors into short recovery
+// messages. Raw provider errors can expose URLs, internal implementation
+// details, or credentials, so they remain in logs only.
+func userFacingProcessingError(channel string, err error) string {
+	if err == nil {
+		return ""
+	}
+
+	prefix := "⚠️ I couldn't complete that request."
+	if strings.EqualFold(channel, "telegram") {
+		prefix = "⚠️ JameClaw couldn't reply to your Telegram request."
+	}
+
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "gateway") || strings.Contains(message, "not connected"):
+		return prefix + " The gateway is not connected. Ask the owner to start or reconnect JameClaw, then try again."
+	case strings.Contains(message, "unauthorized"),
+		strings.Contains(message, "authentication"),
+		strings.Contains(message, "invalid api key"),
+		strings.Contains(message, "invalid_api_key"),
+		strings.Contains(message, "401"):
+		return prefix + " The model provider rejected its credentials. Ask the owner to check the API key or login in the Web Console."
+	case strings.Contains(message, "rate limit"),
+		strings.Contains(message, "quota"),
+		strings.Contains(message, "429"):
+		return prefix + " The model provider is rate-limited or out of quota. Please wait a moment or ask the owner to check the provider account."
+	case strings.Contains(message, "timeout"),
+		strings.Contains(message, "deadline exceeded"),
+		strings.Contains(message, "connection refused"),
+		strings.Contains(message, "no such host"),
+		strings.Contains(message, "network"):
+		return prefix + " JameClaw could not reach the model provider. Check the internet connection and provider status, then try again."
+	default:
+		return prefix + " There was a model or tool error. Please try again; if it continues, ask the owner to check the Web Console logs."
+	}
 }
 
 // drainBusToSteering consumes inbound messages and redirects messages from the
@@ -2748,6 +2786,26 @@ turnLoop:
 				ts.recordPersistedMessage(toolResultMsg)
 			}
 
+			// A screenshot is an observation the agent needs to see, not only an
+			// attachment for the user. Feed tool-produced media back into the next
+			// model call so browser automation can follow Screenshot → Vision →
+			// Reasoning → Mouse/Keyboard → Screenshot.
+			if toolName == "screenshot" && len(toolResult.Media) > 0 {
+				visualObservation := providers.Message{
+					Role:    "user",
+					Content: "[Visual browser observation: inspect this screenshot, decide the next safe UI action, and verify with a new screenshot after acting.]",
+					Media:   append([]string(nil), toolResult.Media...),
+				}
+				resolved := resolveMediaRefs(
+					[]providers.Message{visualObservation},
+					al.mediaStore,
+					maxMediaSize,
+				)
+				if len(resolved) > 0 {
+					messages = append(messages, resolved[0])
+				}
+			}
+
 			if steerMsgs := al.dequeueSteeringMessagesForScope(ts.sessionKey); len(steerMsgs) > 0 {
 				pendingMessages = append(pendingMessages, steerMsgs...)
 			}
@@ -2866,6 +2924,7 @@ turnLoop:
 			)
 			return turnResult{}, err
 		}
+		al.rememberResearchTurn(ts, finalContent)
 	}
 
 	if ts.opts.EnableSummary {
@@ -2878,6 +2937,51 @@ turnLoop:
 		status:       turnStatus,
 		followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
 	}, nil
+}
+
+// rememberResearchTurn keeps a compact record of completed research in the
+// daily memory. This lets the agent build on its own prior work in a later,
+// related conversation instead of starting from a blank slate every time.
+// It intentionally records only explicitly research-like requests; routine
+// chat and one-off actions are left out of working memory.
+func (al *AgentLoop) rememberResearchTurn(ts *turnState, finalContent string) {
+	if ts == nil || ts.agent == nil || ts.agent.ContextBuilder == nil || !isResearchRequest(ts.userMessage) {
+		return
+	}
+
+	topic := strings.TrimSpace(ts.userMessage)
+	learning := strings.TrimSpace(finalContent)
+	if topic == "" || learning == "" {
+		return
+	}
+
+	entry := fmt.Sprintf(
+		"## Working knowledge — %s\n\nResearch request: %s\n\nWhat I learned: %s\n",
+		time.Now().Format("2006-01-02 15:04"),
+		utils.Truncate(topic, 500),
+		utils.Truncate(learning, 2400),
+	)
+	if err := ts.agent.ContextBuilder.memory.AppendToday(entry); err != nil {
+		logger.WarnCF("agent", "Failed to persist research working knowledge", map[string]any{"error": err.Error()})
+		return
+	}
+	logger.DebugCF("agent", "Research working knowledge persisted", map[string]any{"chars": len(entry)})
+}
+
+func isResearchRequest(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"research", "investigate", "analyse", "analyze", "comparison", "compare ",
+		"look up", "find out", "deep dive", "deep-dive", "case study", "study ",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (al *AgentLoop) abortTurn(ts *turnState) (turnResult, error) {

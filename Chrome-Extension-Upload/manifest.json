@@ -2,16 +2,16 @@
   "manifest_version": 3,
   "name": "JameClaw Companion",
   "description": "Compact Chrome extension for the local JameClaw assistant.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "permissions": [
     "activeTab",
     "storage",
     "tabs"
   ],
   "icons": {
-    "16": "favicon-96x96.png",
-    "32": "favicon-96x96.png",
-    "48": "favicon-96x96.png",
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
     "128": "favicon.png"
   },
   "host_permissions": [
@@ -43,8 +43,8 @@
   },
   "action": {
     "default_icon": {
-      "16": "favicon-96x96.png",
-      "32": "favicon-96x96.png"
+      "16": "icon-16.png",
+      "32": "icon-32.png"
     },
     "default_title": "JameClaw Companion",
     "default_popup": "popup.html"

@@ -27,7 +27,7 @@ func NewChromeExtensionTool(bridge *browserbridge.Bridge, configs ...config.MacC
 
 func (t *ChromeExtensionTool) Name() string { return "chrome_extension" }
 func (t *ChromeExtensionTool) Description() string {
-	return "Control the active Chrome tab through the installed JameClaw Companion extension. Use inspect first to see its URL, visible text, links, and form controls; then navigate, click CSS selectors, type into CSS selectors, scroll, go back, or reload. This only works while an extension-enabled Chrome tab is open."
+	return "Control the active Chrome tab through the installed JameClaw Companion extension. Primary workflow: inspect the page, then navigate, click CSS selectors, type or paste into CSS selectors (including contenteditable message composers), scroll, go back, or reload. This supports composing Instagram and X direct messages in a logged-in browser. Visual fallback when selectors are missing or the page changed: (1) call screenshot with app=Google Chrome, (2) use the returned image to identify the next visible target, (3) use mac_control mouse_click, type_text, or keyboard_shortcut only to navigate or fill a form, then (4) take another Chrome screenshot and verify the result. Never use mac_control mouse or keyboard to submit an external message. Send only through this tool's click action: the extension asks for an in-browser confirmation before any Send, Post, Tweet, or Reply click."
 }
 func (t *ChromeExtensionTool) Parameters() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{

@@ -113,8 +113,16 @@ func (cb *ContextBuilder) getIdentity() string {
 	return fmt.Sprintf(
 		`# jameclaw %s (%s)
 
-You are %s, a helpful AI assistant.
-You are Your AI agent for fancy jobs.
+You are %s, a capable local AI agent for practical, ambitious work.
+
+## Identity and Presence
+
+Your name is **%s**. Treat it as your identity, not a cosmetic label: speak as
+%s rather than as a generic interface. Have a consistent point of view, make
+grounded recommendations, and be warm and engaged without roleplaying a life
+or experiences you do not have. Use your name naturally when introducing
+yourself, making an important recommendation, or closing a meaningful task;
+do not repeat it mechanically in every reply.
 
 ## Workspace
 Your workspace is at: %s
@@ -154,7 +162,7 @@ Your workspace is at: %s
 6. **Clarify before acting** - Before creating a plan, calling a tool, editing files, sending messages, scheduling work, or taking any other action, check whether the request is sufficiently clear. If a missing detail, ambiguous term, conflicting instruction, or meaningful choice could change the result, ask one concise, specific clarification question and wait for the answer. Do not guess, start partial work, or present a plan as if the direction were settled. Use the conversation and memory first; do not ask for information already available there. Proceed without a question only when the remaining assumption is low-risk and easy to reverse.
 
 %s`,
-		emoji, version, agentName, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
+		emoji, version, agentName, agentName, agentName, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
 }
 
 func (cb *ContextBuilder) getDiscoveryRule() string {
@@ -207,18 +215,16 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 }
 
 func (cb *ContextBuilder) buildHumanDiscussionContext() string {
+	identityName := strings.TrimSpace(cb.agentName)
 	persona := ""
 	tone := "direct, warm, pragmatic, and natural"
 	mode := "collaborative"
 	memoryNotes := ""
 	statusStyle := "brief, concrete progress updates during longer work"
 
-	if cb.agentName != "" {
-		persona = cb.agentName
-	}
 	if cb.human != nil {
 		if value := strings.TrimSpace(cb.human.AgentName); value != "" {
-			persona = value
+			identityName = value
 		}
 		if value := strings.TrimSpace(cb.human.Persona); value != "" {
 			persona = value
@@ -239,8 +245,11 @@ func (cb *ContextBuilder) buildHumanDiscussionContext() string {
 
 	var sb strings.Builder
 	sb.WriteString("## Human Discussion Style\n\n")
+	if identityName != "" {
+		fmt.Fprintf(&sb, "- Identity: You are %s. Keep this name distinct from your personality, and let it show through a confident, recognizably human conversation style.\n", identityName)
+	}
 	if persona != "" {
-		fmt.Fprintf(&sb, "- Persona: %s\n", persona)
+		fmt.Fprintf(&sb, "- Core personality: %s. Express this through your priorities, language, and recommendations; do not merely announce it.\n", persona)
 	}
 	fmt.Fprintf(&sb, "- Tone: %s\n", tone)
 	fmt.Fprintf(&sb, "- Discussion mode: %s\n", mode)
@@ -248,6 +257,7 @@ func (cb *ContextBuilder) buildHumanDiscussionContext() string {
 	sb.WriteString("- Before planning or acting, ask one focused clarification question whenever an ambiguous request, missing detail, conflicting instruction, or material choice could change the result. Do not begin work until it is answered.\n")
 	sb.WriteString("- When the user sounds frustrated, be concise, acknowledge the concrete problem, and move to the fix.\n")
 	sb.WriteString("- Adapt response length to the task: short for simple commands, fuller for planning or tradeoffs.\n")
+	sb.WriteString("- After research or investigative work, give a short informed takeaway in your own voice: state the central conclusion, something notable, and any relevant uncertainty or source limitation. Treat completed research as working knowledge for related future questions. When useful, refer naturally to it (for example, 'From the Steve Jobs research I did...'), but never pretend to remember work that is not in context or memory.\n")
 	sb.WriteString("- Surface useful next steps after completing work, but do not bury the result under suggestions.\n")
 	sb.WriteString("- Remember stable user preferences, project facts, and recurring workflows using the memory rules above.\n")
 	if memoryNotes != "" {
