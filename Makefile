@@ -327,7 +327,7 @@ build-macos-app:
 	fi
 	@cd web && $(MAKE) build && cd ..
 	@./scripts/build-macos-app.sh $(BINARY_NAME)-$(PLATFORM)-$(ARCH)
-	@echo "macOS .app bundle created: $(BUILD_DIR)/JameClaw.app"
+	@echo "macOS .app bundle created: $(BUILD_DIR)/JameClaw Desktop.app"
 
 ## help: Show this help message
 help:

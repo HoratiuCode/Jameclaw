@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build macOS .app bundle for JameClaw Launcher
+# Build macOS .app bundle for JameClaw Desktop
 
 set -e
 
@@ -12,7 +12,7 @@ fi
 
 echo "executable: $EXECUTABLE"
 
-APP_NAME="JameClaw Launcher"
+APP_NAME="JameClaw Desktop"
 APP_PATH="./build/${APP_NAME}.app"
 APP_CONTENTS="${APP_PATH}/Contents"
 APP_MACOS="${APP_CONTENTS}/MacOS"
@@ -61,9 +61,9 @@ cat > "${APP_CONTENTS}/Info.plist" << 'EOF'
     <key>CFBundleIdentifier</key>
     <string>com.jameclaw.launcher</string>
     <key>CFBundleName</key>
-    <string>JameClaw Launcher</string>
+    <string>JameClaw Desktop</string>
     <key>CFBundleDisplayName</key>
-    <string>JameClaw Launcher</string>
+    <string>JameClaw Desktop</string>
     <key>CFBundleIconFile</key>
     <string>icon.icns</string>
     <key>CFBundlePackageType</key>

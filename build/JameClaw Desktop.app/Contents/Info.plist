@@ -7,9 +7,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.jameclaw.launcher</string>
     <key>CFBundleName</key>
-    <string>JameClaw Launcher</string>
+    <string>JameClaw Desktop</string>
     <key>CFBundleDisplayName</key>
-    <string>JameClaw Launcher</string>
+    <string>JameClaw Desktop</string>
     <key>CFBundleIconFile</key>
     <string>icon.icns</string>
     <key>CFBundlePackageType</key>
