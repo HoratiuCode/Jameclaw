@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2063,5 +2064,153 @@ func TestSubTurn_IndependentContext(t *testing.T) {
 		}
 	} else {
 		t.Log("✓ SubTurn completed successfully (independent context)")
+	}
+}
+
+// ====================== Model / Tools / Tree Fixes ======================
+
+type namedStubTool struct{ name string }
+
+func (t *namedStubTool) Name() string               { return t.name }
+func (t *namedStubTool) Description() string        { return t.name }
+func (t *namedStubTool) Parameters() map[string]any { return map[string]any{"type": "object"} }
+func (t *namedStubTool) Execute(context.Context, map[string]any) *tools.ToolResult {
+	return tools.NewToolResult("ok")
+}
+
+func TestSpawnSubTurn_AppliesModelAndStripsSpawnTools(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	parentAgent := al.registry.GetDefaultAgent()
+	if parentAgent == nil {
+		t.Fatal("expected default agent")
+	}
+	parentAgent.Model = "parent-model"
+	parentAgent.MaxTokens = 111
+	parentAgent.Temperature = 0.1
+	parentAgent.Tools.Register(&namedStubTool{name: "read_file"})
+	parentAgent.Tools.Register(&namedStubTool{name: "spawn"})
+	parentAgent.Tools.Register(&namedStubTool{name: "subagent"})
+	parentAgent.Tools.Register(&namedStubTool{name: "spawn_status"})
+
+	parent := &turnState{
+		ctx:            context.Background(),
+		turnID:         "parent-model-test",
+		depth:          0,
+		pendingResults: make(chan *tools.ToolResult, 4),
+		concurrencySem: make(chan struct{}, testMaxConcurrentSubTurns),
+		agent:          parentAgent,
+	}
+
+	cfg := SubTurnConfig{
+		Model:          "child-model-override",
+		MaxTokens:      2048,
+		Temperature:    0.7,
+		HasTemperature: true,
+		Tools:          nil, // inherit + strip
+		SystemPrompt:   "do work",
+	}
+
+	childCopy := *parentAgent
+	al.applySubTurnModelConfig(&childCopy, cfg)
+	if childCopy.Model != "child-model-override" {
+		t.Fatalf("model = %q, want child-model-override", childCopy.Model)
+	}
+	if childCopy.MaxTokens != 2048 {
+		t.Fatalf("maxTokens = %d, want 2048", childCopy.MaxTokens)
+	}
+	if childCopy.Temperature != 0.7 {
+		t.Fatalf("temperature = %v, want 0.7", childCopy.Temperature)
+	}
+
+	stripped := withoutSubagentTools(parentAgent.Tools)
+	if _, ok := stripped.Get("spawn"); ok {
+		t.Fatal("spawn should be stripped from child tools")
+	}
+	if _, ok := stripped.Get("subagent"); ok {
+		t.Fatal("subagent should be stripped from child tools")
+	}
+	if _, ok := stripped.Get("spawn_status"); ok {
+		t.Fatal("spawn_status should be stripped from child tools")
+	}
+	if _, ok := stripped.Get("read_file"); !ok {
+		t.Fatal("read_file should remain for child tools")
+	}
+
+	result, err := spawnSubTurn(context.Background(), al, parent, cfg)
+	if err != nil {
+		t.Fatalf("spawnSubTurn failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+}
+
+func TestFormatActiveSubagentTree(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	if got := al.FormatActiveSubagentTree(); got != "" {
+		t.Fatalf("expected empty tree, got %q", got)
+	}
+
+	root := &turnState{
+		turnID:       "root-1",
+		agentID:      "main",
+		phase:        TurnPhaseRunning,
+		userMessage:  "parent task",
+		childTurnIDs: []string{"child-1"},
+	}
+	child := &turnState{
+		turnID:       "child-1",
+		agentID:      "main",
+		phase:        TurnPhaseTools,
+		depth:        1,
+		parentTurnID: "root-1",
+		userMessage:  "child task",
+	}
+	al.activeTurnStates.Store("root-1", root)
+	al.activeTurnStates.Store("child-1", child)
+	defer al.activeTurnStates.Delete("root-1")
+	defer al.activeTurnStates.Delete("child-1")
+
+	tree := al.FormatActiveSubagentTree()
+	if tree == "" {
+		t.Fatal("expected non-empty tree")
+	}
+	if !strings.Contains(tree, "root-1") || !strings.Contains(tree, "child-1") {
+		t.Fatalf("tree missing turns: %s", tree)
+	}
+	if !strings.Contains(tree, "depth=1") {
+		t.Fatalf("expected depth marker for child: %s", tree)
+	}
+}
+
+func TestResolveSubTurnBaseAgent_TargetAgent(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	target := &AgentInstance{
+		ID:        "researcher",
+		Model:     "research-model",
+		Workspace: t.TempDir(),
+		Tools:     tools.NewToolRegistry(),
+	}
+	al.registry.mu.Lock()
+	al.registry.agents["researcher"] = target
+	al.registry.mu.Unlock()
+
+	parent := &turnState{agent: al.registry.GetDefaultAgent()}
+	got, err := al.resolveSubTurnBaseAgent(parent, "researcher")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.ID != "researcher" || got.Model != "research-model" {
+		t.Fatalf("got agent %#v", got)
+	}
+
+	if _, err := al.resolveSubTurnBaseAgent(parent, "missing-agent"); err == nil {
+		t.Fatal("expected error for missing agent")
 	}
 }

@@ -141,6 +141,7 @@ func (al *AgentLoop) registerActiveTurn(ts *turnState) {
 
 func (al *AgentLoop) clearActiveTurn(ts *turnState) {
 	al.activeTurnStates.Delete(ts.sessionKey)
+	al.releaseWorkspaceClaims(ts)
 }
 
 func (al *AgentLoop) getActiveTurnState(sessionKey string) *turnState {

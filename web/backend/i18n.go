@@ -34,6 +34,8 @@ const (
 	MenuVersionTooltip   TranslationKey = "MenuVersionTooltip"
 	MenuGitHub           TranslationKey = "MenuGitHub"
 	MenuDocs             TranslationKey = "MenuDocs"
+	MenuSettings         TranslationKey = "MenuSettings"
+	MenuSettingsTooltip  TranslationKey = "MenuSettingsTooltip"
 	MenuRestart          TranslationKey = "MenuRestart"
 	MenuRestartTooltip   TranslationKey = "MenuRestartTooltip"
 	MenuKeepAwake        TranslationKey = "MenuKeepAwake"
@@ -60,6 +62,8 @@ var translations = map[Language]map[TranslationKey]string{
 		MenuVersionTooltip:   "Current version number",
 		MenuGitHub:           "GitHub",
 		MenuDocs:             "Documentation",
+		MenuSettings:         "Settings",
+		MenuSettingsTooltip:  "Service and power settings",
 		MenuRestart:          "Restart Service",
 		MenuRestartTooltip:   "Restart Gateway service",
 		MenuKeepAwake:        "Keep Mac Awake",
@@ -83,6 +87,8 @@ var translations = map[Language]map[TranslationKey]string{
 		MenuVersionTooltip:   "Current version number",
 		MenuGitHub:           "GitHub",
 		MenuDocs:             "Documentation",
+		MenuSettings:         "Settings",
+		MenuSettingsTooltip:  "Service and power settings",
 		MenuRestart:          "Restart Service",
 		MenuRestartTooltip:   "Restart Gateway service",
 		MenuKeepAwake:        "Keep Mac Awake",

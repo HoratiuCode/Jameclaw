@@ -73,6 +73,7 @@ interface ModelsListResponse {
   default_model: string
   default_image_model: string
   default_voice_model: string
+	model_fallbacks: string[]
 }
 
 interface ModelActionResponse {
@@ -165,6 +166,29 @@ export async function setDefaultModel(
 
   await refreshGatewayState()
   return response
+}
+
+export interface ModelFailoverResponse {
+	status: string
+	primary_model: string
+	secondary_model: string
+	gateway_restarted: boolean
+}
+
+export async function setModelFailover(
+	primaryModel: string,
+	secondaryModel: string,
+): Promise<ModelFailoverResponse> {
+	const response = await request<ModelFailoverResponse>("/api/models/failover", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			primary_model: primaryModel,
+			secondary_model: secondaryModel,
+		}),
+	})
+	await refreshGatewayState()
+	return response
 }
 
 export type { ModelsListResponse, ModelActionResponse, ModelCatalogResponse }

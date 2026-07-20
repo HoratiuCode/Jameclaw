@@ -1,0 +1,1 @@
+import{b3 as t,j as r}from"./index-DVo6fa7U.js";import{A as m}from"./agent-memory-page-DckTFKpv.js";import"./agents-Cc8Ofrqh.js";import"./page-header-BDO_oZUm.js";import"./IconDeviceFloppy-DHhdGEfv.js";const i=()=>{const{id:o}=t.useParams();return r.jsx(m,{agentID:o})};export{i as component};

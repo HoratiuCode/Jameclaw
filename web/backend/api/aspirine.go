@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/providers"
 )
 
 type aspirineIssue struct {
@@ -18,6 +19,7 @@ type aspirineIssue struct {
 	Status         string   `json:"status"`
 	Description    string   `json:"description"`
 	Suggestion     string   `json:"suggestion"`
+	RecoveryPrompt string   `json:"recovery_prompt,omitempty"`
 	AutoFixAction  string   `json:"auto_fix_action,omitempty"`
 	AutoFixLabel   string   `json:"auto_fix_label,omitempty"`
 	Affected       []string `json:"affected,omitempty"`
@@ -135,6 +137,8 @@ func (h *Handler) aspirineSummary() aspirineSummary {
 		issues = append(issues, issue)
 	}
 
+	issues = append(issues, recentConversationRecoveryIssues(h.listAllSessions(), checkedAt)...)
+
 	if len(issues) == 0 {
 		issues = append(issues, aspirineIssue{
 			ID:             "system-healthy",
@@ -148,6 +152,72 @@ func (h *Handler) aspirineSummary() aspirineSummary {
 	}
 
 	return buildAspirineSummary(checkedAt, issues)
+}
+
+// recentConversationRecoveryIssues identifies clear corrective feedback that
+// follows an assistant response. It intentionally uses a small, conservative
+// phrase set: Aspirine should suggest a recovery, not pretend to know a user's
+// sentiment from ordinary questions.
+func recentConversationRecoveryIssues(sessions []sessionFile, checkedAt string) []aspirineIssue {
+	issues := make([]aspirineIssue, 0, 3)
+	for _, sess := range sessions {
+		if len(issues) == 3 {
+			break
+		}
+		feedback := latestCorrectiveFeedback(sess.Messages)
+		if feedback == "" {
+			continue
+		}
+		issues = append(issues, aspirineIssue{
+			ID:             "conversation-recovery-" + sessionIDForKey(sess.Key),
+			Title:          "The user may be unhappy with a recent answer",
+			Severity:       "warning",
+			Status:         "needs_follow_up",
+			Description:    "Recent user feedback: “" + truncateRunes(feedback, 280) + "”",
+			Suggestion:     "Follow up in the same conversation: acknowledge the gap, state what was missed, then give a corrected answer or take the requested action.",
+			RecoveryPrompt: "I’m sorry that missed the mark. I understand the issue is: " + truncateRunes(feedback, 180) + ". I’ll correct it now by checking the earlier request and giving you a concrete improved result.",
+			Affected:       []string{sessionIDForKey(sess.Key)},
+			LastObservedAt: checkedAt,
+		})
+	}
+	return issues
+}
+
+func latestCorrectiveFeedback(messages []providers.Message) string {
+	for i := len(messages) - 1; i > 0; i-- {
+		message := messages[i]
+		if message.Role != "user" {
+			continue
+		}
+		feedback := strings.TrimSpace(message.Content)
+		if !looksLikeCorrectiveFeedback(feedback) {
+			continue
+		}
+		for previous := i - 1; previous >= 0; previous-- {
+			if strings.TrimSpace(messages[previous].Content) == "" {
+				continue
+			}
+			if messages[previous].Role == "assistant" {
+				return feedback
+			}
+			break
+		}
+	}
+	return ""
+}
+
+func looksLikeCorrectiveFeedback(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	for _, phrase := range []string{
+		"that is wrong", "this is wrong", "not correct", "not what i asked", "not what i want",
+		"you didn't", "you did not", "try again", "redo", "fix this", "doesn't work", "does not work",
+		"i'm unhappy", "i am unhappy", "bad answer", "missed the point",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildAspirineSummary(checkedAt string, issues []aspirineIssue) aspirineSummary {

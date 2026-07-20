@@ -47,6 +47,8 @@ export function AssistantMessage({
     })
   }
 
+  const previewHref = (href: string) => localPreviewHref(href)
+
   return (
     <div className="group flex w-full flex-col gap-1.5">
       <div className="text-muted-foreground flex items-center justify-between gap-2 px-1 text-xs opacity-70">
@@ -71,6 +73,21 @@ export function AssistantMessage({
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw, rehypeSanitize]}
               components={{
+				a(props) {
+					const { href = "", children, ...rest } = props
+					const resolvedHref = previewHref(href)
+					const isLocalPreview = resolvedHref !== href
+					return (
+						<a
+							href={resolvedHref}
+							target={isLocalPreview ? "_blank" : undefined}
+							rel={isLocalPreview ? "noreferrer" : undefined}
+							{...rest}
+						>
+							{children}
+						</a>
+					)
+				},
                 code(props) {
                   const { children, className, ...rest } = props
                   const text = String(children).trim()
@@ -147,6 +164,27 @@ export function AssistantMessage({
       </div>
     </div>
   )
+}
+
+function localPreviewHref(href: string): string {
+	try {
+		const url = new URL(href)
+		const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
+		if (
+			(url.protocol !== "http:" && url.protocol !== "https:") ||
+			!loopbackHosts.has(url.hostname) ||
+			!url.port
+		) {
+			return href
+		}
+		const port = Number(url.port)
+		if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+			return href
+		}
+		return `/_preview/${port}${url.pathname}${url.search}${url.hash}`
+	} catch {
+		return href
+	}
 }
 
 function ActivityTimeline({

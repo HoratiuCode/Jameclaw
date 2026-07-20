@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -21,6 +22,7 @@ func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/models", h.handleAddModel)
 	mux.HandleFunc("POST /api/models/from-catalog", h.handleAddModelFromCatalog)
 	mux.HandleFunc("POST /api/models/default", h.handleSetDefaultModel)
+	mux.HandleFunc("POST /api/models/failover", h.handleSetModelFailover)
 	mux.HandleFunc("PUT /api/models/{index}", h.handleUpdateModel)
 	mux.HandleFunc("DELETE /api/models/{index}", h.handleDeleteModel)
 }
@@ -120,6 +122,70 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 		"default_model":       defaultModel,
 		"default_image_model": imageModel,
 		"default_voice_model": voiceModel,
+		"model_fallbacks":     cfg.Agents.Defaults.ModelFallbacks,
+	})
+}
+
+// handleSetModelFailover configures the two-provider chat path used by the
+// fallback chain: a primary model and one secondary model to try whenever the
+// primary returns a retriable provider error.
+func (h *Handler) handleSetModelFailover(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PrimaryModel   string `json:"primary_model"`
+		SecondaryModel string `json:"secondary_model"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+	req.PrimaryModel = strings.TrimSpace(req.PrimaryModel)
+	req.SecondaryModel = strings.TrimSpace(req.SecondaryModel)
+	if req.PrimaryModel == "" || req.SecondaryModel == "" {
+		http.Error(w, "primary_model and secondary_model are required", http.StatusBadRequest)
+		return
+	}
+	if req.PrimaryModel == req.SecondaryModel {
+		http.Error(w, "primary_model and secondary_model must be different", http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	for _, modelName := range []string{req.PrimaryModel, req.SecondaryModel} {
+		modelCfg, err := cfg.GetModelConfig(modelName)
+		if err != nil || modelCfg == nil || strings.TrimSpace(modelCfg.Model) == "" || !hasModelConfiguration(modelCfg) {
+			http.Error(w, fmt.Sprintf("configured model %q was not found", modelName), http.StatusBadRequest)
+			return
+		}
+	}
+
+	cfg.Agents.Defaults.ModelName = req.PrimaryModel
+	cfg.Agents.Defaults.ModelFallbacks = []string{req.SecondaryModel}
+	if err := config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload the gateway now so the selected provider pair is used for the
+	// next request. Saving still succeeds if the launcher is attached to an
+	// externally managed gateway that it cannot restart.
+	restarted := false
+	if _, err := h.RestartGateway(); err == nil {
+		restarted = true
+	} else {
+		logger.WarnCF("api", "Provider failover saved; gateway restart is required", map[string]any{"error": err.Error()})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":            "ok",
+		"primary_model":     req.PrimaryModel,
+		"secondary_model":   req.SecondaryModel,
+		"gateway_restarted": restarted,
 	})
 }
 

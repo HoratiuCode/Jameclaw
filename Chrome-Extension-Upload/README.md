@@ -5,7 +5,7 @@ This extension is a native popup chat for the local JameClaw launcher, with an o
 It does two things:
 
 - opens a plain chat popup inside Chrome
-- captures the active tab's title, URL, selection, and a short text excerpt, then attaches that context to each message
+- captures the active tab's title, URL, description, headings, selected text, and readable main content, then attaches that context to each message
 
 ## Load it in Chrome
 
@@ -26,12 +26,10 @@ Developer/source folder:
 
 ## Current behavior
 
-- the popup only shows chat
-- the current page context is attached automatically in the background
+- the popup shows chat plus a compact page-context card, so you can see what Jame will receive
+- the current page context includes the main article or page region, page summary, and heading outline instead of an unstructured body dump
 - selected text on the page is remembered and reused when you open the extension
-- the header `Pick` action refreshes the current page context and selected text
-- the header `Dock` action opens a floating JameClaw panel in the corner of the page so it stays visible while you work
-- when docked, the panel is restored on the next page you open in the same tab
+- the header `Pop out` action opens the chat in a separate JameClaw window
 - it talks to JameClaw through a local extension bootstrap endpoint and websocket proxy on `localhost:18800`
 - when an extension-enabled Chrome tab is open, the agent can inspect the page and use structured browser actions: navigate, click CSS selectors, type into form controls, scroll, go back, and reload
 
@@ -39,4 +37,4 @@ Developer/source folder:
 
 - if you want JameClaw to focus on one part of a website, select that text before opening the extension
 - keep the target Chrome tab open and visible while the agent is controlling it; the extension never exposes arbitrary JavaScript execution
-- if `Dock` is used, the extension opens a floating corner panel instead of a separate window
+- browser inspection returns stable selectors, labels, and control details so the agent can understand and operate pages more reliably

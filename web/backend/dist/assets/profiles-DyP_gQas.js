@@ -1,0 +1,1 @@
+import{j as o}from"./index-DVo6fa7U.js";import{D as t}from"./dashboard-page-Dpwsv6Ah.js";import"./page-header-BDO_oZUm.js";const p=()=>o.jsx(t,{title:"Profiles",kind:"profiles",empty:"No additional agent profiles are configured."});export{p as component};

@@ -3,8 +3,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime"
+	"sort"
+	"strings"
 
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/extensions"
@@ -32,6 +35,24 @@ type toolSupportResponse struct {
 
 type toolStateRequest struct {
 	Enabled bool `json:"enabled"`
+}
+
+type mcpServerResponse struct {
+	Name      string   `json:"name"`
+	Enabled   bool     `json:"enabled"`
+	Transport string   `json:"transport"`
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	URL       string   `json:"url,omitempty"`
+}
+
+type mcpServerRequest struct {
+	Name      string   `json:"name"`
+	Enabled   bool     `json:"enabled"`
+	Transport string   `json:"transport"`
+	Command   string   `json:"command"`
+	Args      []string `json:"args"`
+	URL       string   `json:"url"`
 }
 
 var toolCatalog = []toolCatalogEntry{
@@ -180,6 +201,90 @@ func toolCatalogItems() []extensions.CatalogItem {
 func (h *Handler) registerToolRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tools", h.handleListTools)
 	mux.HandleFunc("PUT /api/tools/{name}/state", h.handleUpdateToolState)
+	mux.HandleFunc("GET /api/tools/mcp/servers", h.handleListMCPServers)
+	mux.HandleFunc("POST /api/tools/mcp/servers", h.handleSaveMCPServer)
+}
+
+func (h *Handler) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	servers := make([]mcpServerResponse, 0, len(cfg.Tools.MCP.Servers))
+	for name, server := range cfg.Tools.MCP.Servers {
+		transport := strings.TrimSpace(server.Type)
+		if transport == "" {
+			if strings.TrimSpace(server.URL) != "" {
+				transport = "http"
+			} else {
+				transport = "stdio"
+			}
+		}
+		servers = append(servers, mcpServerResponse{
+			Name: name, Enabled: server.Enabled, Transport: transport,
+			Command: server.Command, Args: server.Args, URL: server.URL,
+		})
+	}
+	sort.Slice(servers, func(i, j int) bool { return servers[i].Name < servers[j].Name })
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"enabled": cfg.Tools.MCP.Enabled, "servers": servers})
+}
+
+func (h *Handler) handleSaveMCPServer(w http.ResponseWriter, r *http.Request) {
+	var req mcpServerRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+	req.Name = strings.TrimSpace(req.Name)
+	req.Transport = strings.ToLower(strings.TrimSpace(req.Transport))
+	req.Command = strings.TrimSpace(req.Command)
+	req.URL = strings.TrimSpace(req.URL)
+	if req.Name == "" {
+		http.Error(w, "server name is required", http.StatusBadRequest)
+		return
+	}
+	if req.Transport != "stdio" && req.Transport != "http" && req.Transport != "sse" {
+		http.Error(w, "transport must be stdio, http, or sse", http.StatusBadRequest)
+		return
+	}
+	if req.Transport == "stdio" && req.Command == "" {
+		http.Error(w, "command is required for a CLI MCP server", http.StatusBadRequest)
+		return
+	}
+	if req.Transport != "stdio" && req.URL == "" {
+		http.Error(w, "URL is required for an HTTP or SSE MCP server", http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if cfg.Tools.MCP.Servers == nil {
+		cfg.Tools.MCP.Servers = make(map[string]config.MCPServerConfig)
+	}
+	cfg.Tools.MCP.Enabled = true
+	cfg.Tools.MCP.Servers[req.Name] = config.MCPServerConfig{
+		Enabled: req.Enabled, Type: req.Transport, Command: req.Command,
+		Args: req.Args, URL: req.URL,
+	}
+	if err := config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	restarted := false
+	if _, err := h.RestartGateway(); err == nil {
+		restarted = true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "gateway_restarted": restarted})
 }
 
 func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {

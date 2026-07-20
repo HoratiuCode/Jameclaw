@@ -1,4 +1,5 @@
-const PAGE_TEXT_LIMIT = 5000
+const PAGE_TEXT_LIMIT = 9000
+const PAGE_OUTLINE_LIMIT = 24
 const SELECTION_LIMIT = 3000
 const DOCK_STORAGE_KEY = "jameclaw-extension-dock-enabled"
 const DOCK_ROOT_ID = "jameclaw-dock-root"
@@ -19,12 +20,39 @@ function getBrowserClientID() {
 }
 
 async function sendBrowserResult(id, result) {
-  await fetch("http://127.0.0.1:18800/api/extension/browser/result", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...result }) })
+  await fetch("http://127.0.0.1:18800/api/extension/browser/result", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, ...result }),
+  })
 }
 
 function pageMap() {
-  const controls = Array.from(document.querySelectorAll("a, button, input, textarea, select")).slice(0, 80).map((element) => ({ tag: element.tagName.toLowerCase(), text: trimText((element.innerText || element.value || element.getAttribute("aria-label") || "").trim(), 160), id: element.id || "", name: element.getAttribute("name") || "", href: element instanceof HTMLAnchorElement ? element.href : "" }))
-  return JSON.stringify({ title: document.title, url: location.href, text: getPageText(), controls })
+  const controls = Array.from(document.querySelectorAll("a, button, input, textarea, select"))
+    .slice(0, 80)
+    .map((element) => ({
+      tag: element.tagName.toLowerCase(),
+      text: trimText((element.innerText || element.value || element.getAttribute("aria-label") || "").trim(), 160),
+      id: element.id || "",
+      name: element.getAttribute("name") || "",
+      href: element instanceof HTMLAnchorElement ? element.href : "",
+      selector: elementSelector(element),
+      role: element.getAttribute("role") || "",
+      type: element.getAttribute("type") || "",
+      disabled: Boolean(element.disabled),
+    }))
+  return JSON.stringify({ title: document.title, url: location.href, description: pageDescription(), outline: pageOutline(), text: getPageText(), controls })
+}
+
+function elementSelector(element) {
+  if (element.id) return `#${CSS.escape(element.id)}`
+  const testID = element.getAttribute("data-testid")
+  if (testID) return `[data-testid="${CSS.escape(testID)}"]`
+  const name = element.getAttribute("name")
+  if (name) return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`
+  const label = element.getAttribute("aria-label")
+  if (label) return `${element.tagName.toLowerCase()}[aria-label="${CSS.escape(label)}"]`
+  return element.tagName.toLowerCase()
 }
 
 async function runBrowserCommand(command) {
@@ -32,9 +60,38 @@ async function runBrowserCommand(command) {
     const args = command.args || {}
     switch (command.action) {
       case "inspect": return { content: pageMap() }
-      case "navigate": if (!/^https?:/i.test(args.url || "")) throw new Error("Only http and https URLs are allowed."); location.assign(args.url); return { content: `Navigating to ${args.url}` }
-      case "click": { const element = document.querySelector(args.selector); if (!element) throw new Error(`No element matches ${args.selector}`); const actionLabel = [element.innerText, element.getAttribute("aria-label"), element.getAttribute("title"), element.getAttribute("data-testid")].filter(Boolean).join(" "); if (/\b(send|post|tweet|reply)\b/i.test(actionLabel) && !window.confirm(`JameClaw is ready to ${actionLabel.trim() || "send this message"}. Review the recipient and text, then choose OK to continue.`)) return { content: "Send cancelled by user" }; element.click(); return { content: `Clicked ${args.selector}` } }
-      case "type": { const element = document.querySelector(args.selector); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement || element instanceof HTMLElement && element.isContentEditable)) throw new Error(`Selector is not a text field or message composer: ${args.selector}`); const text = String(args.text || ""); element.focus(); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) { element.value = text; element.dispatchEvent(new Event("change", { bubbles: true })) } else { const selection = window.getSelection(); const range = document.createRange(); range.selectNodeContents(element); range.collapse(true); selection?.removeAllRanges(); selection?.addRange(range); document.execCommand("insertText", false, text) } element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text })); return { content: `Pasted text into ${args.selector}` } }
+      case "navigate":
+        if (!/^https?:/i.test(args.url || "")) throw new Error("Only http and https URLs are allowed.")
+        location.assign(args.url); return { content: `Navigating to ${args.url}` }
+      case "click": {
+        const element = document.querySelector(args.selector)
+        if (!element) throw new Error(`No element matches ${args.selector}`)
+        const actionLabel = [element.innerText, element.getAttribute("aria-label"), element.getAttribute("title"), element.getAttribute("data-testid")].filter(Boolean).join(" ")
+        if (/\b(send|post|tweet|reply)\b/i.test(actionLabel) && !window.confirm(`JameClaw is ready to ${actionLabel.trim() || "send this message"}. Review the recipient and text, then choose OK to continue.`)) {
+          return { content: "Send cancelled by user" }
+        }
+        element.click(); return { content: `Clicked ${args.selector}` }
+      }
+      case "type": {
+        const element = document.querySelector(args.selector)
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement || element instanceof HTMLElement && element.isContentEditable)) throw new Error(`Selector is not a text field or message composer: ${args.selector}`)
+        const text = String(args.text || "")
+        element.focus()
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+          element.value = text
+          element.dispatchEvent(new Event("change", { bubbles: true }))
+        } else {
+          const selection = window.getSelection()
+          const range = document.createRange()
+          range.selectNodeContents(element)
+          range.collapse(true)
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          document.execCommand("insertText", false, text)
+        }
+        element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+        return { content: `Pasted text into ${args.selector}` }
+      }
       case "scroll": window.scrollBy(Number(args.x) || 0, Number(args.y) || 600); return { content: "Scrolled page" }
       case "go_back": history.back(); return { content: "Navigating back" }
       case "reload": location.reload(); return { content: "Reloading page" }
@@ -45,7 +102,12 @@ async function runBrowserCommand(command) {
 
 async function pollBrowserCommands() {
   if (!browserClientID || document.visibilityState !== "visible") return
-  try { const response = await fetch("http://127.0.0.1:18800/api/extension/browser/next", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: browserClientID }) }); if (response.status === 204 || !response.ok) return; const command = await response.json(); if (command?.id) await sendBrowserResult(command.id, await runBrowserCommand(command)) } catch { }
+  try {
+    const response = await fetch("http://127.0.0.1:18800/api/extension/browser/next", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: browserClientID }) })
+    if (response.status === 204 || !response.ok) return
+    const command = await response.json()
+    if (command?.id) await sendBrowserResult(command.id, await runBrowserCommand(command))
+  } catch { /* JameClaw may not be running yet. */ }
 }
 
 function getSelectionText() {
@@ -69,17 +131,39 @@ function rememberSelection() {
 }
 
 function getPageText() {
-  const root = document.body
+  const root = getReadableRoot()
   if (!root) {
     return ""
   }
 
-  const text = root.innerText.replace(/\s+/g, " ").trim()
+  const clone = root.cloneNode(true)
+  clone.querySelectorAll("script, style, noscript, nav, footer, aside, form, button, [aria-hidden='true'], [role='navigation'], [role='banner'], [role='contentinfo']").forEach((element) => element.remove())
+  const text = clone.innerText.replace(/\s+/g, " ").trim()
   if (text.length <= PAGE_TEXT_LIMIT) {
     return text
   }
 
   return `${text.slice(0, PAGE_TEXT_LIMIT)}...`
+}
+
+function getReadableRoot() {
+  const candidates = Array.from(document.querySelectorAll("main, article, [role='main']"))
+    .filter((element) => element instanceof HTMLElement && element.innerText.trim().length > 300)
+    .sort((a, b) => b.innerText.length - a.innerText.length)
+  return candidates[0] || document.body
+}
+
+function pageDescription() {
+  return document.querySelector("meta[name='description']")?.getAttribute("content")?.trim() || ""
+}
+
+function pageOutline() {
+  const root = getReadableRoot()
+  if (!root) return []
+  return Array.from(root.querySelectorAll("h1, h2, h3"))
+    .map((heading) => `${heading.tagName.toLowerCase()}: ${heading.textContent?.replace(/\s+/g, " ").trim() || ""}`)
+    .filter(Boolean)
+    .slice(0, PAGE_OUTLINE_LIMIT)
 }
 
 function getDockRoot() {
@@ -209,6 +293,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendResponse({
     title: document.title || "",
     url: window.location.href || "",
+    description: pageDescription(),
+    outline: pageOutline(),
     selection,
     pageText: getPageText(),
   })

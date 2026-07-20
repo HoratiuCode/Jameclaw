@@ -42,6 +42,7 @@ func onReady() {
 	startTrayActivityIndicator()
 
 	// Create menu items
+	// Top-level: Open, About, Settings, Quit — keep the bar clean on macOS.
 	mOpen := systray.AddMenuItem(T(MenuOpen), T(MenuOpenTooltip))
 	mConsole := mOpen.AddSubMenuItem(T(MenuConsole), T(MenuConsoleTooltip))
 	var terminalClicked <-chan struct{}
@@ -59,12 +60,13 @@ func onReady() {
 
 	systray.AddSeparator()
 
-	// Add restart option
-	mRestart := systray.AddMenuItem(T(MenuRestart), T(MenuRestartTooltip))
+	// Settings submenu: service + power options (Restart, Keep Awake on macOS)
+	mSettings := systray.AddMenuItem(T(MenuSettings), T(MenuSettingsTooltip))
+	mRestart := mSettings.AddSubMenuItem(T(MenuRestart), T(MenuRestartTooltip))
 	var keepAwakeClicked <-chan struct{}
 	var mKeepAwake *systray.MenuItem
 	if runtime.GOOS == "darwin" {
-		mKeepAwake = systray.AddMenuItemCheckbox(T(MenuKeepAwake), T(MenuKeepAwakeTooltip), false)
+		mKeepAwake = mSettings.AddSubMenuItemCheckbox(T(MenuKeepAwake), T(MenuKeepAwakeTooltip), false)
 		keepAwakeClicked = mKeepAwake.ClickedCh
 	}
 

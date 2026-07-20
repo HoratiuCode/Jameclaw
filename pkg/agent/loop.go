@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,18 +49,20 @@ type AgentLoop struct {
 	hooks    *HookManager
 
 	// Runtime state
-	running        atomic.Bool
-	summarizing    sync.Map
-	fallback       *providers.FallbackChain
-	channelManager *channels.Manager
-	mediaStore     media.MediaStore
-	transcriber    voice.Transcriber
-	cmdRegistry    *commands.Registry
-	mcp            mcpRuntime
-	hookRuntime    hookRuntime
-	steering       *steeringQueue
-	pendingSkills  sync.Map
-	mu             sync.RWMutex
+	running           atomic.Bool
+	summarizing       sync.Map
+	fallback          *providers.FallbackChain
+	channelManager    *channels.Manager
+	mediaStore        media.MediaStore
+	transcriber       voice.Transcriber
+	cmdRegistry       *commands.Registry
+	mcp               mcpRuntime
+	hookRuntime       hookRuntime
+	steering          *steeringQueue
+	pendingSkills     sync.Map
+	mu                sync.RWMutex
+	workspaceClaimsMu sync.Mutex
+	workspaceClaims   map[string]workspaceWriteClaim
 
 	// Concurrent turn management (from HEAD)
 	activeTurnStates sync.Map     // key: sessionKey (string), value: *turnState
@@ -129,15 +132,16 @@ func NewAgentLoop(
 
 	eventBus := NewEventBus()
 	al := &AgentLoop{
-		bus:         msgBus,
-		cfg:         cfg,
-		registry:    registry,
-		state:       stateManager,
-		eventBus:    eventBus,
-		summarizing: sync.Map{},
-		fallback:    fallbackChain,
-		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
-		steering:    newSteeringQueue(parseSteeringMode(cfg.Agents.Defaults.SteeringMode)),
+		bus:             msgBus,
+		cfg:             cfg,
+		registry:        registry,
+		state:           stateManager,
+		eventBus:        eventBus,
+		summarizing:     sync.Map{},
+		fallback:        fallbackChain,
+		cmdRegistry:     commands.NewRegistry(commands.BuiltinDefinitions()),
+		steering:        newSteeringQueue(parseSteeringMode(cfg.Agents.Defaults.SteeringMode)),
+		workspaceClaims: make(map[string]workspaceWriteClaim),
 	}
 	al.hooks = NewHookManager(eventBus)
 	configureHookManagerFromConfig(al.hooks, cfg)
@@ -164,6 +168,10 @@ func registerSharedTools(
 		if !ok {
 			continue
 		}
+		currentAgentID := agentID
+		agent.ContextBuilder.WithCoordinationContext(func(channel, chatID string) string {
+			return al.activeWorkspaceContext(currentAgentID, agent.Workspace, channel, chatID)
+		})
 
 		if cfg.Tools.IsToolEnabled("web") {
 			searchTool, err := tools.NewWebSearchTool(tools.WebSearchToolOptions{
@@ -328,11 +336,12 @@ func registerSharedTools(
 			}
 		}
 
-		// Spawn and spawn_status tools share a SubagentManager.
-		// Construct it when either tool is enabled (both require subagent).
+		// Spawn, subagent, and spawn_status share a SubagentManager.
+		// Construct it when any of those tools is enabled (all require subagent base).
 		spawnEnabled := cfg.Tools.IsToolEnabled("spawn")
+		subagentEnabled := cfg.Tools.IsToolEnabled("subagent")
 		spawnStatusEnabled := cfg.Tools.IsToolEnabled("spawn_status")
-		if (spawnEnabled || spawnStatusEnabled) && cfg.Tools.IsToolEnabled("subagent") {
+		if (spawnEnabled || spawnStatusEnabled || subagentEnabled) && subagentEnabled {
 			subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
 			subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 
@@ -357,14 +366,18 @@ func registerSharedTools(
 						session:        nil, // Ephemeral session not needed for adhoc spawn
 						pendingResults: make(chan *tools.ToolResult, 16),
 						concurrencySem: make(chan struct{}, 5),
+						agent:          agent,
 					}
 				}
 
-				// 2. Build Tools slice from registry
+				// 2. Build Tools slice from registry (already without spawn tools when
+				// set via SetTools on a pre-registration clone).
 				var tlSlice []tools.Tool
-				for _, name := range tls.List() {
-					if t, ok := tls.Get(name); ok {
-						tlSlice = append(tlSlice, t)
+				if tls != nil {
+					for _, name := range tls.List() {
+						if t, ok := tls.Get(name); ok {
+							tlSlice = append(tlSlice, t)
+						}
 					}
 				}
 
@@ -373,45 +386,57 @@ func registerSharedTools(
 					"You have access to tools - use them as needed to complete your task.\n" +
 					"After completing the task, provide a clear summary of what was done.\n\n" +
 					"Task: " + task
+				if label != "" {
+					systemPrompt = "You are a subagent labeled \"" + label + "\". Complete the given task independently and report the result.\n" +
+						"You have access to tools - use them as needed to complete your task.\n" +
+						"After completing the task, provide a clear summary of what was done.\n\n" +
+						"Task: " + task
+				}
 
-				// 4. Resolve Model
+				// 4. Resolve Model — prefer target agent's model when agent_id is set.
 				modelToUse := agent.Model
 				if targetAgentID != "" {
-					if targetAgent, ok := al.GetRegistry().GetAgent(targetAgentID); ok {
+					if targetAgent, ok := al.GetRegistry().GetAgent(targetAgentID); ok && targetAgent != nil {
 						modelToUse = targetAgent.Model
 					}
 				}
 
-				// 5. Build SubTurnConfig
-				cfg := SubTurnConfig{
+				// 5. Build SubTurnConfig (AgentID switches full identity; Model/Tools applied in spawnSubTurn)
+				subCfg := SubTurnConfig{
 					Model:        modelToUse,
 					Tools:        tlSlice,
 					SystemPrompt: systemPrompt,
+					AgentID:      targetAgentID,
+					Async:        true, // manager path is always async (spawn)
 				}
 				if hasMaxTokens {
-					cfg.MaxTokens = maxTokens
+					subCfg.MaxTokens = maxTokens
+				}
+				if hasTemperature {
+					subCfg.Temperature = temperature
+					subCfg.HasTemperature = true
 				}
 
 				// 6. Spawn SubTurn
-				return spawnSubTurn(ctx, al, parentTS, cfg)
+				return spawnSubTurn(ctx, al, parentTS, subCfg)
 			})
 
 			// Clone the parent's tool registry so subagents can use all
 			// tools registered so far (file, web, etc.) but NOT spawn/
 			// spawn_status which are added below — preventing recursive
-			// subagent spawning.
-			subagentManager.SetTools(agent.Tools.Clone())
+			// subagent spawning. spawnSubTurn also strips these as a safety net.
+			subagentManager.SetTools(withoutSubagentTools(agent.Tools))
 			if spawnEnabled {
 				spawnTool := tools.NewSpawnTool(subagentManager)
 				spawnTool.SetSpawner(NewSubTurnSpawner(al))
-				currentAgentID := agentID
 				spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
 					return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 				})
 
 				agent.Tools.Register(spawnTool)
-
-				// Also register the synchronous subagent tool
+			}
+			// Synchronous subagent tool is independent of spawn enablement.
+			if subagentEnabled {
 				subagentTool := tools.NewSubagentTool(subagentManager)
 				subagentTool.SetSpawner(NewSubTurnSpawner(al))
 				agent.Tools.Register(subagentTool)
@@ -419,7 +444,7 @@ func registerSharedTools(
 			if spawnStatusEnabled {
 				agent.Tools.Register(tools.NewSpawnStatusTool(subagentManager))
 			}
-		} else if (spawnEnabled || spawnStatusEnabled) && !cfg.Tools.IsToolEnabled("subagent") {
+		} else if (spawnEnabled || spawnStatusEnabled) && !subagentEnabled {
 			logger.WarnCF("agent", "spawn/spawn_status tools require subagent to be enabled", nil)
 		}
 	}
@@ -2134,7 +2159,14 @@ turnLoop:
 					providerCtx,
 					activeCandidates,
 					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						return ts.agent.Provider.Chat(ctx, messagesForCall, toolDefsForCall, model, llmOpts)
+						candidateProvider, err := providerForCandidate(cfg, ts.agent, providers.FallbackCandidate{
+							Provider: provider,
+							Model:    model,
+						})
+						if err != nil {
+							return nil, err
+						}
+						return candidateProvider.Chat(ctx, messagesForCall, toolDefsForCall, model, llmOpts)
 					},
 				)
 				if fbErr != nil {
@@ -2668,6 +2700,16 @@ turnLoop:
 			}
 
 			toolStart := time.Now()
+			if conflict := al.claimWorkspaceWrite(ts, toolName, toolArgs); conflict != "" {
+				toolResult := tools.ErrorResult(conflict)
+				conflictMsg := providers.Message{Role: "tool", Content: toolResult.ForLLM, ToolCallID: tc.ID}
+				messages = append(messages, conflictMsg)
+				if !ts.opts.NoHistory {
+					ts.agent.Sessions.AddFullMessage(ts.sessionKey, conflictMsg)
+					ts.recordPersistedMessage(conflictMsg)
+				}
+				continue
+			}
 			toolResult := ts.agent.Tools.ExecuteWithContext(
 				turnCtx,
 				toolName,
@@ -2937,6 +2979,200 @@ turnLoop:
 		status:       turnStatus,
 		followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
 	}, nil
+}
+
+type workspaceWriteClaim struct {
+	turnID  string
+	agentID string
+	path    string
+}
+
+func (al *AgentLoop) claimWorkspaceWrite(ts *turnState, toolName string, args map[string]any) string {
+	if al == nil || ts == nil || ts.agent == nil || !isWorkspaceWriteTool(toolName) {
+		return ""
+	}
+	rawPath, _ := args["path"].(string)
+	if strings.TrimSpace(rawPath) == "" {
+		return ""
+	}
+	claimPath := workspaceClaimPath(ts.agent.Workspace, rawPath)
+	if claimPath == "" {
+		return ""
+	}
+
+	al.workspaceClaimsMu.Lock()
+	defer al.workspaceClaimsMu.Unlock()
+	if al.workspaceClaims == nil {
+		al.workspaceClaims = make(map[string]workspaceWriteClaim)
+	}
+	if existing, ok := al.workspaceClaims[claimPath]; ok && existing.turnID != ts.turnID {
+		return fmt.Sprintf("Workspace coordination blocked this write: agent %q is actively working on %s. Inspect its progress or choose a separate file instead.", existing.agentID, rawPath)
+	}
+	al.workspaceClaims[claimPath] = workspaceWriteClaim{turnID: ts.turnID, agentID: ts.agentID, path: claimPath}
+	// Surface the reservation immediately so other concurrent turns see it even
+	// while the filesystem operation is still running.
+	ts.recordVerificationInput(toolName, args)
+	return ""
+}
+
+func (al *AgentLoop) releaseWorkspaceClaims(ts *turnState) {
+	if al == nil || ts == nil {
+		return
+	}
+	al.workspaceClaimsMu.Lock()
+	defer al.workspaceClaimsMu.Unlock()
+	for path, claim := range al.workspaceClaims {
+		if claim.turnID == ts.turnID {
+			delete(al.workspaceClaims, path)
+		}
+	}
+}
+
+func isWorkspaceWriteTool(toolName string) bool {
+	switch toolName {
+	case "write_file", "edit_file", "append_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func workspaceClaimPath(workspace, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workspace, path)
+	}
+	return filepath.Clean(path)
+}
+
+func (al *AgentLoop) activeWorkspaceContext(agentID, workspace, channel, chatID string) string {
+	workspace = filepath.Clean(strings.TrimSpace(workspace))
+	if workspace == "" {
+		return ""
+	}
+
+	type activeWork struct {
+		agentID string
+		phase   TurnPhase
+		task    string
+		files   []string
+	}
+	var work []activeWork
+	al.activeTurnStates.Range(func(_, value any) bool {
+		ts, ok := value.(*turnState)
+		if !ok || ts == nil || ts.agent == nil || filepath.Clean(ts.agent.Workspace) != workspace {
+			return true
+		}
+		info := ts.snapshot()
+		if info.AgentID == agentID && info.Channel == channel && info.ChatID == chatID {
+			return true
+		}
+		files, _ := ts.verificationInputs()
+		item := activeWork{agentID: info.AgentID, phase: info.Phase, files: files}
+		if info.Channel == channel && info.ChatID == chatID {
+			item.task = utils.Truncate(strings.TrimSpace(info.UserMessage), 180)
+		} else {
+			item.task = "private task in the shared workspace"
+		}
+		work = append(work, item)
+		return true
+	})
+	externalCollaborators := detectExternalCollaborators()
+	worktreeChanges := workspaceWorktreeChanges(workspace)
+	if len(work) == 0 && len(externalCollaborators) == 0 && worktreeChanges == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Active Workspace Coordination\n\nDo not duplicate work or overwrite changes you did not make.\n")
+	if len(externalCollaborators) > 0 {
+		sb.WriteString("\n## External collaborators detected on this Mac\n")
+		for _, collaborator := range externalCollaborators {
+			fmt.Fprintf(&sb, "- %s\n", collaborator)
+		}
+		sb.WriteString("Their process presence does not reveal their private prompts or intent. Use the worktree changes below and inspect relevant files before editing.\n")
+	}
+	if worktreeChanges != "" {
+		fmt.Fprintf(&sb, "\n## Current worktree changes\n```text\n%s\n```\nTreat these as someone else's in-progress work unless you can verify ownership.\n", worktreeChanges)
+	}
+	if len(work) > 0 {
+		sb.WriteString("\n## Active JameClaw work\n")
+	}
+	for _, item := range work {
+		fmt.Fprintf(&sb, "\n- Agent %q — phase: %s; task: %s", item.agentID, item.phase, item.task)
+		if len(item.files) > 0 {
+			fmt.Fprintf(&sb, "; claimed files: %s", strings.Join(item.files, ", "))
+		}
+	}
+	sb.WriteString("\nChoose an independent area (research, review, tests, or separate files), or wait for the owner before changing a claimed file.")
+	return sb.String()
+}
+
+var externalCollaboratorSignatures = []struct {
+	label   string
+	markers []string
+}{
+	{label: "Codex", markers: []string{"codex"}},
+	{label: "Claude Code", markers: []string{"claude"}},
+	{label: "Cursor", markers: []string{"cursor"}},
+	{label: "Windsurf", markers: []string{"windsurf"}},
+	{label: "Aider", markers: []string{"aider"}},
+	{label: "Cline", markers: []string{"cline"}},
+	{label: "Roo Code", markers: []string{"roo-code", "roo code"}},
+	{label: "Continue", markers: []string{"continue"}},
+	{label: "GitHub Copilot", markers: []string{"copilot"}},
+	{label: "Visual Studio Code", markers: []string{"visual studio code", "code.app"}},
+	{label: "Zed", markers: []string{"zed.app"}},
+}
+
+// detectExternalCollaborators reports only the presence of well-known local
+// coding-agent and IDE processes. It never reads another app's conversation,
+// files, or command arguments into the agent prompt.
+func detectExternalCollaborators() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,comm=,args=").Output()
+	if err != nil {
+		return nil
+	}
+	return parseExternalCollaborators(string(out))
+}
+
+func parseExternalCollaborators(processList string) []string {
+	found := make(map[string]struct{})
+	for _, line := range strings.Split(processList, "\n") {
+		lower := strings.ToLower(line)
+		for _, signature := range externalCollaboratorSignatures {
+			for _, marker := range signature.markers {
+				if strings.Contains(lower, marker) {
+					found[signature.label] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	labels := make([]string, 0, len(found))
+	for label := range found {
+		labels = append(labels, label)
+	}
+	slices.Sort(labels)
+	return labels
+}
+
+func workspaceWorktreeChanges(workspace string) string {
+	if strings.TrimSpace(workspace) == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", workspace, "status", "--short").Output()
+	if err != nil {
+		return ""
+	}
+	return utils.Truncate(strings.TrimSpace(string(out)), 1800)
 }
 
 // rememberResearchTurn keeps a compact record of completed research in the
@@ -3861,11 +4097,11 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			return al.channelManager.GetEnabledChannels()
 		},
 		GetActiveTurn: func() any {
-			info := al.GetActiveTurn()
-			if info == nil {
+			tree := al.FormatActiveSubagentTree()
+			if tree == "" {
 				return nil
 			}
-			return info
+			return tree
 		},
 		SwitchChannel: func(value string) error {
 			if al.channelManager == nil {

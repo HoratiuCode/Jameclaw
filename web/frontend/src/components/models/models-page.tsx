@@ -8,10 +8,13 @@ import {
   type ProviderCatalogEntry,
   getModelCatalog,
   getModels,
+	setModelFailover,
   setDefaultModel,
 } from "@/api/models"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 import { AddModelSheet } from "./add-model-sheet"
 import { AddProviderModelSheet } from "./add-provider-model-sheet"
@@ -43,6 +46,10 @@ export function ModelsPage() {
     index: number
     role: ModelRole
   } | null>(null)
+	const [failoverPrimary, setFailoverPrimary] = useState("")
+	const [failoverSecondary, setFailoverSecondary] = useState("")
+	const [savingFailover, setSavingFailover] = useState(false)
+	const [failoverError, setFailoverError] = useState("")
 
   const fetchModels = useCallback(async () => {
     try {
@@ -66,6 +73,8 @@ export function ModelsPage() {
       })
       setModels(sorted)
       setProviders(catalog.providers)
+		setFailoverPrimary(data.default_model)
+		setFailoverSecondary(data.model_fallbacks?.[0] ?? "")
       setFetchError("")
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : t("models.loadError"))
@@ -161,6 +170,23 @@ export function ModelsPage() {
   const defaultModel = models.find((model) => model.is_default)
   const defaultImageModel = models.find((model) => model.is_image_default)
   const defaultVoiceModel = models.find((model) => model.is_voice_default)
+	const configuredChatModels = models.filter((model) => model.configured)
+	const saveFailover = async () => {
+		if (!failoverPrimary || !failoverSecondary || failoverPrimary === failoverSecondary) {
+			setFailoverError("Choose two different configured models.")
+			return
+		}
+		setSavingFailover(true)
+		setFailoverError("")
+		try {
+			await setModelFailover(failoverPrimary, failoverSecondary)
+			await fetchModels()
+		} catch (error) {
+			setFailoverError(error instanceof Error ? error.message : "Could not save provider failover.")
+		} finally {
+			setSavingFailover(false)
+		}
+	}
 
   return (
     <div className="flex h-full flex-col">
@@ -203,6 +229,16 @@ export function ModelsPage() {
 
         {!loading && !fetchError && (
           <div className="pb-8">
+			<ProviderFailoverCard
+				models={configuredChatModels}
+				primary={failoverPrimary}
+				secondary={failoverSecondary}
+				onPrimaryChange={setFailoverPrimary}
+				onSecondaryChange={setFailoverSecondary}
+				onSave={() => void saveFailover()}
+				saving={savingFailover}
+				error={failoverError}
+			/>
             {providerGroups.map((providerGroup) => (
               <ProviderSection
                 key={providerGroup.key}
@@ -248,4 +284,61 @@ export function ModelsPage() {
       />
     </div>
   )
+}
+
+function ProviderFailoverCard({
+	models,
+	primary,
+	secondary,
+	onPrimaryChange,
+	onSecondaryChange,
+	onSave,
+	saving,
+	error,
+}: {
+	models: ModelInfo[]
+	primary: string
+	secondary: string
+	onPrimaryChange: (value: string) => void
+	onSecondaryChange: (value: string) => void
+	onSave: () => void
+	saving: boolean
+	error: string
+}) {
+	const secondaryModels = models.filter((model) => model.model_name !== primary)
+	const primaryModels = models.filter((model) => model.model_name !== secondary)
+	const hasTwoDistinctModels = primary !== "" && secondary !== "" && primary !== secondary
+
+	return (
+		<Card className="my-5 border-primary/25 bg-primary/3">
+			<CardHeader>
+				<CardTitle>Primary and backup model</CardTitle>
+				<CardDescription>
+					Choose two different configured models. The backup model takes over automatically when the primary model has a retryable error, such as an outage, rate limit, or timeout.
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+				<ProviderSelect label="Primary model" value={primary} models={primaryModels} onChange={onPrimaryChange} />
+				<ProviderSelect label="Backup model" value={secondary} models={secondaryModels} onChange={onSecondaryChange} />
+				<Button onClick={onSave} disabled={saving || models.length < 2 || !hasTwoDistinctModels}>
+					{saving ? "Saving…" : "Save model pair"}
+				</Button>
+				{error && <p className="text-destructive basis-full text-sm">{error}</p>}
+			</CardContent>
+		</Card>
+	)
+}
+
+function ProviderSelect({ label, value, models, onChange }: { label: string; value: string; models: ModelInfo[]; onChange: (value: string) => void }) {
+	return (
+		<div className="grid min-w-52 flex-1 gap-2">
+			<label className="text-sm font-medium">{label}</label>
+			<Select value={value} onValueChange={onChange}>
+				<SelectTrigger><SelectValue placeholder="Choose a configured model" /></SelectTrigger>
+				<SelectContent>
+					{models.map((model) => <SelectItem key={model.model_name} value={model.model_name}>{model.model_name} · {model.model}</SelectItem>)}
+				</SelectContent>
+			</Select>
+		</div>
+	)
 }

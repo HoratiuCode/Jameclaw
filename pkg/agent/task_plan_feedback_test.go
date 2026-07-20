@@ -24,8 +24,11 @@ func TestNormalizeTaskPlanLimitsAndFormatsBullets(t *testing.T) {
 	}
 }
 
-func TestTaskPlanPromptRequiresClarificationBeforePlanning(t *testing.T) {
-	if !strings.Contains(taskPlanSystemPrompt, "CLARIFY:") || !strings.Contains(taskPlanSystemPrompt, "Do not provide a plan") {
-		t.Fatalf("task plan prompt does not require clarification: %s", taskPlanSystemPrompt)
+func TestTaskPlanPromptEncouragesIndependentExecution(t *testing.T) {
+	if !strings.Contains(taskPlanSystemPrompt, "Proceed independently") || !strings.Contains(taskPlanSystemPrompt, "low-risk, reversible assumption") {
+		t.Fatalf("task plan prompt does not encourage independent execution: %s", taskPlanSystemPrompt)
+	}
+	if !strings.Contains(taskPlanSystemPrompt, "irreversible, external, security-sensitive") {
+		t.Fatalf("task plan prompt must retain high-impact clarification boundary: %s", taskPlanSystemPrompt)
 	}
 }

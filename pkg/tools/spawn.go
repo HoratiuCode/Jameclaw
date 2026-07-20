@@ -12,6 +12,7 @@ type SpawnTool struct {
 	defaultModel   string
 	maxTokens      int
 	temperature    float64
+	hasTemperature bool
 	allowlistCheck func(targetAgentID string) bool
 }
 
@@ -23,10 +24,11 @@ func NewSpawnTool(manager *SubagentManager) *SpawnTool {
 		return &SpawnTool{}
 	}
 	return &SpawnTool{
-		manager:      manager,
-		defaultModel: manager.defaultModel,
-		maxTokens:    manager.maxTokens,
-		temperature:  manager.temperature,
+		manager:        manager,
+		defaultModel:   manager.defaultModel,
+		maxTokens:      manager.maxTokens,
+		temperature:    manager.temperature,
+		hasTemperature: manager.hasTemperature,
 	}
 }
 
@@ -140,14 +142,21 @@ Task: %s`,
 	if t.spawner != nil {
 		// Launch async sub-turn in goroutine
 		go func() {
-			result, err := t.spawner.SpawnSubTurn(ctx, SubTurnConfig{
+			cfg := SubTurnConfig{
 				Model:        t.defaultModel,
-				Tools:        nil, // Will inherit from parent via context
+				Tools:        nil, // Inherit parent tools (spawn tools stripped in spawnSubTurn)
 				SystemPrompt: systemPrompt,
-				MaxTokens:    t.maxTokens,
-				Temperature:  t.temperature,
+				AgentID:      agentID,
 				Async:        true, // Async execution
-			})
+			}
+			if t.maxTokens > 0 {
+				cfg.MaxTokens = t.maxTokens
+			}
+			if t.hasTemperature {
+				cfg.Temperature = t.temperature
+				cfg.HasTemperature = true
+			}
+			result, err := t.spawner.SpawnSubTurn(ctx, cfg)
 			if err != nil {
 				result = ErrorResult(fmt.Sprintf("Spawn failed: %v", err)).WithError(err)
 			}

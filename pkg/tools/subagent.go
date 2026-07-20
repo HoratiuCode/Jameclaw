@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,8 @@ type SubTurnConfig struct {
 	SystemPrompt       string
 	MaxTokens          int
 	Temperature        float64
+	HasTemperature     bool          // true when Temperature was explicitly set (0 is valid)
+	AgentID            string        // optional target agent ID for full identity switch
 	Async              bool          // true for async (spawn), false for sync (subagent)
 	Critical           bool          // continue running after parent finishes gracefully
 	Timeout            time.Duration // 0 = use default (5 minutes)
@@ -144,7 +147,7 @@ func (sm *SubagentManager) Spawn(
 		AgentID:        agentID,
 		OriginChannel:  originChannel,
 		OriginChatID:   originChatID,
-		Status:         "queued",
+		Status:         SubagentStatusQueued,
 		Created:        time.Now().UnixMilli(),
 		DeliveryStatus: "pending",
 	}
@@ -165,11 +168,12 @@ func (sm *SubagentManager) runTask(
 	callback AsyncCallback,
 ) {
 	sm.mu.Lock()
-	task.Status = "running"
+	task.Status = SubagentStatusRunning
 	task.Started = time.Now().UnixMilli()
 	if task.Created == 0 {
 		task.Created = task.Started
 	}
+	task.DeliveryStatus = "pending"
 	sm.mu.Unlock()
 	// TODO(eventbus): once subagents are modeled as child turns inside
 	// pkg/agent, emit SubTurnEnd and SubTurnResultDelivered from the parent
@@ -179,10 +183,11 @@ func (sm *SubagentManager) runTask(
 	select {
 	case <-ctx.Done():
 		sm.mu.Lock()
-		task.Status = "cancelled"
+		task.Status = classifySubagentContextError(ctx)
 		task.Result = "Task canceled before execution"
 		task.Error = ctx.Err().Error()
 		task.TerminalSummary = task.Result
+		task.DeliveryStatus = "cancelled"
 		task.Ended = time.Now().UnixMilli()
 		sm.mu.Unlock()
 		return
@@ -262,23 +267,17 @@ After completing the task, provide a clear summary of what was done.`
 	}
 
 	sm.mu.Lock()
-	defer func() {
-		sm.mu.Unlock()
-		// Call callback if provided and result is set
-		if callback != nil && result != nil {
-			callback(ctx, result)
-		}
-	}()
-
 	if err != nil {
-		task.Status = "failed"
+		task.Status = SubagentStatusFailed
 		task.Result = fmt.Sprintf("Error: %v", err)
 		task.Error = err.Error()
-		// Check if it was canceled
 		if ctx.Err() != nil {
-			task.Status = "cancelled"
+			task.Status = classifySubagentContextError(ctx)
 			task.Result = "Task canceled during execution"
 			task.Error = ctx.Err().Error()
+			task.DeliveryStatus = "cancelled"
+		} else {
+			task.DeliveryStatus = "failed"
 		}
 		task.TerminalSummary = task.Result
 		result = &ToolResult{
@@ -290,11 +289,37 @@ After completing the task, provide a clear summary of what was done.`
 			Err:     err,
 		}
 	} else {
-		task.Status = "succeeded"
-		task.Result = result.ForLLM
-		task.TerminalSummary = result.ForLLM
+		task.Status = SubagentStatusSucceeded
+		if result != nil {
+			task.Result = result.ForLLM
+			task.TerminalSummary = result.ForLLM
+		}
+		task.DeliveryStatus = "completed"
 	}
 	task.Ended = time.Now().UnixMilli()
+	sm.mu.Unlock()
+
+	// Deliver result after releasing the manager lock to avoid holding it
+	// across potentially slow callback work (bus publish, etc.).
+	if callback != nil && result != nil {
+		callback(ctx, result)
+		sm.mu.Lock()
+		if task.DeliveryStatus == "completed" {
+			task.DeliveryStatus = "delivered"
+		}
+		sm.mu.Unlock()
+	}
+}
+
+// classifySubagentContextError maps a canceled/deadline context to a terminal status.
+func classifySubagentContextError(ctx context.Context) string {
+	if ctx == nil || ctx.Err() == nil {
+		return SubagentStatusCancelled
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return SubagentStatusTimedOut
+	}
+	return SubagentStatusCancelled
 }
 
 func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
@@ -343,10 +368,11 @@ func (sm *SubagentManager) ListTaskCopies() []SubagentTask {
 // SubagentTool executes a subagent task synchronously and returns the result.
 // It directly calls SubTurnSpawner with Async=false for synchronous execution.
 type SubagentTool struct {
-	spawner      SubTurnSpawner
-	defaultModel string
-	maxTokens    int
-	temperature  float64
+	spawner        SubTurnSpawner
+	defaultModel   string
+	maxTokens      int
+	temperature    float64
+	hasTemperature bool
 }
 
 func NewSubagentTool(manager *SubagentManager) *SubagentTool {
@@ -354,9 +380,10 @@ func NewSubagentTool(manager *SubagentManager) *SubagentTool {
 		return &SubagentTool{}
 	}
 	return &SubagentTool{
-		defaultModel: manager.defaultModel,
-		maxTokens:    manager.maxTokens,
-		temperature:  manager.temperature,
+		defaultModel:   manager.defaultModel,
+		maxTokens:      manager.maxTokens,
+		temperature:    manager.temperature,
+		hasTemperature: manager.hasTemperature,
 	}
 }
 
@@ -418,14 +445,20 @@ Task: %s`,
 
 	// Use spawner if available (direct SpawnSubTurn call)
 	if t.spawner != nil {
-		result, err := t.spawner.SpawnSubTurn(ctx, SubTurnConfig{
+		cfg := SubTurnConfig{
 			Model:        t.defaultModel,
-			Tools:        nil, // Will inherit from parent via context
+			Tools:        nil, // Inherit parent tools (spawn tools stripped in spawnSubTurn)
 			SystemPrompt: systemPrompt,
-			MaxTokens:    t.maxTokens,
-			Temperature:  t.temperature,
 			Async:        false, // Synchronous execution
-		})
+		}
+		if t.maxTokens > 0 {
+			cfg.MaxTokens = t.maxTokens
+		}
+		if t.hasTemperature {
+			cfg.Temperature = t.temperature
+			cfg.HasTemperature = true
+		}
+		result, err := t.spawner.SpawnSubTurn(ctx, cfg)
 		if err != nil {
 			return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
 		}

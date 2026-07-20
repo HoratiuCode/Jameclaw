@@ -13,7 +13,8 @@ import (
 )
 
 const taskPlanSystemPrompt = `Decide whether the request is clear enough to begin work.
-If a missing detail, ambiguous term, conflicting instruction, or material choice could change the outcome, return exactly "CLARIFY: " followed by one concise question. Do not provide a plan and do not start work.
+Proceed independently whenever a reasonable, low-risk, reversible assumption lets the work move forward. State that assumption briefly as the first plan bullet when useful.
+Return exactly "CLARIFY: " followed by one concise question only when the missing detail affects an irreversible, external, security-sensitive, or materially different outcome. Do not provide a plan in that case.
 Otherwise, return only a concise, user-visible execution plan of 3-4 Markdown bullets. Describe concrete outcomes and checks, not private reasoning. Do not perform the task, make claims of completion, or mention tools unless useful to the user.`
 
 const (

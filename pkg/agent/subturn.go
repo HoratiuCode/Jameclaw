@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -105,6 +107,14 @@ type SubTurnConfig struct {
 	Tools        []tools.Tool
 	SystemPrompt string
 	MaxTokens    int
+	Temperature  float64
+	// HasTemperature distinguishes an explicit 0 temperature from "unset".
+	HasTemperature bool
+
+	// AgentID optionally selects a different registered agent as the base for
+	// this SubTurn (workspace, tools, persona, provider candidates). When empty,
+	// the parent turn's agent is used.
+	AgentID string
 
 	// Async controls the result delivery mechanism:
 	//
@@ -169,10 +179,8 @@ type SubTurnConfig struct {
 	// InitialTokenBudget is a shared atomic counter for tracking remaining tokens.
 	// If set, the SubTurn will inherit this budget and deduct tokens after each LLM call.
 	// If nil, the SubTurn will inherit the parent's tokenBudget (if any).
-	// Used by team tool to enforce token limits across all team members.
+	// Used by team-style multi-subturn orchestration to enforce token limits across members.
 	InitialTokenBudget *atomic.Int64
-
-	// Can be extended with temperature, topP, etc.
 }
 
 // ====================== Context Keys ======================
@@ -226,6 +234,9 @@ func (s *AgentLoopSpawner) SpawnSubTurn(
 		InitialMessages:    cfg.InitialMessages,
 		InitialTokenBudget: cfg.InitialTokenBudget,
 		MaxTokens:          cfg.MaxTokens,
+		Temperature:        cfg.Temperature,
+		HasTemperature:     cfg.HasTemperature,
+		AgentID:            cfg.AgentID,
 		Async:              cfg.Async,
 		Critical:           cfg.Critical,
 		Timeout:            cfg.Timeout,
@@ -331,23 +342,30 @@ func spawnSubTurn(
 
 	childID := al.generateSubTurnID()
 
-	// Get the agent instance from parent, falling back to the default agent.
+	// Resolve the base agent: optional target AgentID, else parent, else default.
 	// Wrap it in a shallow copy that uses an ephemeral (in-memory only) session store
 	// so that child turns never pollute or persist to the parent's session history.
-	baseAgent := parentTS.agent
-	if baseAgent == nil {
-		baseAgent = al.registry.GetDefaultAgent()
-	}
-	if baseAgent == nil {
-		return nil, errors.New("parent turnState has no agent instance")
+	baseAgent, err := al.resolveSubTurnBaseAgent(parentTS, cfg.AgentID)
+	if err != nil {
+		return nil, err
 	}
 	ephemeralStore := newEphemeralSession(nil)
 	agent := *baseAgent // shallow copy
 	agent.Sessions = ephemeralStore
-	// Clone the tool registry so child turn's tool registrations
-	// don't pollute the parent's registry.
-	if baseAgent.Tools != nil {
-		agent.Tools = baseAgent.Tools.Clone()
+
+	// Apply model / LLM options from SubTurnConfig onto the child agent copy.
+	al.applySubTurnModelConfig(&agent, cfg)
+
+	// Tool registry for the child:
+	//   - cfg.Tools != nil  → use the explicit tool set (spawn tools stripped)
+	//   - cfg.Tools == nil  → inherit parent tools with spawn tools stripped
+	// Stripping spawn/subagent/spawn_status prevents recursive subagent spawning.
+	if cfg.Tools != nil {
+		agent.Tools = registryFromTools(cfg.Tools)
+	} else if baseAgent.Tools != nil {
+		agent.Tools = withoutSubagentTools(baseAgent.Tools)
+	} else {
+		agent.Tools = tools.NewToolRegistry()
 	}
 
 	// Create processOptions for the child turn
@@ -668,4 +686,212 @@ func (e *ephemeralSessionStore) truncateLocked() {
 	if len(e.history) > maxEphemeralHistorySize {
 		e.history = e.history[len(e.history)-maxEphemeralHistorySize:]
 	}
+}
+
+// ====================== SubTurn agent / tool helpers ======================
+
+func isSubagentToolName(name string) bool {
+	switch name {
+	case "spawn", "subagent", "spawn_status":
+		return true
+	default:
+		return false
+	}
+}
+
+// withoutSubagentTools clones a registry while stripping spawn/subagent tools so
+// children cannot recursively spawn further subagents.
+func withoutSubagentTools(reg *tools.ToolRegistry) *tools.ToolRegistry {
+	out := tools.NewToolRegistry()
+	if reg == nil {
+		return out
+	}
+	for _, name := range reg.List() {
+		if isSubagentToolName(name) {
+			continue
+		}
+		if t, ok := reg.Get(name); ok {
+			out.Register(t)
+		}
+	}
+	return out
+}
+
+// registryFromTools builds a registry from an explicit tool list, stripping
+// spawn/subagent tools for the same recursion safety reason.
+func registryFromTools(list []tools.Tool) *tools.ToolRegistry {
+	out := tools.NewToolRegistry()
+	for _, t := range list {
+		if t == nil || isSubagentToolName(t.Name()) {
+			continue
+		}
+		out.Register(t)
+	}
+	return out
+}
+
+// resolveSubTurnBaseAgent picks the agent instance that backs a SubTurn.
+// When agentID is set, the registered target agent is used (full identity:
+// workspace, tools base, persona, candidates). Otherwise the parent agent
+// is used, falling back to the default agent.
+func (al *AgentLoop) resolveSubTurnBaseAgent(parentTS *turnState, agentID string) (*AgentInstance, error) {
+	if agentID != "" && al != nil && al.registry != nil {
+		if target, ok := al.registry.GetAgent(agentID); ok && target != nil {
+			return target, nil
+		}
+		return nil, fmt.Errorf("target agent %q not found", agentID)
+	}
+
+	if parentTS != nil && parentTS.agent != nil {
+		return parentTS.agent, nil
+	}
+	if al != nil && al.registry != nil {
+		if def := al.registry.GetDefaultAgent(); def != nil {
+			return def, nil
+		}
+	}
+	return nil, errors.New("parent turnState has no agent instance")
+}
+
+// applySubTurnModelConfig applies Model / MaxTokens / Temperature from cfg onto
+// a shallow-copied child agent, re-resolving provider candidates when the model
+// changes so agent_id and model overrides actually take effect in runTurn.
+func (al *AgentLoop) applySubTurnModelConfig(agent *AgentInstance, cfg SubTurnConfig) {
+	if agent == nil {
+		return
+	}
+
+	if cfg.MaxTokens > 0 {
+		agent.MaxTokens = cfg.MaxTokens
+	}
+	if cfg.HasTemperature {
+		agent.Temperature = cfg.Temperature
+	}
+
+	model := cfg.Model
+	if model == "" || model == agent.Model {
+		// Still required for validation upstream; nothing else to rebind.
+		if model != "" {
+			agent.Model = model
+		}
+		return
+	}
+
+	agent.Model = model
+	if al == nil || al.cfg == nil {
+		return
+	}
+
+	defaultProvider := al.cfg.Agents.Defaults.Provider
+	agent.Candidates = resolveModelCandidates(al.cfg, defaultProvider, model, agent.Fallbacks)
+
+	modelCfg, err := resolvedModelConfig(al.cfg, model, agent.Workspace)
+	if err != nil {
+		logger.WarnCF("subturn", "Failed to resolve SubTurn model config; keeping parent provider",
+			map[string]any{"model": model, "error": err.Error()})
+		return
+	}
+	provider, _, err := providers.CreateProviderFromConfig(modelCfg)
+	if err != nil {
+		logger.WarnCF("subturn", "Failed to create SubTurn provider; keeping parent provider",
+			map[string]any{"model": model, "error": err.Error()})
+		return
+	}
+	agent.Provider = provider
+}
+
+// FormatActiveSubagentTree returns a human-readable tree of active turns for
+// the /subagents command. Empty string means no active turns.
+func (al *AgentLoop) FormatActiveSubagentTree() string {
+	if al == nil {
+		return ""
+	}
+
+	type node struct {
+		info     ActiveTurnInfo
+		children []string
+	}
+	byID := make(map[string]*node)
+
+	al.activeTurnStates.Range(func(_, value any) bool {
+		ts, ok := value.(*turnState)
+		if !ok || ts == nil {
+			return true
+		}
+		info := ts.snapshot()
+		byID[info.TurnID] = &node{
+			info:     info,
+			children: append([]string(nil), info.ChildTurnIDs...),
+		}
+		return true
+	})
+
+	if len(byID) == 0 {
+		return ""
+	}
+
+	// Roots: no parent, or parent not currently active.
+	var roots []string
+	for id, n := range byID {
+		if n.info.ParentTurnID == "" {
+			roots = append(roots, id)
+			continue
+		}
+		if _, ok := byID[n.info.ParentTurnID]; !ok {
+			roots = append(roots, id)
+		}
+	}
+	// Stable order for display.
+	sort.Strings(roots)
+
+	var sb strings.Builder
+	var walk func(id string, indent string, visited map[string]bool)
+	walk = func(id string, indent string, visited map[string]bool) {
+		if visited[id] {
+			return
+		}
+		visited[id] = true
+		n, ok := byID[id]
+		if !ok {
+			return
+		}
+		info := n.info
+		label := info.TurnID
+		if info.Depth > 0 {
+			label = fmt.Sprintf("%s (depth=%d)", info.TurnID, info.Depth)
+		}
+		fmt.Fprintf(&sb, "%s- %s agent=%s phase=%s", indent, label, info.AgentID, info.Phase)
+		if info.UserMessage != "" {
+			msg := info.UserMessage
+			if len([]rune(msg)) > 80 {
+				msg = string([]rune(msg)[:80]) + "…"
+			}
+			fmt.Fprintf(&sb, " task=%q", msg)
+		}
+		sb.WriteByte('\n')
+
+		children := append([]string(nil), n.children...)
+		sort.Strings(children)
+		for _, childID := range children {
+			walk(childID, indent+"  ", visited)
+		}
+	}
+
+	visited := make(map[string]bool)
+	for _, root := range roots {
+		walk(root, "", visited)
+	}
+	// Orphans not reachable from roots (shouldn't happen, but be complete).
+	remaining := make([]string, 0)
+	for id := range byID {
+		if !visited[id] {
+			remaining = append(remaining, id)
+		}
+	}
+	sort.Strings(remaining)
+	for _, id := range remaining {
+		walk(id, "", visited)
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
 }

@@ -276,6 +276,13 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		}
 		return NewCodexCliProvider(workspace), modelID, nil
 
+	case "grok-cli", "grokcli", "grok-build":
+		workspace := cfg.Workspace
+		if workspace == "" {
+			workspace = "."
+		}
+		return NewGrokCliProvider(workspace), modelID, nil
+
 	case "github-copilot", "copilot":
 		apiBase := cfg.APIBase
 		if apiBase == "" {

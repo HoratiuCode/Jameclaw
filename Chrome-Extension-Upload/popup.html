@@ -22,8 +22,17 @@
           title="Conversations"
         >
           <span class="folder-icon" aria-hidden="true"></span>
+          <span class="button-label">Chats</span>
         </button>
-        <button id="refresh-context" class="topbar-button" type="button">Dock</button>
+        <button id="refresh-context" class="topbar-button" type="button"><span aria-hidden="true">↗</span> Pop out</button>
+      </div>
+
+      <div id="page-context" class="page-context" hidden>
+        <div class="page-context-icon" aria-hidden="true">⌁</div>
+        <div class="page-context-copy">
+          <div id="context-title" class="page-context-title">Reading current page</div>
+          <div id="context-detail" class="page-context-detail"></div>
+        </div>
       </div>
 
       <div id="conversation-panel" class="conversation-panel" hidden>
@@ -42,7 +51,7 @@
           rows="1"
           placeholder="Ask about this page"
         ></textarea>
-        <button id="send" type="submit">↗</button>
+        <button id="send" type="submit" aria-label="Send message" title="Send message">↗</button>
       </form>
     </div>
 

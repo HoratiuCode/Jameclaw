@@ -22,14 +22,15 @@ import (
 )
 
 type ContextBuilder struct {
-	workspace          string
-	skillsLoader       *skills.SkillsLoader
-	memory             *MemoryStore
-	toolDiscoveryBM25  bool
-	toolDiscoveryRegex bool
-	planContext        func(channel, chatID string) string
-	agentName          string
-	human              *config.HumanConfig
+	workspace           string
+	skillsLoader        *skills.SkillsLoader
+	memory              *MemoryStore
+	toolDiscoveryBM25   bool
+	toolDiscoveryRegex  bool
+	planContext         func(channel, chatID string) string
+	coordinationContext func(channel, chatID string) string
+	agentName           string
+	human               *config.HumanConfig
 
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
@@ -64,6 +65,14 @@ func (cb *ContextBuilder) WithHumanConfig(agentName string, human *config.HumanC
 
 func (cb *ContextBuilder) WithPlanContext(fn func(channel, chatID string) string) *ContextBuilder {
 	cb.planContext = fn
+	return cb
+}
+
+// WithCoordinationContext supplies short-lived awareness of other agents that
+// are working in the same workspace. It is intentionally dynamic and never
+// cached with the static system prompt.
+func (cb *ContextBuilder) WithCoordinationContext(fn func(channel, chatID string) string) *ContextBuilder {
+	cb.coordinationContext = fn
 	return cb
 }
 
@@ -159,7 +168,9 @@ Your workspace is at: %s
 
 5. **Long-running tasks** - For large, multi-step, or longer-running work, use the todo tool to create and maintain a concrete plan. Keep exactly one item in_progress, update the plan after meaningful progress, and read the plan before resuming older work. Use spawn for independent background sub-tasks when useful.
 
-6. **Clarify before acting** - Before creating a plan, calling a tool, editing files, sending messages, scheduling work, or taking any other action, check whether the request is sufficiently clear. If a missing detail, ambiguous term, conflicting instruction, or meaningful choice could change the result, ask one concise, specific clarification question and wait for the answer. Do not guess, start partial work, or present a plan as if the direction were settled. Use the conversation and memory first; do not ask for information already available there. Proceed without a question only when the remaining assumption is low-risk and easy to reverse.
+6. **Independent execution** - Use the conversation and memory first, then proceed when a reasonable, low-risk, reversible assumption lets you make progress. State important assumptions briefly and verify the outcome. Ask one concise question only when the missing detail affects an irreversible action, an external commitment, security, or a materially different result. Do not ask for information already available in context.
+
+7. **Shared workspace collaboration** - You may be one member of a swarm. Before changing code, inspect the current worktree and relevant files for in-progress work from people or external coding agents such as Codex. Do not overwrite changes you did not make. Respect active workspace claims supplied in the coordination context; choose a separate file or wait and report the conflict. Delegate independent research, review, or test work to subagents, but give one agent clear ownership of each file or implementation area.
 
 %s`,
 		emoji, version, agentName, agentName, agentName, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, toolDiscovery)
@@ -254,7 +265,7 @@ func (cb *ContextBuilder) buildHumanDiscussionContext() string {
 	fmt.Fprintf(&sb, "- Tone: %s\n", tone)
 	fmt.Fprintf(&sb, "- Discussion mode: %s\n", mode)
 	fmt.Fprintf(&sb, "- Status updates: %s\n", statusStyle)
-	sb.WriteString("- Before planning or acting, ask one focused clarification question whenever an ambiguous request, missing detail, conflicting instruction, or material choice could change the result. Do not begin work until it is answered.\n")
+	sb.WriteString("- Work independently when a reasonable, low-risk, reversible assumption lets you proceed. State important assumptions briefly, verify results, and ask a focused clarification only for irreversible, external, security-sensitive, or materially different outcomes.\n")
 	sb.WriteString("- When the user sounds frustrated, be concise, acknowledge the concrete problem, and move to the fix.\n")
 	sb.WriteString("- Adapt response length to the task: short for simple commands, fuller for planning or tradeoffs.\n")
 	sb.WriteString("- After research or investigative work, give a short informed takeaway in your own voice: state the central conclusion, something notable, and any relevant uncertainty or source limitation. Treat completed research as working knowledge for related future questions. When useful, refer naturally to it (for example, 'From the Steve Jobs research I did...'), but never pretend to remember work that is not in context or memory.\n")
@@ -666,6 +677,13 @@ func (cb *ContextBuilder) BuildMessages(
 		if planText := cb.planContext(channel, chatID); planText != "" {
 			stringParts = append(stringParts, planText)
 			contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: planText})
+		}
+	}
+
+	if cb.coordinationContext != nil {
+		if coordinationText := cb.coordinationContext(channel, chatID); coordinationText != "" {
+			stringParts = append(stringParts, coordinationText)
+			contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: coordinationText})
 		}
 	}
 

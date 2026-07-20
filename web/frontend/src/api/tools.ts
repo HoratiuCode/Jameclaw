@@ -12,7 +12,30 @@ interface ToolsResponse {
 }
 
 interface ToolActionResponse {
-  status: string
+	status: string
+}
+
+export interface MCPServer {
+	name: string
+	enabled: boolean
+	transport: "stdio" | "http" | "sse"
+	command?: string
+	args?: string[]
+	url?: string
+}
+
+interface MCPServersResponse {
+	enabled: boolean
+	servers: MCPServer[]
+}
+
+export interface SaveMCPServerPayload {
+	name: string
+	enabled: boolean
+	transport: "stdio" | "http" | "sse"
+	command?: string
+	args?: string[]
+	url?: string
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -53,4 +76,18 @@ export async function setToolEnabled(
       body: JSON.stringify({ enabled }),
     },
   )
+}
+
+export async function getMCPServers(): Promise<MCPServersResponse> {
+	return request<MCPServersResponse>("/api/tools/mcp/servers")
+}
+
+export async function saveMCPServer(
+	payload: SaveMCPServerPayload,
+): Promise<{ status: string; gateway_restarted: boolean }> {
+	return request("/api/tools/mcp/servers", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(payload),
+	})
 }

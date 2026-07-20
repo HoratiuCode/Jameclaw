@@ -119,8 +119,8 @@ func TestSubagentManager_SpawnTracksOpenClawStyleLifecycle(t *testing.T) {
 	if task.Created == 0 || task.Started == 0 || task.Ended == 0 {
 		t.Fatalf("expected created/started/ended timestamps, got %+v", task)
 	}
-	if task.DeliveryStatus != "pending" {
-		t.Fatalf("delivery status = %q, want pending", task.DeliveryStatus)
+	if task.DeliveryStatus != "completed" {
+		t.Fatalf("delivery status = %q, want completed", task.DeliveryStatus)
 	}
 	if !strings.Contains(task.TerminalSummary, "done: check status") {
 		t.Fatalf("terminal summary = %q", task.TerminalSummary)

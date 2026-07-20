@@ -95,3 +95,46 @@ func resolvedModelConfig(cfg *config.Config, modelName, workspace string) (*conf
 
 	return &clone, nil
 }
+
+// providerForCandidate returns the provider implementation that belongs to a
+// resolved fallback candidate. The primary instance is reused, while a real
+// provider is constructed for secondary candidates so a fallback can cross
+// provider boundaries (for example Codex CLI -> Claude API).
+func providerForCandidate(
+	cfg *config.Config,
+	agent *AgentInstance,
+	candidate providers.FallbackCandidate,
+) (providers.LLMProvider, error) {
+	if agent == nil {
+		return nil, fmt.Errorf("agent is nil")
+	}
+	if len(agent.Candidates) > 0 &&
+		agent.Candidates[0].Provider == candidate.Provider &&
+		agent.Candidates[0].Model == candidate.Model {
+		return agent.Provider, nil
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
+	}
+
+	for _, configured := range cfg.ModelList {
+		if configured == nil {
+			continue
+		}
+		ref := providers.ParseModelRef(configured.Model, "")
+		if ref == nil || ref.Provider != candidate.Provider || ref.Model != candidate.Model {
+			continue
+		}
+		clone := *configured
+		if clone.Workspace == "" {
+			clone.Workspace = agent.Workspace
+		}
+		provider, _, err := providers.CreateProviderFromConfig(&clone)
+		if err != nil {
+			return nil, fmt.Errorf("initialize fallback provider %s/%s: %w", candidate.Provider, candidate.Model, err)
+		}
+		return provider, nil
+	}
+
+	return nil, fmt.Errorf("no configured provider for fallback candidate %s/%s", candidate.Provider, candidate.Model)
+}

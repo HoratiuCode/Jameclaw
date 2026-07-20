@@ -192,6 +192,16 @@ function IssueCard({
               {issue.description}
             </p>
             <p className="text-foreground mt-3 text-sm">{issue.suggestion}</p>
+            {issue.recovery_prompt ? (
+              <div className="border-primary/20 bg-primary/5 mt-3 rounded-md border p-3">
+                <div className="text-primary text-xs font-semibold tracking-wide uppercase">
+                  Suggested recovery
+                </div>
+                <p className="text-foreground mt-1 text-sm italic">
+                  {issue.recovery_prompt}
+                </p>
+              </div>
+            ) : null}
             {issue.affected && issue.affected.length > 0 ? (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {issue.affected.map((item) => (

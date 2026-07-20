@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/providers"
 )
 
 const modelProbeTimeout = 800 * time.Millisecond
@@ -61,7 +62,7 @@ func requiresRuntimeProbe(m *config.ModelConfig) bool {
 	}
 
 	switch modelProtocol(m.Model) {
-	case "claude-cli", "claudecli", "codex-cli", "codexcli", "github-copilot", "copilot":
+	case "claude-cli", "claudecli", "codex-cli", "codexcli", "grok-cli", "grokcli", "grok-build", "github-copilot", "copilot":
 		return true
 	case "ollama", "vllm":
 		apiBase := strings.TrimSpace(m.APIBase)
@@ -87,6 +88,8 @@ func probeLocalModelAvailability(m *config.ModelConfig) bool {
 		return probeTCPServiceFunc(apiBase)
 	case "claude-cli", "claudecli", "codex-cli", "codexcli":
 		return true
+	case "grok-cli", "grokcli", "grok-build":
+		return providers.GrokCLIAvailable()
 	default:
 		if hasLocalAPIBase(apiBase) {
 			return probeOpenAICompatibleModelFunc(apiBase, modelID, m.APIKey())

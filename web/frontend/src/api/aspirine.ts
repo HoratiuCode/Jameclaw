@@ -5,6 +5,7 @@ export interface AspirineIssue {
   status: string
   description: string
   suggestion: string
+  recovery_prompt?: string
   auto_fix_action?: string
   auto_fix_label?: string
   affected?: string[]

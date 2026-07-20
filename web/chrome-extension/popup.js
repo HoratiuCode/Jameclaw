@@ -18,6 +18,9 @@ const conversationPanelEl = document.getElementById("conversation-panel")
 const conversationListEl = document.getElementById("conversation-list")
 const newConversationEl = document.getElementById("new-conversation")
 const titleEl = document.querySelector(".title")
+const pageContextEl = document.getElementById("page-context")
+const contextTitleEl = document.getElementById("context-title")
+const contextDetailEl = document.getElementById("context-detail")
 const isDock = document.body.classList.contains("dock")
 
 let socket = null
@@ -224,15 +227,8 @@ function renderConversationMessages(messages) {
 }
 
 function ensureEmptyState() {
-  if (messagesEl.children.length > 0) {
-    return
-  }
-
-  const empty = document.createElement("div")
-  empty.className = "empty"
-  empty.textContent =
-    "Start typing. The current page context is attached automatically. Select text on the website before opening the popup if you want JameClaw to focus on it."
-  messagesEl.appendChild(empty)
+  // The empty chat is intentionally blank. Page context is shown in the
+  // compact context card above the conversation instead of a large placeholder.
 }
 
 function setConversationPanelOpen(open) {
@@ -354,6 +350,8 @@ function buildContextBlock(context) {
   return [
     context.title ? `Page title: ${context.title}` : "",
     context.url ? `Page URL: ${context.url}` : "",
+    context.description ? `Page summary: ${context.description}` : "",
+    context.outline?.length ? `Page outline:\n${context.outline.join("\n")}` : "",
     context.selection ? `Selected text:\n${context.selection}` : "",
     context.pageText ? `Page content excerpt:\n${context.pageText}` : "",
   ]
@@ -371,9 +369,26 @@ function normalizeContext(context) {
   return {
     title: (context?.title || "").trim(),
     url: (context?.url || "").trim(),
+    description: (context?.description || "").trim(),
+    outline: Array.isArray(context?.outline) ? context.outline.map((item) => String(item).trim()).filter(Boolean).slice(0, 24) : [],
     selection: (context?.selection || "").trim(),
     pageText: (context?.pageText || "").trim(),
   }
+}
+
+function renderPageContext(context) {
+  if (!pageContextEl || !contextTitleEl || !contextDetailEl) return
+  if (!context?.title && !context?.selection) {
+    pageContextEl.hidden = true
+    return
+  }
+  pageContextEl.hidden = false
+  contextTitleEl.textContent = context.selection ? "Selected text is attached" : context.title || "Current page is attached"
+  const details = []
+  if (context.selection) details.push(`${context.selection.length.toLocaleString()} selected characters`)
+  else if (context.outline?.length) details.push(`${context.outline.length} headings captured`)
+  if (context.pageText) details.push(`${context.pageText.length.toLocaleString()} characters ready`)
+  contextDetailEl.textContent = details.join(" · ") || "Current page context is ready"
 }
 
 function requestPageContext() {
@@ -394,6 +409,7 @@ function requestPageContext() {
       }
 
       pendingContext = normalizeContext(response.context)
+      renderPageContext(pendingContext)
       if (pendingContext.selection) {
         setStatus("Using selected text.")
         return
@@ -618,6 +634,6 @@ refreshContextEl.addEventListener("click", () => {
   )
 })
 
-refreshContextEl.textContent = isDock ? "Close" : "Pop out"
+refreshContextEl.innerHTML = isDock ? "Close" : '<span aria-hidden="true">↗</span> Pop out'
 
 void bootstrap()

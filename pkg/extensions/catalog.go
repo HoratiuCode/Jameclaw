@@ -186,6 +186,7 @@ func providerDescriptors() []ProviderDescriptor {
 		localProvider("vllm", "vLLM", "http://localhost:8000/v1", "local-model", "vllm/local-model", "Start a vLLM OpenAI-compatible server on localhost:8000."),
 		localProviderWithProtocols("claude-cli", "Claude CLI", []string{"claude-cli", "claudecli"}, "", "claude-cli", "claude-cli/sonnet", "Install and authenticate the Claude CLI."),
 		localProviderWithProtocols("codex-cli", "Codex CLI", []string{"codex-cli", "codexcli"}, "", "codex-cli", "codex-cli/gpt-5.4", "Install and authenticate the Codex CLI."),
+		localProviderWithProtocols("grok-build", "Grok Build", []string{"grok-cli", "grokcli", "grok-build"}, "", "grok-build", "grok-build/default", "Use the signed-in Grok Build CLI installed on this Mac."),
 		localProvider("antigravity", "Google Code Assist", "", "antigravity", "antigravity/default", "Authenticate Google Code Assist / Antigravity locally."),
 		{
 			ID:             "github-copilot",

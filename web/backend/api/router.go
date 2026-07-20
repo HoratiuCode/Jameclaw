@@ -83,6 +83,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Launcher service parameters (port/public)
 	h.registerLauncherConfigRoutes(mux)
 
+	// Sandboxed reverse proxy for local development previews. This makes a
+	// localhost server started by the agent reachable from the same Web Console
+	// session when the console itself is accessed over Tailscale.
+	h.registerLocalPreviewRoutes(mux)
+
 	// GitHub release update checks
 	h.registerUpdateRoutes(mux)
 

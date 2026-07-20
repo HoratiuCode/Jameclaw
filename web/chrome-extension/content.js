@@ -1,4 +1,5 @@
-const PAGE_TEXT_LIMIT = 5000
+const PAGE_TEXT_LIMIT = 9000
+const PAGE_OUTLINE_LIMIT = 24
 const SELECTION_LIMIT = 3000
 const DOCK_STORAGE_KEY = "jameclaw-extension-dock-enabled"
 const DOCK_ROOT_ID = "jameclaw-dock-root"
@@ -35,8 +36,23 @@ function pageMap() {
       id: element.id || "",
       name: element.getAttribute("name") || "",
       href: element instanceof HTMLAnchorElement ? element.href : "",
+      selector: elementSelector(element),
+      role: element.getAttribute("role") || "",
+      type: element.getAttribute("type") || "",
+      disabled: Boolean(element.disabled),
     }))
-  return JSON.stringify({ title: document.title, url: location.href, text: getPageText(), controls })
+  return JSON.stringify({ title: document.title, url: location.href, description: pageDescription(), outline: pageOutline(), text: getPageText(), controls })
+}
+
+function elementSelector(element) {
+  if (element.id) return `#${CSS.escape(element.id)}`
+  const testID = element.getAttribute("data-testid")
+  if (testID) return `[data-testid="${CSS.escape(testID)}"]`
+  const name = element.getAttribute("name")
+  if (name) return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`
+  const label = element.getAttribute("aria-label")
+  if (label) return `${element.tagName.toLowerCase()}[aria-label="${CSS.escape(label)}"]`
+  return element.tagName.toLowerCase()
 }
 
 async function runBrowserCommand(command) {
@@ -115,17 +131,39 @@ function rememberSelection() {
 }
 
 function getPageText() {
-  const root = document.body
+  const root = getReadableRoot()
   if (!root) {
     return ""
   }
 
-  const text = root.innerText.replace(/\s+/g, " ").trim()
+  const clone = root.cloneNode(true)
+  clone.querySelectorAll("script, style, noscript, nav, footer, aside, form, button, [aria-hidden='true'], [role='navigation'], [role='banner'], [role='contentinfo']").forEach((element) => element.remove())
+  const text = clone.innerText.replace(/\s+/g, " ").trim()
   if (text.length <= PAGE_TEXT_LIMIT) {
     return text
   }
 
   return `${text.slice(0, PAGE_TEXT_LIMIT)}...`
+}
+
+function getReadableRoot() {
+  const candidates = Array.from(document.querySelectorAll("main, article, [role='main']"))
+    .filter((element) => element instanceof HTMLElement && element.innerText.trim().length > 300)
+    .sort((a, b) => b.innerText.length - a.innerText.length)
+  return candidates[0] || document.body
+}
+
+function pageDescription() {
+  return document.querySelector("meta[name='description']")?.getAttribute("content")?.trim() || ""
+}
+
+function pageOutline() {
+  const root = getReadableRoot()
+  if (!root) return []
+  return Array.from(root.querySelectorAll("h1, h2, h3"))
+    .map((heading) => `${heading.tagName.toLowerCase()}: ${heading.textContent?.replace(/\s+/g, " ").trim() || ""}`)
+    .filter(Boolean)
+    .slice(0, PAGE_OUTLINE_LIMIT)
 }
 
 function getDockRoot() {
@@ -255,6 +293,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendResponse({
     title: document.title || "",
     url: window.location.href || "",
+    description: pageDescription(),
+    outline: pageOutline(),
     selection,
     pageText: getPageText(),
   })
