@@ -111,6 +111,8 @@ EOF
 #}
 
 cp $ICON_SOURCE "${APP_RESOURCES}/icon.icns"
+bash ./scripts/build-macos-settings-app.sh "${APP_RESOURCES}/JameClaw Settings.app"
+bash ./scripts/build-macos-home-app.sh "${APP_RESOURCES}/Jame.app"
 
 echo ""
 echo "=========================================="

@@ -31,3 +31,7 @@ func runTray() {
 	<-ctx.Done()
 	shutdownApp()
 }
+
+func requestLauncherQuit() {
+	_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+}

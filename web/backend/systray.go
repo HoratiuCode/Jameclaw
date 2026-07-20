@@ -32,6 +32,12 @@ func runTray() {
 	systray.Run(onReady, onExit)
 }
 
+// requestLauncherQuit is shared by the menu bar and the native Jame app so
+// either way of stopping Jame follows the same full shutdown path.
+func requestLauncherQuit() {
+	systray.Quit()
+}
+
 // onReady is called when the system tray is ready
 func onReady() {
 	// A template icon lets macOS choose the correct foreground automatically:
@@ -62,6 +68,11 @@ func onReady() {
 
 	// Settings submenu: service + power options (Restart, Keep Awake on macOS)
 	mSettings := systray.AddMenuItem(T(MenuSettings), T(MenuSettingsTooltip))
+	var nativeSettingsClicked <-chan struct{}
+	if runtime.GOOS == "darwin" {
+		mNativeSettings := mSettings.AddSubMenuItem("Open native settings", "Open simple JameClaw settings")
+		nativeSettingsClicked = mNativeSettings.ClickedCh
+	}
 	mRestart := mSettings.AddSubMenuItem(T(MenuRestart), T(MenuRestartTooltip))
 	var keepAwakeClicked <-chan struct{}
 	var mKeepAwake *systray.MenuItem
@@ -113,6 +124,11 @@ func onReady() {
 					}
 				}
 
+			case <-nativeSettingsClicked:
+				if err := openNativeSettings(); err != nil {
+					logger.Errorf("Failed to open native settings: %v", err)
+				}
+
 			case <-keepAwakeClicked:
 				next := !keepAwakeChecked
 				if err := setKeepAwake(next); err != nil {
@@ -133,22 +149,21 @@ func onReady() {
 				}
 
 			case <-mQuit.ClickedCh:
-				systray.Quit()
+				requestLauncherQuit()
 			}
 		}
 	}()
 
 	if !*noBrowser {
-		// Auto-open browser after systray is ready (if not disabled)
-		// Check no-browser flag via environment or pass as parameter if needed
-		if err := openBrowserBackground(); err != nil {
-			logger.Errorf("Warning: Failed to auto-open browser: %v", err)
+		if err := openNativeHome(); err != nil {
+			logger.Errorf("Warning: Failed to open native home: %v", err)
 		}
 	}
 }
 
 // onExit is called when the system tray is exiting
 func onExit() {
+	closeNativeHome()
 	stopKeepAwake()
 	logger.Info(T(Exiting))
 }

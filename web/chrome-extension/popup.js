@@ -33,9 +33,8 @@ let bootstrapRetryAttempts = 0
 let lastBootstrap = null
 let sessionId = null
 
-const extensionVersion = chrome.runtime?.getManifest?.().version
-if (titleEl && extensionVersion) {
-  titleEl.textContent = `JameClaw Chat v${extensionVersion}`
+if (titleEl) {
+  titleEl.textContent = "Jame"
 }
 
 function scrollToBottom() {
@@ -205,7 +204,17 @@ function appendMessage(role, content) {
 
   const item = document.createElement("div")
   item.className = `message ${role}`
-  item.textContent = content
+  if (role === "error") {
+    const title = document.createElement("div")
+    title.className = "error-title"
+    title.textContent = "Couldn’t complete that"
+    const detail = document.createElement("div")
+    detail.className = "error-content"
+    detail.textContent = content
+    item.append(title, detail)
+  } else {
+    item.textContent = content
+  }
   messagesEl.appendChild(item)
   scrollToBottom()
   return item
@@ -237,6 +246,7 @@ function setConversationPanelOpen(open) {
   }
   conversationPanelEl.hidden = !open
   conversationExplorerEl.classList.toggle("is-active", open)
+  conversationExplorerEl.setAttribute("aria-expanded", String(open))
 }
 
 function formatConversationMeta(item) {
@@ -602,6 +612,14 @@ conversationExplorerEl?.addEventListener("click", () => {
   setConversationPanelOpen(willOpen)
   if (willOpen) {
     void loadConversationList()
+  }
+})
+
+document.addEventListener("click", (event) => {
+  if (!conversationPanelEl || !conversationExplorerEl || conversationPanelEl.hidden) return
+  const target = event.target
+  if (target instanceof Node && !conversationPanelEl.contains(target) && !conversationExplorerEl.contains(target)) {
+    setConversationPanelOpen(false)
   }
 })
 

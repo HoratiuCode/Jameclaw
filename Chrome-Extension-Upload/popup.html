@@ -16,15 +16,15 @@
         </div>
         <button
           id="conversation-explorer"
-          class="icon-button"
+          class="more-button"
           type="button"
-          aria-label="Conversations"
-          title="Conversations"
+          aria-label="Open conversation history"
+          title="Conversation history"
+          aria-haspopup="menu"
+          aria-expanded="false"
         >
-          <span class="folder-icon" aria-hidden="true"></span>
-          <span class="button-label">Chats</span>
+          <span aria-hidden="true">•••</span>
         </button>
-        <button id="refresh-context" class="topbar-button" type="button"><span aria-hidden="true">↗</span> Pop out</button>
       </div>
 
       <div id="page-context" class="page-context" hidden>
@@ -35,10 +35,13 @@
         </div>
       </div>
 
-      <div id="conversation-panel" class="conversation-panel" hidden>
+      <div id="conversation-panel" class="conversation-panel" role="menu" hidden>
         <div class="conversation-panel-header">
           <span>Conversations</span>
-          <button id="new-conversation" class="small-button" type="button">New</button>
+          <div class="menu-actions">
+            <button id="new-conversation" class="small-button" type="button">New</button>
+            <button id="refresh-context" class="small-button" type="button"><span aria-hidden="true">↗</span> Pop out</button>
+          </div>
         </div>
         <div id="conversation-list" class="conversation-list"></div>
       </div>
