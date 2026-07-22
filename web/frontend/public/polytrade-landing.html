@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polytrade</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      color: #101828;
+      background:
+        radial-gradient(circle at top left, rgba(22, 163, 74, 0.14), transparent 28%),
+        radial-gradient(circle at top right, rgba(14, 116, 144, 0.14), transparent 24%),
+        linear-gradient(180deg, #f6fbf8 0%, #ffffff 44%, #f4f8ff 100%);
+    }
+    a { color: inherit; text-decoration: none; }
+    .shell {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(18px);
+      background: rgba(246, 251, 248, 0.82);
+      border-bottom: 1px solid rgba(16, 24, 40, 0.08);
+    }
+    .nav-inner {
+      min-height: 74px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #0f766e, #22c55e);
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-size: 14px;
+      box-shadow: 0 12px 28px rgba(15, 118, 110, 0.24);
+    }
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      color: #475467;
+      font-size: 14px;
+    }
+    .nav-links a:hover { color: #101828; }
+    .cta-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 20px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-weight: 700;
+      font-size: 14px;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+    .button:hover { transform: translateY(-1px); }
+    .button-primary {
+      background: linear-gradient(135deg, #0f766e, #16a34a);
+      color: #fff;
+      box-shadow: 0 16px 34px rgba(22, 163, 74, 0.24);
+    }
+    .button-secondary {
+      background: rgba(255, 255, 255, 0.78);
+      border-color: rgba(16, 24, 40, 0.1);
+      color: #101828;
+    }
+    .hero {
+      padding: 84px 0 56px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(15, 118, 110, 0.12);
+      color: #0f766e;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #16a34a;
+      box-shadow: 0 0 0 6px rgba(22, 163, 74, 0.12);
+    }
+    .hero-grid {
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 36px;
+      align-items: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(48px, 7vw, 86px);
+      line-height: 0.95;
+      letter-spacing: -0.06em;
+      max-width: 760px;
+    }
+    .hero-copy {
+      margin: 24px 0 0;
+      max-width: 610px;
+      font-size: 20px;
+      line-height: 1.7;
+      color: #475467;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 32px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 36px;
+    }
+    .metric {
+      padding: 18px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid rgba(16, 24, 40, 0.08);
+      box-shadow: 0 18px 44px rgba(16, 24, 40, 0.06);
+    }
+    .metric strong {
+      display: block;
+      font-size: 28px;
+      letter-spacing: -0.05em;
+    }
+    .metric span {
+      display: block;
+      margin-top: 6px;
+      color: #475467;
+      font-size: 14px;
+    }
+    .panel {
+      border-radius: 32px;
+      background: #0b1c24;
+      color: #eff8ff;
+      padding: 28px;
+      box-shadow: 0 28px 60px rgba(11, 28, 36, 0.24);
+      overflow: hidden;
+      position: relative;
+    }
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: auto -40px -80px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(34, 197, 94, 0.34), transparent 70%);
+    }
+    .panel-kicker {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(239, 248, 255, 0.08);
+      color: #98a2b3;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .panel h2 {
+      margin: 18px 0 10px;
+      font-size: 32px;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+    .panel p {
+      margin: 0;
+      color: #cbd5e1;
+      line-height: 1.7;
+    }
+    .terminal {
+      margin-top: 24px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .terminal-bar i {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #22c55e;
+      opacity: 0.8;
+    }
+    .terminal-body {
+      padding: 18px 18px 22px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13px;
+      line-height: 1.9;
+      color: #d1fae5;
+    }
+    .terminal-body .muted { color: #94a3b8; }
+    .section {
+      padding: 40px 0 72px;
+    }
+    .section-header {
+      max-width: 660px;
+      margin-bottom: 28px;
+    }
+    .section-label {
+      display: inline-block;
+      color: #0f766e;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 14px;
+    }
+    .section h3 {
+      margin: 0;
+      font-size: clamp(32px, 4vw, 48px);
+      line-height: 1;
+      letter-spacing: -0.05em;
+    }
+    .section-copy {
+      margin-top: 16px;
+      color: #475467;
+      font-size: 18px;
+      line-height: 1.7;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .card {
+      padding: 24px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid rgba(16, 24, 40, 0.08);
+      box-shadow: 0 20px 48px rgba(16, 24, 40, 0.05);
+    }
+    .card strong {
+      display: block;
+      font-size: 22px;
+      letter-spacing: -0.04em;
+      margin-bottom: 10px;
+    }
+    .card p {
+      margin: 0;
+      color: #475467;
+      line-height: 1.75;
+    }
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .step {
+      padding: 22px;
+      border-radius: 26px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(240,253,244,0.88));
+      border: 1px solid rgba(15, 118, 110, 0.1);
+    }
+    .step b {
+      display: inline-grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      background: #101828;
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    .step strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 19px;
+      letter-spacing: -0.03em;
+    }
+    .step p {
+      margin: 0;
+      color: #475467;
+      line-height: 1.7;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+      gap: 18px;
+    }
+    .quote {
+      padding: 28px;
+      border-radius: 28px;
+      background: #101828;
+      color: #f8fafc;
+      min-height: 100%;
+    }
+    .quote p {
+      margin: 0 0 18px;
+      font-size: 26px;
+      line-height: 1.35;
+      letter-spacing: -0.04em;
+    }
+    .quote small {
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+    .faq {
+      display: grid;
+      gap: 14px;
+    }
+    .faq-item {
+      padding: 22px 24px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid rgba(16, 24, 40, 0.08);
+    }
+    .faq-item strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+    .faq-item p {
+      margin: 0;
+      color: #475467;
+      line-height: 1.75;
+    }
+    .footer {
+      padding: 28px 0 64px;
+      color: #475467;
+      font-size: 14px;
+    }
+    .footer-card {
+      border-radius: 30px;
+      padding: 28px;
+      background: linear-gradient(135deg, #0b1c24, #123044);
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .footer-card h4 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: -0.04em;
+    }
+    .footer-card p {
+      margin: 0;
+      color: #cbd5e1;
+      max-width: 640px;
+      line-height: 1.7;
+    }
+    @media (max-width: 980px) {
+      .hero-grid,
+      .split,
+      .card-grid,
+      .workflow,
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+      .nav-links { display: none; }
+      .hero { padding-top: 56px; }
+      h1 { font-size: clamp(40px, 12vw, 64px); }
+      .hero-copy { font-size: 18px; }
+    }
+    @media (max-width: 640px) {
+      .shell { padding: 0 18px; }
+      .cta-row .button-secondary { display: none; }
+      .button { width: 100%; }
+      .hero-actions { flex-direction: column; }
+      .footer-card { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="shell nav-inner">
+      <a class="brand" href="#top">
+        <span class="brand-mark">PT</span>
+        <span>Polytrade</span>
+      </a>
+      <div class="nav-links">
+        <a href="#infrastructure">Infrastructure</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#trust">Trust Layer</a>
+      </div>
+      <div class="cta-row">
+        <a class="button button-secondary" href="#faq">FAQ</a>
+        <a class="button button-primary" href="mailto:team@polytrade.example">Request Access</a>
+      </div>
+    </div>
+  </nav>
+
+  <main id="top">
+    <section class="hero">
+      <div class="shell">
+        <span class="eyebrow"><span class="dot"></span> Real-world assets, operationalized</span>
+        <div class="hero-grid">
+          <div>
+            <h1>Bring private credit and tokenized inventory into one trading surface.</h1>
+            <p class="hero-copy">
+              Polytrade is the landing point for teams that need asset onboarding, compliance-aware execution,
+              and portfolio visibility without stitching five vendors together every quarter.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="mailto:team@polytrade.example">Book a Product Walkthrough</a>
+              <a class="button button-secondary" href="#infrastructure">See the stack</a>
+            </div>
+            <div class="metrics">
+              <div class="metric">
+                <strong>36 hrs</strong>
+                <span>Average time from issuer review to listing-ready asset package</span>
+              </div>
+              <div class="metric">
+                <strong>12 markets</strong>
+                <span>Structured onboarding paths for lenders, funds, and treasury desks</span>
+              </div>
+              <div class="metric">
+                <strong>1 surface</strong>
+                <span>Origination, trading, servicing, and reporting in the same workflow</span>
+              </div>
+            </div>
+          </div>
+          <aside class="panel">
+            <span class="panel-kicker">Operator Console</span>
+            <h2>Designed for desks that need control, not dashboards that only look expensive.</h2>
+            <p>
+              Underwriting signals, mandate rules, and secondary liquidity sit next to each other so
+              the operating team can move quickly without breaking controls.
+            </p>
+            <div class="terminal">
+              <div class="terminal-bar"><i></i><i></i><i></i></div>
+              <div class="terminal-body">
+                &gt; intake.asset --type receivables --jurisdiction SG<br />
+                <span class="muted">issuer verified, servicing schema mapped, risk room opened</span><br />
+                &gt; route.pool --mandate income_plus --allocation 4.8m<br />
+                <span class="muted">matched with 3 desks, waterfall constraints preserved</span><br />
+                &gt; settle.trade --venue polytrade --window T+0<br />
+                <span class="muted">token leg prepared, audit pack pinned, investor notice queued</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="infrastructure">
+      <div class="shell">
+        <div class="section-header">
+          <span class="section-label">Infrastructure</span>
+          <h3>Built for asset operators, fund managers, and tokenization teams that need execution-grade plumbing.</h3>
+          <p class="section-copy">
+            The product is opinionated where it should be: data rooms, approvals, investor routing, and servicing handoffs
+            are modeled as a single operating lane instead of disconnected apps.
+          </p>
+        </div>
+        <div class="card-grid">
+          <article class="card">
+            <strong>Asset ingestion</strong>
+            <p>Capture issuer files, normalize servicing data, and version every disclosure artifact before the deal hits the market.</p>
+          </article>
+          <article class="card">
+            <strong>Rule-aware execution</strong>
+            <p>Embed allocation rules, concentration limits, and regional restrictions directly into placement and trade workflows.</p>
+          </article>
+          <article class="card">
+            <strong>Post-trade clarity</strong>
+            <p>Keep settlement milestones, notices, distributions, and reporting visible to operating teams and investors in real time.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="workflow">
+      <div class="shell">
+        <div class="section-header">
+          <span class="section-label">Workflow</span>
+          <h3>Four moves from issuance to active liquidity.</h3>
+        </div>
+        <div class="workflow">
+          <article class="step">
+            <b>01</b>
+            <strong>Qualify</strong>
+            <p>Score issuer readiness, legal shape, and servicing reliability before time gets wasted in committee.</p>
+          </article>
+          <article class="step">
+            <b>02</b>
+            <strong>Structure</strong>
+            <p>Assemble pool terms, token wrappers, and investor mandate constraints inside one controlled process.</p>
+          </article>
+          <article class="step">
+            <b>03</b>
+            <strong>Distribute</strong>
+            <p>Route assets to matched demand with transparent approvals, pricing context, and audit visibility.</p>
+          </article>
+          <article class="step">
+            <b>04</b>
+            <strong>Service</strong>
+            <p>Track repayments, exceptions, and disclosures so the secondary market stays informed after the first trade.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="trust">
+      <div class="shell split">
+        <div class="quote">
+          <p>“Polytrade reduces the distance between compliant asset packaging and an actual trade. That’s the difference between a pilot and a market.”</p>
+          <small>Built for teams handling real-world assets with actual operating pressure.</small>
+        </div>
+        <div class="faq">
+          <div class="faq-item">
+            <strong>Who is this for?</strong>
+            <p>Originators, alternative credit funds, treasury teams, and tokenization operators moving institutional assets into digital workflows.</p>
+          </div>
+          <div class="faq-item">
+            <strong>What makes the landing different?</strong>
+            <p>It frames Polytrade as infrastructure, not a generic crypto marketplace. The page is tuned for serious counterparties and product discovery.</p>
+          </div>
+          <div class="faq-item">
+            <strong>What is the primary CTA?</strong>
+            <p>A product walkthrough request. That fits a higher-consideration B2B flow better than a shallow wallet-connect prompt.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell">
+      <div class="footer-card">
+        <div>
+          <h4>Polytrade</h4>
+          <p>
+            A one-page landing artifact for presenting tokenized asset infrastructure with a sharper institutional tone.
+          </p>
+        </div>
+        <a class="button button-primary" href="mailto:team@polytrade.example">Start the conversation</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

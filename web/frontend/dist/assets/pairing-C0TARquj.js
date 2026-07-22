@@ -1,0 +1,1 @@
+import{j as a}from"./index-CWB17ZqQ.js";import{D as i}from"./dashboard-page-ChiAyagS.js";import"./page-header-DYWm2p5d.js";const r=()=>a.jsx(i,{title:"Pairing",kind:"pairing",empty:"No enabled messaging channels are available for pairing."});export{r as component};

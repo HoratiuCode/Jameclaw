@@ -102,7 +102,7 @@ export function AppHeader() {
         <div className="flex shrink-0 items-center sm:w-44">
           <Link
             to="/"
-            search={{ prompt: undefined }}
+            search={{ prompt: undefined, newChat: false }}
             className="flex items-center"
           >
             <img className="h-11 w-auto object-contain" src={headerLogoSrc} alt="JameClaw" />

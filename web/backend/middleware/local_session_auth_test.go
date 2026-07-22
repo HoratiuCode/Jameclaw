@@ -64,6 +64,20 @@ func TestLocalSessionAuth_CookieAllowsAPI(t *testing.T) {
 	}
 }
 
+func TestLocalSessionAuth_QueryTokenAllowsAPIWithoutRedirect(t *testing.T) {
+	h := LocalSessionAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/gateway/status?access_token=secret-token", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
 func TestLocalSessionAuth_RejectsAPIWithoutToken(t *testing.T) {
 	h := LocalSessionAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

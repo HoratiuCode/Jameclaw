@@ -365,7 +365,13 @@ func (h *Handler) StartGateway() (int, error) {
 
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
-	if gateway.cmd != nil && gateway.cmd.Process != nil {
+	// The caller may have reached this point while another request was starting
+	// the gateway. Reuse that process instead of launching a second one that
+	// would contend for the shared gateway port.
+	if gateway.cmd != nil && isCmdProcessAliveLocked(gateway.cmd) {
+		return gateway.cmd.Process.Pid, nil
+	}
+	if gateway.cmd != nil {
 		gateway.cmd = nil
 		setGatewayRuntimeStatusLocked("stopped")
 	}

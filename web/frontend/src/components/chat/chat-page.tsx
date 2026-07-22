@@ -24,7 +24,7 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 export function ChatPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { prompt } = useSearch({ from: "/" })
+  const { prompt, newChat: newChatRequested } = useSearch({ from: "/" })
   const scrollRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -89,16 +89,22 @@ export function ChatPage() {
     isTyping && messages[messages.length - 1]?.role === "assistant"
 
   useEffect(() => {
-    if (!prompt) {
+    if (!prompt && !newChatRequested) {
       return
     }
-    setInput(prompt)
+
+    if (newChatRequested) {
+      void newChat({ force: true })
+    }
+    if (prompt) {
+      setInput(prompt)
+    }
     void navigate({
       to: "/",
-      search: { prompt: undefined },
+      search: { prompt: undefined, newChat: false },
       replace: true,
     })
-  }, [navigate, prompt])
+  }, [navigate, newChat, newChatRequested, prompt])
 
   const {
     sessions,

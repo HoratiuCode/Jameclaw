@@ -112,6 +112,11 @@ struct SettingsView: View {
                 Spacer()
                 Button("Save settings") { store.save() }.keyboardShortcut(.defaultAction)
             }
+
+            Text("Developed by Jame")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(22)
         .frame(width: 440)

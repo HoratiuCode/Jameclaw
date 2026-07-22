@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,6 +73,21 @@ func openBrowserBackground() error {
 		return fmt.Errorf("server address not set")
 	}
 	return utils.OpenBrowserBackground(launcherOpenURL(serverAddr))
+}
+
+func openNewChat() error {
+	if serverAddr == "" {
+		return fmt.Errorf("server address not set")
+	}
+
+	chatURL, err := url.Parse(launcherOpenURL(serverAddr))
+	if err != nil {
+		return err
+	}
+	query := chatURL.Query()
+	query.Set("new_chat", "1")
+	chatURL.RawQuery = query.Encode()
+	return utils.OpenBrowser(chatURL.String())
 }
 
 func openTerminalChat() error {

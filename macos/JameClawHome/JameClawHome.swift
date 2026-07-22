@@ -4,18 +4,47 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-private func authenticatedConsoleURL(port: Int, path: String = "/") -> URL {
+private func authenticatedConsoleURL(
+    port: Int,
+    path: String = "/",
+    queryItems: [URLQueryItem] = []
+) -> URL {
     var components = URLComponents()
     components.scheme = "http"
-    components.host = "localhost"
+    // The desktop launcher binds to IPv4 loopback. URLSession may otherwise
+    // resolve localhost to ::1 first, where no launcher is listening.
+    components.host = "127.0.0.1"
     components.port = port
     components.path = path
     let tokenURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".jameclaw/launcher_access_token")
+    var items = queryItems
     if let token = try? String(contentsOf: tokenURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
-        components.queryItems = [URLQueryItem(name: "access_token", value: token)]
+        items.append(URLQueryItem(name: "access_token", value: token))
     }
-    return components.url ?? URL(string: "http://localhost:\(port)")!
+    if !items.isEmpty {
+        components.queryItems = items
+    }
+    return components.url ?? URL(string: "http://127.0.0.1:\(port)")!
+}
+
+// Native URLSession requests keep the launcher token in a cookie as well as
+// in the bootstrap URL. This avoids depending on redirect/cookie persistence
+// during the first connection attempt after the launcher starts.
+private func authenticatedConsoleRequest(
+    port: Int,
+    path: String,
+    method: String = "GET",
+    queryItems: [URLQueryItem] = []
+) -> URLRequest {
+    var request = URLRequest(url: authenticatedConsoleURL(port: port, path: path, queryItems: queryItems))
+    request.httpMethod = method
+    let tokenURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".jameclaw/launcher_access_token")
+    if let token = try? String(contentsOf: tokenURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
+        request.setValue("jameclaw_launcher_session=\(token)", forHTTPHeaderField: "Cookie")
+    }
+    return request
 }
 
 private func configuredLauncherPort() -> Int {
@@ -59,6 +88,8 @@ private enum LauncherTheme: String, CaseIterable, Identifiable {
     case terminal
     case midnight
     case light
+    case forest
+    case lavender
 
     var id: String { rawValue }
     var label: String {
@@ -66,6 +97,8 @@ private enum LauncherTheme: String, CaseIterable, Identifiable {
         case .terminal: return "Terminal"
         case .midnight: return "Midnight"
         case .light: return "Light"
+        case .forest: return "Forest"
+        case .lavender: return "Lavender"
         }
     }
     var colorScheme: ColorScheme { self == .light ? .light : .dark }
@@ -74,6 +107,8 @@ private enum LauncherTheme: String, CaseIterable, Identifiable {
         case .terminal: return Color(red: 0.95, green: 0.42, blue: 0.36)
         case .midnight: return Color(red: 0.36, green: 0.55, blue: 0.98)
         case .light: return Color(red: 0.72, green: 0.18, blue: 0.15)
+        case .forest: return Color(red: 0.31, green: 0.78, blue: 0.53)
+        case .lavender: return Color(red: 0.67, green: 0.52, blue: 0.98)
         }
     }
     var background: Color {
@@ -81,6 +116,8 @@ private enum LauncherTheme: String, CaseIterable, Identifiable {
         case .terminal: return Color(red: 0.045, green: 0.05, blue: 0.055)
         case .midnight: return Color(red: 0.035, green: 0.06, blue: 0.12)
         case .light: return Color(red: 0.96, green: 0.97, blue: 0.98)
+        case .forest: return Color(red: 0.025, green: 0.08, blue: 0.055)
+        case .lavender: return Color(red: 0.09, green: 0.07, blue: 0.15)
         }
     }
     var panel: Color {
@@ -88,9 +125,53 @@ private enum LauncherTheme: String, CaseIterable, Identifiable {
         case .terminal: return Color(red: 0.075, green: 0.08, blue: 0.09)
         case .midnight: return Color(red: 0.065, green: 0.10, blue: 0.19)
         case .light: return .white
+        case .forest: return Color(red: 0.045, green: 0.13, blue: 0.09)
+        case .lavender: return Color(red: 0.14, green: 0.11, blue: 0.23)
         }
     }
     var text: Color { self == .light ? Color(red: 0.13, green: 0.15, blue: 0.18) : Color(red: 0.9, green: 0.92, blue: 0.88) }
+}
+
+private enum LauncherAccent: String, CaseIterable, Identifiable {
+    case theme
+    case coral
+    case blue
+    case mint
+    case violet
+    case gold
+
+    var id: String { rawValue }
+    var label: String { rawValue == "theme" ? "Match theme" : rawValue.capitalized }
+    var color: Color? {
+        switch self {
+        case .theme: return nil
+        case .coral: return Color(red: 0.95, green: 0.38, blue: 0.34)
+        case .blue: return Color(red: 0.28, green: 0.58, blue: 0.98)
+        case .mint: return Color(red: 0.23, green: 0.78, blue: 0.62)
+        case .violet: return Color(red: 0.64, green: 0.46, blue: 0.96)
+        case .gold: return Color(red: 0.94, green: 0.68, blue: 0.22)
+        }
+    }
+}
+
+private enum ChatDensity: String, CaseIterable, Identifiable {
+    case compact
+    case comfortable
+    case spacious
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var messageSpacing: CGFloat { self == .compact ? 7 : self == .comfortable ? 12 : 18 }
+    var messagePadding: CGFloat { self == .compact ? 9 : self == .comfortable ? 12 : 16 }
+    var contentPadding: CGFloat { self == .compact ? 12 : self == .comfortable ? 18 : 26 }
+}
+
+private enum MessageSurface: String, CaseIterable, Identifiable {
+    case cards
+    case minimal
+
+    var id: String { rawValue }
+    var label: String { self == .cards ? "Cards" : "Minimal" }
 }
 
 @MainActor
@@ -138,32 +219,410 @@ struct JameClawHomeApp: App {
 
     var body: some Scene {
         WindowGroup { JameRootView() }
-            .windowResizability(.contentSize)
+            // A content-sized window disables the standard macOS full-screen
+            // control. Keep the desktop window resizable so it can enter
+            // full screen from the title bar, the toolbar, or ⌃⌘F.
+            .windowResizability(.automatic)
     }
 }
 
 struct JameRootView: View {
     @StateObject private var settings = LauncherSettingsStore()
-    // The native launcher is a chat app first. Keep the supporting controls a
-    // tab away so opening Jame from the menu-bar launcher always lands here.
-    @State private var selectedTab = 0
+    // The native launcher is a chat app first. Keep it selected on launch,
+    // while retaining a persistent, desktop-native list of supporting views.
+    @State private var selectedSection: DesktopSection? = .chat
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            ChatView(port: Int(settings.port) ?? 18800)
-                .tabItem { Label("Chat", systemImage: "message.fill") }
-                .tag(0)
-            ArtifactsView()
-                .tabItem { Label("Artifacts", systemImage: "shippingbox.fill") }
-                .tag(1)
-            SkillsView()
-                .tabItem { Label("Skills", systemImage: "wand.and.stars") }
-                .tag(2)
-            QuickSettingsView(settings: settings)
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-                .tag(3)
+        NavigationSplitView {
+            List(DesktopSection.allCases, selection: $selectedSection) { section in
+                Label(section.title, systemImage: section.symbol)
+                    .tag(section)
+            }
+            .navigationTitle("JameClaw")
+            .listStyle(.sidebar)
+        } detail: {
+            switch selectedSection ?? .chat {
+            case .chat:
+                ChatView(port: Int(settings.port) ?? 18800)
+            case .sessions:
+                SessionsView(port: Int(settings.port) ?? 18800)
+            case .connectors:
+                ConnectorsView(port: Int(settings.port) ?? 18800)
+            case .artifacts:
+                ArtifactsView()
+            case .skills:
+                SkillsView(port: Int(settings.port) ?? 18800)
+            case .settings:
+                QuickSettingsView(settings: settings)
+            }
         }
-        .frame(width: 820, height: 650)
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 820, idealWidth: 980, minHeight: 650, idealHeight: 720)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    NSApplication.shared.keyWindow?.toggleFullScreen(nil)
+                } label: {
+                    Label("Toggle Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+                .help("Enter or exit full screen (⌃⌘F)")
+                .keyboardShortcut("f", modifiers: [.command, .control])
+            }
+        }
+    }
+}
+
+private enum DesktopSection: String, CaseIterable, Identifiable {
+    case chat
+    case artifacts
+    case skills
+    case sessions
+    case connectors
+    case settings
+
+    var id: Self { self }
+    var title: String { rawValue.capitalized }
+    var symbol: String {
+        switch self {
+        case .chat: return "message.fill"
+        case .sessions: return "clock.arrow.circlepath"
+        case .connectors: return "point.3.connected.trianglepath.dotted"
+        case .artifacts: return "shippingbox.fill"
+        case .skills: return "wand.and.stars"
+        case .settings: return "gearshape"
+        }
+    }
+}
+
+private struct NativeSessionSummary: Codable, Identifiable {
+    let id: String
+    let title: String
+    let preview: String
+    let messageCount: Int
+    let updated: String
+    let channel: String?
+    let chatType: String?
+    let chatID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, preview, updated, channel
+        case chatType = "chat_type"
+        case chatID = "chat_id"
+        case messageCount = "message_count"
+    }
+}
+
+private struct NativeSessionMessage: Codable, Identifiable {
+    let role: String
+    let content: String
+    let id = UUID()
+
+    enum CodingKeys: String, CodingKey {
+        case role, content
+    }
+}
+
+private struct NativeSessionDetail: Codable {
+    let id: String
+    let messages: [NativeSessionMessage]
+}
+
+@MainActor
+private final class NativeSessionStore: ObservableObject {
+    @Published var sessions: [NativeSessionSummary] = []
+    @Published var selectedSessionID: String?
+    @Published var selectedSession: NativeSessionDetail?
+    @Published var isLoading = false
+    @Published var error = ""
+
+    private let port: Int
+
+    init(port: Int) { self.port = port }
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                from: authenticatedConsoleURL(
+                    port: port,
+                    path: "/api/sessions",
+                    queryItems: [
+                        URLQueryItem(name: "offset", value: "0"),
+                        URLQueryItem(name: "limit", value: "200"),
+                    ]
+                )
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            sessions = try JSONDecoder().decode([NativeSessionSummary].self, from: data)
+            self.error = sessions.isEmpty ? "No conversations have been saved yet." : ""
+        } catch {
+            self.error = "Could not load conversation history. Start JameClaw and try again."
+        }
+    }
+
+    func select(_ id: String?) async {
+        selectedSessionID = id
+        selectedSession = nil
+        guard let id else { return }
+        do {
+            let path = "/api/sessions/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)"
+            let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: path))
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            selectedSession = try JSONDecoder().decode(NativeSessionDetail.self, from: data)
+            self.error = ""
+        } catch {
+            self.error = "Could not open this conversation."
+        }
+    }
+}
+
+private struct SessionsView: View {
+    @StateObject private var store: NativeSessionStore
+
+    init(port: Int) { _store = StateObject(wrappedValue: NativeSessionStore(port: port)) }
+
+    var body: some View {
+        HSplitView {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Sessions").font(.title2.weight(.semibold))
+                    Spacer()
+                    Button { Task { await store.load() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("Refresh session history")
+                }
+                .padding()
+                List(store.sessions, selection: $store.selectedSessionID) { session in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(session.title.isEmpty ? session.preview : session.title)
+                            .lineLimit(1)
+                            .font(.headline)
+                        Text("\(sessionSource(session)) · \(session.messageCount) messages · \(session.updated)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 3)
+                    .tag(session.id)
+                }
+                .overlay {
+                    if store.isLoading { ProgressView() }
+                    else if store.sessions.isEmpty, !store.error.isEmpty { ContentUnavailableView("No sessions", systemImage: "clock", description: Text(store.error)) }
+                }
+            }
+            .frame(minWidth: 285, idealWidth: 350)
+
+            Group {
+                if let session = store.selectedSession {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            ForEach(session.messages) { message in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(message.role.capitalized)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(message.role == "user" ? .blue : .green)
+                                    Text(message.content.isEmpty ? "(no text content)" : message.content)
+                                        .textSelection(.enabled)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                        .padding()
+                    }
+                } else {
+                    ContentUnavailableView("Select a session", systemImage: "bubble.left.and.bubble.right", description: Text("Choose a conversation to see its complete history."))
+                }
+            }
+            .frame(minWidth: 420)
+        }
+        .task { await store.load() }
+        .onChange(of: store.selectedSessionID) { _, id in Task { await store.select(id) } }
+    }
+
+    private func sessionSource(_ session: NativeSessionSummary) -> String {
+        let channel = session.channel?.isEmpty == false ? session.channel! : "terminal"
+        if channel == "jame" { return "Desktop" }
+        return channel.capitalized
+    }
+}
+
+private struct MCPServerList: Codable {
+    let enabled: Bool
+    let servers: [MCPServer]
+}
+
+private struct MCPServer: Codable, Identifiable {
+    let name: String
+    let enabled: Bool
+    let transport: String
+    let command: String?
+    let args: [String]?
+    let url: String?
+    var id: String { name }
+
+    var endpoint: String {
+        if transport == "stdio" {
+            return ([command].compactMap { $0 } + (args ?? []))
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
+        return url ?? "No endpoint configured"
+    }
+}
+
+private struct NativeModelList: Codable {
+    let models: [NativeConnectorModel]
+}
+
+private struct NativeConnectorModel: Codable, Identifiable {
+    let index: Int
+    let modelName: String
+    let model: String
+    let connectMode: String?
+    let workspace: String?
+    let configured: Bool
+    let isDefault: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case index
+        case modelName = "model_name"
+        case model
+        case connectMode = "connect_mode"
+        case workspace
+        case configured
+        case isDefault = "is_default"
+    }
+
+    var id: Int { index }
+    var isCLI: Bool {
+        let protocolName = model.lowercased().split(separator: "/").first ?? ""
+        return protocolName.contains("cli") || protocolName == "github-copilot" || connectMode == "stdio" || connectMode == "grpc"
+    }
+}
+
+@MainActor
+private final class ConnectorsStore: ObservableObject {
+    @Published var mcpEnabled = false
+    @Published var mcpServers: [MCPServer] = []
+    @Published var cliModels: [NativeConnectorModel] = []
+    @Published var isLoading = false
+    @Published var error = ""
+
+    private let port: Int
+    init(port: Int) { self.port = port }
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            async let mcpRequest = URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/tools/mcp/servers"))
+            async let modelsRequest = URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/models"))
+            let (mcpData, mcpResponse) = try await mcpRequest
+            let (modelData, modelResponse) = try await modelsRequest
+            guard let mcpHTTP = mcpResponse as? HTTPURLResponse, (200..<300).contains(mcpHTTP.statusCode),
+                  let modelHTTP = modelResponse as? HTTPURLResponse, (200..<300).contains(modelHTTP.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let decoder = JSONDecoder()
+            let mcp = try decoder.decode(MCPServerList.self, from: mcpData)
+            let models = try decoder.decode(NativeModelList.self, from: modelData)
+            mcpEnabled = mcp.enabled
+            mcpServers = mcp.servers
+            cliModels = models.models.filter(\.isCLI)
+            self.error = ""
+        } catch {
+            self.error = "Could not load connectors. Check that JameClaw is running."
+        }
+    }
+}
+
+private struct ConnectorsView: View {
+    @StateObject private var store: ConnectorsStore
+
+    init(port: Int) { _store = StateObject(wrappedValue: ConnectorsStore(port: port)) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Connectors").font(.title2.weight(.semibold))
+                        Text("MCP servers and CLI providers available to this agent.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Refresh connectors")
+                }
+
+                ConnectorSection(title: "MCP servers", icon: "point.3.connected.trianglepath.dotted", empty: "No MCP servers are configured.") {
+                    if store.mcpServers.isEmpty {
+                        Text("No MCP servers are configured.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(store.mcpServers) { server in
+                            ConnectorRow(name: server.name, detail: "\(server.transport.uppercased()) · \(server.endpoint)", connected: store.mcpEnabled && server.enabled)
+                        }
+                    }
+                }
+
+                ConnectorSection(title: "CLI providers", icon: "terminal", empty: "No CLI-backed models are configured.") {
+                    if store.cliModels.isEmpty {
+                        Text("No CLI-backed models are configured.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(store.cliModels) { model in
+                            ConnectorRow(name: model.modelName, detail: [model.model, model.connectMode, model.workspace].compactMap { $0 }.joined(separator: " · "), connected: model.configured)
+                        }
+                    }
+                }
+
+                if store.isLoading { ProgressView("Loading connectors…") }
+                if !store.error.isEmpty { Text(store.error).foregroundStyle(.red) }
+            }
+            .padding(24)
+        }
+        .task { await store.load() }
+    }
+}
+
+private struct ConnectorSection<Content: View>: View {
+    let title: String
+    let icon: String
+    let empty: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon).font(.headline)
+            VStack(alignment: .leading, spacing: 8) { content }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+}
+
+private struct ConnectorRow: View {
+    let name: String
+    let detail: String
+    let connected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle().fill(connected ? .green : .gray).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.subheadline.weight(.semibold))
+                Text(detail.isEmpty ? "No connection details" : detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer()
+            Text(connected ? "Connected" : "Not connected").font(.caption.weight(.medium)).foregroundStyle(connected ? .green : .secondary)
+        }
     }
 }
 
@@ -288,6 +747,9 @@ struct SkillsView: View {
     @State private var skillName = ""
     @State private var skillDescription = ""
     @State private var addError = ""
+    private let port: Int
+
+    init(port: Int) { self.port = port }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -297,7 +759,7 @@ struct SkillsView: View {
                     Text(browser.directory.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
-                Button { browser.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                Button { refreshAgentSkills() } label: { Image(systemName: "arrow.clockwise") }
                 Button("Add Skill") {
                     skillName = ""
                     skillDescription = ""
@@ -330,7 +792,7 @@ struct SkillsView: View {
             HStack { Text(browser.status).font(.caption).foregroundStyle(.secondary); Spacer() }
                 .padding(.horizontal, 18).padding(.vertical, 10)
         }
-        .task { browser.refresh() }
+        .task { refreshAgentSkills() }
         .sheet(isPresented: $showingAddSkill) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Add a Skill").font(.title2.weight(.bold))
@@ -389,6 +851,22 @@ struct SkillsView: View {
             addError = "Could not create this skill."
         }
     }
+
+    private func refreshAgentSkills() {
+        Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/skills"))
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+                let skillList = try JSONDecoder().decode(NativeSkillsResponse.self, from: data).skills
+                let directories = skillList.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent() }
+                browser.entries = directories.map { WorkspaceEntry(url: $0, isDirectory: true) }
+                browser.status = "\(skillList.count) skills available to the agent (workspace, global, and bundled)."
+            } catch {
+                browser.refresh()
+                browser.status = "Showing workspace skills only. Could not reach the agent skill registry."
+            }
+        }
+    }
 }
 
 struct HomeView: View {
@@ -442,9 +920,119 @@ struct HomeView: View {
 
 }
 
+private struct NativeModelInfo: Codable, Identifiable {
+    let modelName: String
+    let model: String
+    let apiBase: String?
+    let configured: Bool
+
+    var id: String { modelName }
+
+    enum CodingKeys: String, CodingKey {
+        case modelName = "model_name"
+        case model
+        case apiBase = "api_base"
+        case configured
+    }
+}
+
+private struct NativeModelsResponse: Codable {
+    let models: [NativeModelInfo]
+    let defaultModel: String
+
+    enum CodingKeys: String, CodingKey {
+        case models
+        case defaultModel = "default_model"
+    }
+}
+
+private struct NativeProviderInfo: Codable {
+    let name: String
+    let configuredModels: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case configuredModels = "configured_models"
+    }
+}
+
+private struct NativeProviderCatalogResponse: Codable {
+    let providers: [NativeProviderInfo]
+}
+
+@MainActor
+private final class NativeProviderStore: ObservableObject {
+    @Published var models: [NativeModelInfo] = []
+    @Published var defaultModel = ""
+    @Published var selectedModel = ""
+    @Published var providerNames: [String: String] = [:]
+    @Published var status = ""
+    @Published var isLoading = false
+
+    func load(port: Int) async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            async let modelsRequest: NativeModelsResponse = fetch(path: "/api/models", port: port)
+            async let catalogRequest: NativeProviderCatalogResponse = fetch(path: "/api/models/catalog", port: port)
+            let (modelsResponse, catalogResponse) = try await (modelsRequest, catalogRequest)
+            models = modelsResponse.models.filter(\.configured)
+            defaultModel = modelsResponse.defaultModel
+            selectedModel = modelsResponse.defaultModel
+            providerNames = Dictionary(uniqueKeysWithValues: catalogResponse.providers.flatMap { provider in
+                (provider.configuredModels ?? []).map { ($0, provider.name) }
+            })
+            status = models.isEmpty ? "No configured AI providers yet." : ""
+        } catch {
+            status = "Could not load AI providers. Start JameClaw and try again."
+        }
+    }
+
+    func setDefaultModel(_ modelName: String, port: Int) async {
+        guard modelName != defaultModel else { return }
+        do {
+            var request = URLRequest(url: authenticatedConsoleURL(port: port, path: "/api/models/default"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(["model_name": modelName, "role": "chat"])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            defaultModel = modelName
+            status = "Chat model updated. New chats will use it."
+        } catch {
+            status = "Could not change the chat model."
+        }
+    }
+
+    func providerName(for model: NativeModelInfo) -> String {
+        if let configuredProvider = providerNames[model.modelName] {
+            return configuredProvider
+        }
+        guard let apiBase = model.apiBase,
+              let host = URL(string: apiBase)?.host,
+              !host.isEmpty else { return "Custom provider" }
+        return host
+    }
+
+    private func fetch<T: Decodable>(path: String, port: Int) async throws -> T {
+        let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: path))
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+}
+
 struct QuickSettingsView: View {
     @ObservedObject var settings: LauncherSettingsStore
+    @StateObject private var providers = NativeProviderStore()
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.terminal.rawValue
+    @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
+    @AppStorage("launcher.design.density") private var savedDensity = ChatDensity.comfortable.rawValue
+    @AppStorage("launcher.design.surface") private var savedSurface = MessageSurface.cards.rawValue
     @AppStorage("launcher.design.fontScale") private var fontScale = 1.0
     @AppStorage("launcher.design.backgroundPath") private var backgroundPath = ""
     @State private var showingBackgroundPicker = false
@@ -468,10 +1056,50 @@ struct QuickSettingsView: View {
                 Button("Save settings") { settings.save() }
                 if !settings.saveStatus.isEmpty { Text(settings.saveStatus).font(.caption).foregroundStyle(.secondary) }
             }
+            Section("AI Provider") {
+                if providers.models.isEmpty {
+                    Text(providers.isLoading ? "Loading configured providers…" : "No configured AI providers.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Chat model", selection: $providers.selectedModel) {
+                        ForEach(providers.models) { model in
+                            Text("\(providers.providerName(for: model)) · \(model.modelName)")
+                                .tag(model.modelName)
+                        }
+                    }
+                    Text("Current provider: \(providers.models.first(where: { $0.modelName == providers.defaultModel }).map { providers.providerName(for: $0) } ?? "Not selected")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Refresh providers") {
+                        Task { await providers.load(port: Int(settings.port) ?? 18800) }
+                    }
+                    if providers.isLoading { ProgressView().controlSize(.small) }
+                }
+                if !providers.status.isEmpty {
+                    Text(providers.status).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("Design") {
                 Picker("Theme", selection: $savedTheme) {
                     ForEach(LauncherTheme.allCases) { theme in
                         Text(theme.label).tag(theme.rawValue)
+                    }
+                }
+                Picker("Accent color", selection: $savedAccent) {
+                    ForEach(LauncherAccent.allCases) { accent in
+                        Text(accent.label).tag(accent.rawValue)
+                    }
+                }
+                Picker("Chat spacing", selection: $savedDensity) {
+                    ForEach(ChatDensity.allCases) { density in
+                        Text(density.label).tag(density.rawValue)
+                    }
+                }
+                Picker("Message style", selection: $savedSurface) {
+                    ForEach(MessageSurface.allCases) { surface in
+                        Text(surface.label).tag(surface.rawValue)
                     }
                 }
                 Picker("Chat text size", selection: $fontScale) {
@@ -489,9 +1117,19 @@ struct QuickSettingsView: View {
                 Text("The selected image is stored locally and used behind the Chat view.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Text("Developed by Jame")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(.top, 6)
+        .task { await providers.load(port: Int(settings.port) ?? 18800) }
+        .onChange(of: providers.selectedModel) { _, modelName in
+            guard !modelName.isEmpty else { return }
+            Task { await providers.setDefaultModel(modelName, port: Int(settings.port) ?? 18800) }
+        }
         .fileImporter(
             isPresented: $showingBackgroundPicker,
             allowedContentTypes: [.image],
@@ -532,29 +1170,75 @@ private struct PendingNativeChatMessage {
     let content: String
 }
 
+struct NativeAppError: Identifiable {
+    let id = UUID()
+    let title: String
+    let detail: String
+}
+
+private enum SkillUploadError: LocalizedError {
+    case chooseSkillFile
+    case missingSkillFile
+    case alreadyExists(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .chooseSkillFile:
+            return "Choose a file named SKILL.md or a folder containing one."
+        case .missingSkillFile:
+            return "This folder does not contain SKILL.md."
+        case let .alreadyExists(name):
+            return "A workspace skill named \(name) already exists."
+        }
+    }
+}
+
 @MainActor
 final class NativeChatStore: ObservableObject {
     @Published var messages: [NativeChatMessage] = []
     @Published var draft = ""
     @Published var status = "Connecting…"
     @Published var isThinking = false
+    @Published var lastError: NativeAppError?
+    @Published var workspaceName = "Choose workspace"
 
     private let port: Int
-    private let sessionID = UUID().uuidString
+    private let sessionID: String
     private var socket: URLSessionWebSocketTask?
     private var pendingMessages: [PendingNativeChatMessage] = []
     private var reconnectTask: Task<Void, Never>?
     private var launcherProcess: Process?
     private var attemptedLauncherRecovery = false
+    private var reconnectAttempt = 0
 
-    init(port: Int) { self.port = port }
+    init(port: Int) {
+        self.port = port
+        workspaceName = jameWorkspaceURL().lastPathComponent
+        let key = "jameclaw.native-chat.session-id"
+        if let storedID = UserDefaults.standard.string(forKey: key), !storedID.isEmpty {
+            sessionID = storedID
+        } else {
+            let newID = UUID().uuidString
+            UserDefaults.standard.set(newID, forKey: key)
+            sessionID = newID
+        }
+    }
 
     func startGatewayAndConnect() {
         Task {
-            var request = URLRequest(url: authenticatedConsoleURL(port: port, path: "/api/gateway/start"))
-            request.httpMethod = "POST"
-            _ = try? await URLSession.shared.data(for: request)
-            connect()
+            do {
+                let request = authenticatedConsoleRequest(port: port, path: "/api/gateway/start", method: "POST")
+                let (_, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                try await waitForGatewayReadiness()
+                connect()
+            } catch {
+                startBundledLauncherIfNeeded()
+                reportError(title: "JameClaw is not ready", detail: connectionDetail(for: error))
+                scheduleReconnect()
+            }
         }
     }
 
@@ -565,12 +1249,14 @@ final class NativeChatStore: ObservableObject {
         status = "Connecting…"
         Task {
             do {
-                var setup = URLRequest(url: authenticatedConsoleURL(port: port, path: "/api/jame/setup"))
-                setup.httpMethod = "POST"
-                let (data, _) = try await URLSession.shared.data(for: setup)
-                let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                guard let token = response?["token"] as? String,
-                      let rawURL = response?["ws_url"] as? String,
+                let setup = authenticatedConsoleRequest(port: port, path: "/api/jame/setup", method: "POST")
+                let (data, httpResponse) = try await URLSession.shared.data(for: setup)
+                guard let http = httpResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                let setupResponse = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                guard let token = setupResponse?["token"] as? String,
+                      let rawURL = setupResponse?["ws_url"] as? String,
                       var parts = URLComponents(string: rawURL) else { throw URLError(.badServerResponse) }
                 var query = parts.queryItems ?? []
                 query.append(URLQueryItem(name: "session_id", value: sessionID))
@@ -579,13 +1265,23 @@ final class NativeChatStore: ObservableObject {
                 let task = URLSession.shared.webSocketTask(with: wsURL, protocols: ["token.\(token)"])
                 socket = task
                 task.resume()
+                // URLSession does not expose a WebSocket "open" callback.
+                // A ping makes the upgrade observable before the UI accepts or
+                // flushes queued messages, matching the Web Console's onopen
+                // behavior rather than showing a false-ready state.
+                let pingID = "native-ping-\(UUID().uuidString)"
+                let ping = try JSONSerialization.data(withJSONObject: ["type": "ping", "id": pingID])
+                guard let pingText = String(data: ping, encoding: .utf8) else { throw URLError(.badServerResponse) }
+                try await task.send(.string(pingText))
                 status = "Ready"
+                lastError = nil
+                reconnectAttempt = 0
                 flushPendingMessages()
                 receive()
             } catch {
                 socket = nil
                 startBundledLauncherIfNeeded()
-                status = "Waiting for JameClaw Desktop…"
+                reportError(title: "Could not connect to JameClaw", detail: connectionDetail(for: error))
                 scheduleReconnect()
             }
         }
@@ -593,11 +1289,61 @@ final class NativeChatStore: ObservableObject {
 
     private func scheduleReconnect() {
         guard reconnectTask == nil else { return }
+        let delay = min(pow(2, Double(reconnectAttempt)), 15)
+        reconnectAttempt = min(reconnectAttempt + 1, 4)
+        status = "Reconnecting…"
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
             self?.reconnectTask = nil
             self?.startGatewayAndConnect()
+        }
+    }
+
+    func retryConnection() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
+        lastError = nil
+        reconnectAttempt = 0
+        startGatewayAndConnect()
+    }
+
+    func dismissError() { lastError = nil }
+
+    func setWorkspace(_ workspaceURL: URL) {
+        let workspacePath = workspaceURL.standardizedFileURL.path
+        Task {
+            do {
+                status = "Updating workspace…"
+                var request = URLRequest(url: authenticatedConsoleURL(port: port, path: "/api/config"))
+                request.httpMethod = "PATCH"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "agents": ["defaults": ["workspace": workspacePath]],
+                ])
+                let (_, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+
+                var restart = URLRequest(url: authenticatedConsoleURL(port: port, path: "/api/gateway/restart"))
+                restart.httpMethod = "POST"
+                let (_, restartResponse) = try await URLSession.shared.data(for: restart)
+                guard let http = restartResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+
+                workspaceName = workspaceURL.lastPathComponent
+                status = "Workspace updated. Reconnecting…"
+                socket?.cancel(with: .goingAway, reason: nil)
+                socket = nil
+                lastError = nil
+                scheduleReconnect()
+            } catch {
+                reportError(title: "Could not change workspace", detail: connectionDetail(for: error))
+            }
         }
     }
 
@@ -636,10 +1382,16 @@ final class NativeChatStore: ObservableObject {
         isThinking = true
         guard socket != nil else {
             pendingMessages.append(PendingNativeChatMessage(id: id, content: content))
+            status = "Connecting…"
             connect()
             return
         }
         send(id: id, content: content)
+    }
+
+    func sendSkillImported(_ skillName: String) {
+        draft = "I uploaded the \(skillName) skill to this workspace. Please read and use it for this task."
+        send()
     }
 
     private func flushPendingMessages() {
@@ -659,7 +1411,8 @@ final class NativeChatStore: ObservableObject {
         }
         Task {
             do {
-                try await socket?.send(.string(text))
+                guard let socket else { throw URLError(.notConnectedToInternet) }
+                try await socket.send(.string(text))
             } catch {
                 fail(messageID: id, message: "Message failed to send. Reconnecting…")
                 socket = nil
@@ -695,7 +1448,8 @@ final class NativeChatStore: ObservableObject {
         }
         Task {
             do {
-                try await socket?.send(.string(text))
+                guard let socket else { throw URLError(.notConnectedToInternet) }
+                try await socket.send(.string(text))
             } catch {
                 fail(messageID: id, message: "Upload failed. Reconnecting…")
                 socket = nil
@@ -706,8 +1460,48 @@ final class NativeChatStore: ObservableObject {
 
     private func fail(messageID: String, message: String) {
         messages.append(NativeChatMessage(id: "error-\(UUID().uuidString)", role: "error", content: message))
-        status = message
+        reportError(title: "Message error", detail: message)
+    }
+
+    private func reportError(title: String, detail: String) {
+        status = title
         isThinking = false
+        lastError = NativeAppError(title: title, detail: detail)
+    }
+
+    private func connectionDetail(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet:
+                return "Check that the JameClaw launcher is running, then try again."
+            case .timedOut:
+                return "The launcher took too long to respond. It may still be starting."
+            default:
+                break
+            }
+        }
+        return error.localizedDescription.isEmpty ? "The launcher returned an unexpected response." : error.localizedDescription
+    }
+
+    private func waitForGatewayReadiness() async throws {
+        for _ in 0..<20 {
+            let (data, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/gateway/status")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let state = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if state?["gateway_status"] as? String == "running" {
+                return
+            }
+            if state?["gateway_status"] as? String == "error" {
+                let reason = state?["gateway_start_reason"] as? String ?? "The gateway could not start. Check the configured chat model."
+                throw NativeGatewayError.notReady(reason)
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw NativeGatewayError.notReady("The gateway is still starting. It will retry automatically.")
     }
 
     private func receive() {
@@ -718,7 +1512,7 @@ final class NativeChatStore: ObservableObject {
                 receive()
             } catch {
                 socket = nil
-                status = "Reconnecting…"
+                reportError(title: "Connection lost", detail: "Jame will retry automatically. You can also retry now.")
                 scheduleReconnect()
             }
         }
@@ -733,34 +1527,106 @@ final class NativeChatStore: ObservableObject {
         case "typing.start": isThinking = true
         case "typing.stop": isThinking = false
         case "message.create":
-            let content = payload["content"] as? String ?? ""
-            let id = payload["message_id"] as? String ?? UUID().uuidString
-            messages.append(NativeChatMessage(id: id, role: "assistant", content: content))
+            let content = responseContent(from: payload)
+            let id = (payload["message_id"] as? String) ?? (event["id"] as? String) ?? UUID().uuidString
+            upsertAssistantMessage(id: id, content: content)
             isThinking = false
         case "message.update":
-            let id = payload["message_id"] as? String ?? ""
-            if let index = messages.firstIndex(where: { $0.id == id }) { messages[index].content = payload["content"] as? String ?? "" }
+            let id = (payload["message_id"] as? String) ?? (event["id"] as? String) ?? UUID().uuidString
+            // A gateway can begin streaming before its placeholder reaches the
+            // desktop. Treat that update as the first visible assistant reply
+            // instead of dropping it.
+            upsertAssistantMessage(id: id, content: responseContent(from: payload))
         case "error":
-            messages.append(NativeChatMessage(id: UUID().uuidString, role: "error", content: (payload["message"] as? String) ?? "Request failed."))
-            isThinking = false
+            let message = responseContent(from: payload, fallback: "The provider could not complete this request.")
+            messages.append(NativeChatMessage(id: UUID().uuidString, role: "error", content: message))
+            reportError(title: "Provider error", detail: message)
         default: break
+        }
+    }
+
+    private func responseContent(from payload: [String: Any], fallback: String = "") -> String {
+        for key in ["content", "text", "message", "error"] {
+            if let value = payload[key] as? String, !value.isEmpty { return value }
+        }
+        return fallback
+    }
+
+    private func upsertAssistantMessage(id: String, content: String) {
+        if let index = messages.firstIndex(where: { $0.id == id }) {
+            messages[index].content = content
+        } else {
+            messages.append(NativeChatMessage(id: id, role: "assistant", content: content))
         }
     }
 }
 
+private enum NativeGatewayError: LocalizedError {
+    case notReady(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .notReady(message): return message
+        }
+    }
+}
+
+private struct NativeSkillReference: Codable, Identifiable {
+    let name: String
+    let description: String
+    let source: String
+    let path: String
+    var id: String { "skill-\(name)-\(source)" }
+}
+
+private struct NativeSkillsResponse: Codable {
+    let skills: [NativeSkillReference]
+}
+
+private struct NativeFileReference: Codable, Identifiable {
+    let name: String
+    let path: String
+    let directory: String
+    var id: String { path }
+}
+
+private struct NativeFileSearchResponse: Codable {
+    let items: [NativeFileReference]
+}
+
+private struct ChatComposerSuggestion: Identifiable {
+    enum Kind { case skill, file }
+    let id: String
+    let kind: Kind
+    let title: String
+    let subtitle: String
+    let insertion: String
+    var icon: String { kind == .skill ? "wand.and.stars" : "doc" }
+}
+
 struct ChatView: View {
     @StateObject private var chat: NativeChatStore
+    private let port: Int
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.terminal.rawValue
+    @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
+    @AppStorage("launcher.design.density") private var savedDensity = ChatDensity.comfortable.rawValue
+    @AppStorage("launcher.design.surface") private var savedSurface = MessageSurface.cards.rawValue
     @AppStorage("launcher.design.fontScale") private var fontScale = 1.0
     @AppStorage("launcher.design.backgroundPath") private var backgroundPath = ""
-    @State private var showingImagePicker = false
     @State private var isRecording = false
     @State private var recorder: AVAudioRecorder?
     @State private var recordingURL: URL?
+    @State private var suggestions: [ChatComposerSuggestion] = []
 
-    init(port: Int) { _chat = StateObject(wrappedValue: NativeChatStore(port: port)) }
+    init(port: Int) {
+        self.port = port
+        _chat = StateObject(wrappedValue: NativeChatStore(port: port))
+    }
 
     private var theme: LauncherTheme { LauncherTheme(rawValue: savedTheme) ?? .terminal }
+    private var accent: Color { (LauncherAccent(rawValue: savedAccent) ?? .theme).color ?? theme.accent }
+    private var density: ChatDensity { ChatDensity(rawValue: savedDensity) ?? .comfortable }
+    private var messageSurface: MessageSurface { MessageSurface(rawValue: savedSurface) ?? .cards }
     private var backgroundImage: NSImage? {
         guard !backgroundPath.isEmpty else { return nil }
         return NSImage(contentsOf: URL(fileURLWithPath: backgroundPath))
@@ -774,12 +1640,60 @@ struct ChatView: View {
                 Spacer()
                 Text(chat.status.uppercased()).font(.system(size: 10 * fontScale, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
             }
-            .foregroundStyle(theme.accent)
+            .foregroundStyle(accent)
             .padding(.horizontal, 18).padding(.vertical, 13)
             .background(theme.panel)
+            Button {
+                chooseWorkspace()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(accent)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Workspace")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(chat.workspaceName)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Choose agent workspace")
+            .background(theme.panel.opacity(0.9))
+            if let error = chat.lastError {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(error.title).font(.subheadline.weight(.semibold))
+                        Text(error.detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button("Retry") { chat.retryConnection() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button { chat.dismissError() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Dismiss error")
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(Color.orange.opacity(theme == .light ? 0.12 : 0.18))
+            }
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: density.messageSpacing) {
                         if chat.messages.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("jame@local:~$ ready for your prompt")
@@ -794,37 +1708,65 @@ struct ChatView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(message.role == "user" ? "you >" : message.role == "error" ? "error >" : "jame >")
                                     .font(.system(size: 10 * fontScale, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(message.role == "user" ? theme.accent : message.role == "error" ? .red : Color.green)
+                                    .foregroundStyle(message.role == "user" ? accent : message.role == "error" ? .red : Color.green)
                                 Text(message.content).textSelection(.enabled)
                             }
                                 .font(.system(size: 14 * fontScale, design: .monospaced))
                                 .foregroundStyle(theme.text)
-                                .padding(12).frame(maxWidth: message.role == "user" ? 520 : .infinity, alignment: .leading)
-                                .background(message.role == "user" ? theme.accent.opacity(theme == .light ? 0.14 : 0.22) : message.role == "error" ? Color.red.opacity(0.18) : Color.white.opacity(theme == .light ? 0.82 : 0.06))
-                                .clipShape(RoundedRectangle(cornerRadius: 7)).frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
+                                .padding(density.messagePadding).frame(maxWidth: message.role == "user" ? 520 : .infinity, alignment: .leading)
+                                .background(messageSurface == .cards ? (message.role == "user" ? accent.opacity(theme == .light ? 0.14 : 0.22) : message.role == "error" ? Color.red.opacity(0.18) : Color.white.opacity(theme == .light ? 0.82 : 0.06)) : .clear)
+                                .clipShape(RoundedRectangle(cornerRadius: messageSurface == .cards ? 8 : 0)).frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
                                 .id(message.id)
                         }
                         if chat.isThinking { Text("jame > thinking…").font(.system(size: 12 * fontScale, design: .monospaced)).foregroundStyle(Color.green) }
-                    }.padding(18)
+                    }.padding(density.contentPadding)
                 }
                 .background(chatBackground)
                 .onChange(of: chat.messages.count) { _, _ in if let last = chat.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
             Divider().overlay(Color.white.opacity(0.12))
+            if !suggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(suggestions) { suggestion in
+                        Button {
+                            applySuggestion(suggestion)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: suggestion.icon).frame(width: 16)
+                                Text(suggestion.title).font(.subheadline.weight(.medium))
+                                Text(suggestion.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 7)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .background(theme.panel.opacity(0.96))
+                .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.12)) }
+            }
             HStack(alignment: .bottom) {
                 Button {
-                    showingImagePicker = true
+                    chooseWorkspace()
                 } label: {
-                    Image(systemName: "photo")
+                    Image(systemName: "folder")
                 }
-                .help("Attach an image")
+                .help("Choose agent workspace")
+                .disabled(chat.isThinking)
+
+                Button {
+                    uploadItem()
+                } label: {
+                    Image(systemName: "paperclip")
+                }
+                .help("Upload a file or workspace skill")
                 .disabled(chat.isThinking)
 
                 Button {
                     toggleRecording()
                 } label: {
                     Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
-                        .foregroundStyle(isRecording ? Color.red : theme.accent)
+                        .foregroundStyle(isRecording ? Color.red : accent)
                 }
                 .help(isRecording ? "Stop and send recording" : "Record a voice message")
                 .disabled(chat.isThinking && !isRecording)
@@ -832,8 +1774,9 @@ struct ChatView: View {
                 TextField("type a message…", text: $chat.draft, axis: .vertical)
                     .font(.system(size: 14 * fontScale, design: .monospaced)).lineLimit(1...5)
                     .textFieldStyle(.plain)
+                    .onChange(of: chat.draft) { _, value in updateSuggestions(for: value) }
                 Button("Send") { chat.send() }
-                    .buttonStyle(.borderedProminent).tint(theme.accent)
+                    .buttonStyle(.borderedProminent).tint(accent)
                     .keyboardShortcut(.defaultAction)
             }
             .padding(14)
@@ -842,14 +1785,51 @@ struct ChatView: View {
         .background(chatBackground)
         .preferredColorScheme(theme.colorScheme)
         .task { chat.startGatewayAndConnect() }
-        .fileImporter(
-            isPresented: $showingImagePicker,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case let .success(urls) = result, let url = urls.first else { return }
-            uploadImage(url)
+    }
+
+    private func updateSuggestions(for input: String) {
+        guard let match = input.range(of: "(?:^|\\s)([@/])[^\\s]*$", options: .regularExpression) else {
+            suggestions = []
+            return
         }
+        let token = String(input[match])
+        guard let trigger = token.first(where: { $0 == "@" || $0 == "/" }) else {
+            suggestions = []
+            return
+        }
+        let query = String(token.drop { $0 == " " || $0 == trigger }).lowercased()
+        Task {
+            do {
+                let skillsData = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/skills")).0
+                let skills = try JSONDecoder().decode(NativeSkillsResponse.self, from: skillsData).skills
+                var items = skills
+                    .filter { query.isEmpty || $0.name.lowercased().contains(query) || $0.description.lowercased().contains(query) }
+                    .prefix(8)
+                    .map { skill in
+                        ChatComposerSuggestion(id: skill.id, kind: .skill, title: skill.name, subtitle: skill.description.isEmpty ? "\(skill.source) skill" : skill.description, insertion: trigger == "/" ? "/\(skill.name) " : "@skill:\(skill.name) ")
+                    }
+                if trigger == "@" {
+                    let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                    let fileData = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/files/search", queryItems: [URLQueryItem(name: "q", value: escaped), URLQueryItem(name: "limit", value: "8")])).0
+                    let files = try JSONDecoder().decode(NativeFileSearchResponse.self, from: fileData).items
+                    items.append(contentsOf: files.map { file in
+                        ChatComposerSuggestion(id: file.id, kind: .file, title: file.name, subtitle: file.directory, insertion: "@\"\(file.path)\" ")
+                    })
+                }
+                guard input == chat.draft else { return }
+                suggestions = items
+            } catch {
+                suggestions = []
+            }
+        }
+    }
+
+    private func applySuggestion(_ suggestion: ChatComposerSuggestion) {
+        guard let range = chat.draft.range(of: "(?:^|\\s)[@/][^\\s]*$", options: .regularExpression) else { return }
+        let prefix = String(chat.draft[..<range.lowerBound])
+        let leadingSpace = chat.draft[range].first?.isWhitespace == true ? " " : ""
+        chat.draft = prefix + leadingSpace + suggestion.insertion
+        suggestions = []
     }
 
     @ViewBuilder
@@ -866,16 +1846,117 @@ struct ChatView: View {
         }
     }
 
-    private func uploadImage(_ url: URL) {
+    private func uploadFile(_ url: URL) {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
-            let contentType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/jpeg"
-            chat.sendMedia(data: data, filename: url.lastPathComponent, contentType: contentType, kind: "image")
+            let type = UTType(filenameExtension: url.pathExtension)
+            let contentType = type?.preferredMIMEType ?? "application/octet-stream"
+            let kind = type?.conforms(to: .image) == true ? "image" : "file"
+            chat.sendMedia(data: data, filename: url.lastPathComponent, contentType: contentType, kind: kind)
         } catch {
-            chat.status = "Could not read that image."
+            chat.status = "Could not read that file."
         }
+    }
+
+    private func uploadItem() {
+        let panel = NSOpenPanel()
+        panel.title = "Upload File or JameClaw Skill"
+        panel.message = "Choose a file to attach, or choose SKILL.md / a skill folder to import into this workspace."
+        panel.prompt = "Upload"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
+        let didAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer { if didAccess { sourceURL.stopAccessingSecurityScopedResource() } }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory) else {
+            chat.status = "Could not find that item."
+            return
+        }
+        if isDirectory.boolValue || sourceURL.lastPathComponent.caseInsensitiveCompare("SKILL.md") == .orderedSame {
+            importSkill(sourceURL)
+        } else {
+            uploadFile(sourceURL)
+        }
+    }
+
+    private func importSkill(_ sourceURL: URL) {
+        do {
+            let fileManager = FileManager.default
+            let sourceSkillFile: URL
+            let sourceDirectory: URL
+            let sourceIsDirectory: Bool
+
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory) else {
+                throw SkillUploadError.missingSkillFile
+            }
+            sourceIsDirectory = isDirectory.boolValue
+            if sourceIsDirectory {
+                sourceDirectory = sourceURL
+                sourceSkillFile = sourceURL.appendingPathComponent("SKILL.md")
+            } else {
+                guard sourceURL.lastPathComponent.caseInsensitiveCompare("SKILL.md") == .orderedSame else {
+                    throw SkillUploadError.chooseSkillFile
+                }
+                sourceSkillFile = sourceURL
+                sourceDirectory = sourceURL.deletingLastPathComponent()
+            }
+
+            guard fileManager.fileExists(atPath: sourceSkillFile.path) else {
+                throw SkillUploadError.missingSkillFile
+            }
+            let skillDocument = try String(contentsOf: sourceSkillFile, encoding: .utf8)
+            let skillName = skillName(from: skillDocument, fallback: sourceDirectory.lastPathComponent)
+            let skillsDirectory = jameWorkspaceURL().appendingPathComponent("skills", isDirectory: true)
+            let destinationDirectory = skillsDirectory.appendingPathComponent(skillName, isDirectory: true)
+
+            guard !fileManager.fileExists(atPath: destinationDirectory.path) else {
+                throw SkillUploadError.alreadyExists(skillName)
+            }
+            try fileManager.createDirectory(at: skillsDirectory, withIntermediateDirectories: true)
+            if sourceIsDirectory {
+                try fileManager.copyItem(at: sourceDirectory, to: destinationDirectory)
+            } else {
+                try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+                try fileManager.copyItem(at: sourceSkillFile, to: destinationDirectory.appendingPathComponent("SKILL.md"))
+            }
+            chat.status = "Imported skill: \(skillName)"
+            chat.sendSkillImported(skillName)
+        } catch {
+            chat.status = error.localizedDescription
+        }
+    }
+
+    private func skillName(from document: String, fallback: String) -> String {
+        let declaredName = document
+            .split(whereSeparator: \.isNewline)
+            .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("name:") }
+            .map { String($0).split(separator: ":", maxSplits: 1)[1].trimmingCharacters(in: .whitespacesAndNewlines) }
+        let candidate = declaredName?.isEmpty == false ? declaredName! : fallback
+        let slug = candidate.lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return slug.isEmpty || slug == "skill" ? "imported-skill-\(UUID().uuidString.prefix(8))" : slug
+    }
+
+    private func chooseWorkspace() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose JameClaw Workspace"
+        panel.message = "Choose the folder where Jame should read and create workspace files."
+        panel.prompt = "Use Workspace"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let workspaceURL = panel.url else { return }
+        chat.setWorkspace(workspaceURL)
     }
 
     private func toggleRecording() {

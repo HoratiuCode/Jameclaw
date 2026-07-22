@@ -53,7 +53,11 @@ func LocalSessionAuth(accessToken string, next http.Handler) http.Handler {
 				SameSite: http.SameSiteLaxMode,
 			})
 
-			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			// Browser page loads should shed the bootstrap token from the URL,
+			// but native clients use the token on every API request and do not
+			// rely on a browser cookie jar. Redirecting API GETs turns a valid
+			// response into an authentication loop for the desktop chat.
+			if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !strings.HasPrefix(r.URL.Path, "/api/") {
 				redirectURL := stripLauncherAccessToken(r.URL)
 				http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 				return

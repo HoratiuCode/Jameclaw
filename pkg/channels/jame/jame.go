@@ -85,6 +85,13 @@ func NewJameChannel(cfg config.JameConfig, messageBus *bus.MessageBus) (*JameCha
 			return true // allow all if not configured
 		}
 		origin := r.Header.Get("Origin")
+		// Native desktop WebSocket clients are not browser pages and do not
+		// send an Origin header. They are still required to pass the Jame
+		// token authentication below, so permit this non-browser handshake
+		// even when browser origins have been explicitly restricted.
+		if origin == "" {
+			return true
+		}
 		for _, allowed := range allowOrigins {
 			if allowed == "*" || allowed == origin {
 				return true

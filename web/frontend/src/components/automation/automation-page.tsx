@@ -69,6 +69,7 @@ export function AutomationPage() {
             to="/"
             search={{
               prompt: "Create an automation for: ",
+              newChat: false,
             }}
           >
             <IconPlus className="size-4" />

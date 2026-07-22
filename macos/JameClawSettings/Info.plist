@@ -4,6 +4,7 @@
   <key>CFBundleExecutable</key><string>JameClaw Settings</string>
   <key>CFBundleIdentifier</key><string>com.jameclaw.settings</string>
   <key>CFBundleName</key><string>JameClaw Settings</string>
+  <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>

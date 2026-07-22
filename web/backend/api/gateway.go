@@ -121,7 +121,15 @@ func (h *Handler) TryAutoStartGateway() {
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
 
-	if gateway.cmd != nil && gateway.cmd.Process != nil {
+	// A chat setup request can arrive while the delayed startup task is still
+	// launching the gateway. Health is not available during that small window,
+	// so do not start a second process just because the initial health probe
+	// missed the first one.
+	if gateway.cmd != nil && isCmdProcessAliveLocked(gateway.cmd) {
+		logger.InfoC("gateway", fmt.Sprintf("Gateway already starting or running (PID: %d)", gateway.cmd.Process.Pid))
+		return
+	}
+	if gateway.cmd != nil {
 		gateway.cmd = nil
 	}
 

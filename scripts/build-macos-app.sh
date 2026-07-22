@@ -65,7 +65,7 @@ cat > "${APP_CONTENTS}/Info.plist" << 'EOF'
     <key>CFBundleDisplayName</key>
     <string>JameClaw Desktop</string>
     <key>CFBundleIconFile</key>
-    <string>icon.icns</string>
+    <string>icon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -75,8 +75,6 @@ cat > "${APP_CONTENTS}/Info.plist" << 'EOF'
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
-    <true/>
-    <key>LSUIElement</key>
     <true/>
     <key>NSUserNotificationUsageDescription</key>
     <string>JameClaw uses notifications to show alerts for agent actions, automation results, and gateway status changes.</string>

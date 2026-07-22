@@ -48,9 +48,10 @@ func onReady() {
 	startTrayActivityIndicator()
 
 	// Create menu items
-	// Top-level: Open, About, Settings, Quit — keep the bar clean on macOS.
+	// Top-level: Open, New Chat, About, Settings, Quit — keep the bar clean on macOS.
 	mOpen := systray.AddMenuItem(T(MenuOpen), T(MenuOpenTooltip))
 	mConsole := mOpen.AddSubMenuItem(T(MenuConsole), T(MenuConsoleTooltip))
+	mNewChat := systray.AddMenuItem(T(MenuNewChat), T(MenuNewChatTooltip))
 	var terminalClicked <-chan struct{}
 	if runtime.GOOS == "darwin" {
 		mTerminalChat := mOpen.AddSubMenuItem(T(MenuTerminalChat), T(MenuTerminalTooltip))
@@ -94,6 +95,11 @@ func onReady() {
 			case <-mConsole.ClickedCh:
 				if err := openBrowser(); err != nil {
 					logger.Errorf("Failed to open browser: %v", err)
+				}
+
+			case <-mNewChat.ClickedCh:
+				if err := openNewChat(); err != nil {
+					logger.Errorf("Failed to start a new chat: %v", err)
 				}
 
 			case <-terminalClicked:
