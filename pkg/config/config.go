@@ -1306,15 +1306,16 @@ type ReadFileToolConfig struct {
 }
 
 type MacControlToolsConfig struct {
-	ToolConfig        `                         envPrefix:"JAMECLAW_TOOLS_MAC_CONTROL_"`
-	AllowRemote       bool     `json:"allow_remote"         env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_REMOTE"`
-	RemoteChannels    []string `json:"remote_channels"      env:"JAMECLAW_TOOLS_MAC_CONTROL_REMOTE_CHANNELS"`
-	AllowOpenApps     bool     `json:"allow_open_apps"      env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_OPEN_APPS"`
-	AllowUIAutomation bool     `json:"allow_ui_automation" env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_UI_AUTOMATION"`
-	AllowTyping       bool     `json:"allow_typing"        env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_TYPING"`
-	AllowShortcuts    bool     `json:"allow_shortcuts"     env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SHORTCUTS"`
-	AllowScreenshots  bool     `json:"allow_screenshots"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SCREENSHOTS"`
-	AllowAppleScript  bool     `json:"allow_applescript"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_APPLESCRIPT"`
+	ToolConfig          `                         envPrefix:"JAMECLAW_TOOLS_MAC_CONTROL_"`
+	AllowRemote         bool     `json:"allow_remote"         env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_REMOTE"`
+	RemoteChannels      []string `json:"remote_channels"      env:"JAMECLAW_TOOLS_MAC_CONTROL_REMOTE_CHANNELS"`
+	AllowOpenApps       bool     `json:"allow_open_apps"      env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_OPEN_APPS"`
+	AllowUIAutomation   bool     `json:"allow_ui_automation" env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_UI_AUTOMATION"`
+	AllowTyping         bool     `json:"allow_typing"        env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_TYPING"`
+	AllowShortcuts      bool     `json:"allow_shortcuts"     env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SHORTCUTS"`
+	AllowScreenshots    bool     `json:"allow_screenshots"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_SCREENSHOTS"`
+	AllowAppleScript    bool     `json:"allow_applescript"   env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_APPLESCRIPT"`
+	AllowMusicPlaylists bool     `json:"allow_music_playlists" env:"JAMECLAW_TOOLS_MAC_CONTROL_ALLOW_MUSIC_PLAYLISTS"`
 }
 
 type ToolsConfig struct {

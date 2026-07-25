@@ -1,1 +1,0 @@
-import{f as o}from"./index-CWB17ZqQ.js";const t=[["path",{d:"M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12",key:"svg-0"}],["path",{d:"M19 16h-12a2 2 0 0 0 -2 2",key:"svg-1"}],["path",{d:"M9 8h6",key:"svg-2"}]],e=o("outline","book-2","Book2",t);export{e as I};

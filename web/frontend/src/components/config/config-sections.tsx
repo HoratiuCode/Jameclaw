@@ -1,6 +1,9 @@
 import {
+  IconBrain,
   IconCircleCheck,
   IconExternalLink,
+  IconFolder,
+  IconHistory,
   IconLoader2,
   IconPlug,
   IconRefresh,
@@ -210,6 +213,70 @@ export function ChannelsSection({ appConfig }: ChannelsSectionProps) {
           })}
         </div>
       )}
+    </ConfigSectionCard>
+  )
+}
+
+interface DataStorageSectionProps {
+  workspace: string
+}
+
+export function DataStorageSection({ workspace }: DataStorageSectionProps) {
+  const { t } = useTranslation()
+  const normalizedWorkspace = workspace.trim() || "~/.jameclaw/workspace"
+
+  const locations = [
+    {
+      label: t("pages.config.storage.sessions"),
+      path: `${normalizedWorkspace}/sessions`,
+      icon: IconHistory,
+    },
+    {
+      label: t("pages.config.storage.memory"),
+      path: `${normalizedWorkspace}/memory`,
+      icon: IconBrain,
+    },
+    {
+      label: t("pages.config.storage.automation"),
+      path: `${normalizedWorkspace}/cron`,
+      icon: IconFolder,
+    },
+  ]
+
+  return (
+    <ConfigSectionCard
+      title={t("pages.config.sections.storage")}
+      description={t("pages.config.storage.description")}
+    >
+      <Field
+        label={t("pages.config.storage.workspace")}
+        hint={t("pages.config.storage.workspace_hint")}
+        layout="setting-row"
+      >
+        <code className="bg-muted block max-w-full overflow-x-auto rounded-md px-3 py-2 text-xs">
+          {normalizedWorkspace}
+        </code>
+      </Field>
+
+      {locations.map(({ label, path, icon: Icon }) => (
+        <div key={label} className="flex items-center gap-3 py-4">
+          <span className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
+            <Icon className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{label}</p>
+            <code className="text-muted-foreground block truncate text-xs">
+              {path}
+            </code>
+          </div>
+        </div>
+      ))}
+
+      <div className="flex justify-end py-4">
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/automation">{t("pages.config.storage.open_automations")}</Link>
+        </Button>
+      </div>
     </ConfigSectionCard>
   )
 }
@@ -537,6 +604,15 @@ export function MacControlSection({
         checked={form.macControlAllowOpenApps}
         onCheckedChange={(checked) =>
           onFieldChange("macControlAllowOpenApps", checked)
+        }
+      />
+      <SwitchCardField
+        label={t("pages.config.allow_music_playlists")}
+        hint={t("pages.config.allow_music_playlists_hint")}
+        layout="setting-row"
+        checked={form.macControlAllowMusicPlaylists}
+        onCheckedChange={(checked) =>
+          onFieldChange("macControlAllowMusicPlaylists", checked)
         }
       />
     </ConfigSectionCard>

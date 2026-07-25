@@ -119,7 +119,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(22)
-        .frame(width: 440)
+        // The settings window should follow the user's chosen size too.
     }
 }
 
@@ -127,6 +127,6 @@ struct SettingsView: View {
 struct JameClawSettingsApp: App {
     var body: some Scene {
         WindowGroup { SettingsView() }
-            .windowResizability(.contentSize)
+            .windowResizability(.automatic)
     }
 }

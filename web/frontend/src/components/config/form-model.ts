@@ -8,6 +8,7 @@ export interface CoreConfigForm {
   execEnabled: boolean
   allowRemote: boolean
   macControlAllowOpenApps: boolean
+  macControlAllowMusicPlaylists: boolean
   enableDenyPatterns: boolean
   customDenyPatternsText: string
   customAllowPatternsText: string
@@ -74,6 +75,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   execEnabled: true,
   allowRemote: true,
   macControlAllowOpenApps: false,
+  macControlAllowMusicPlaylists: false,
   enableDenyPatterns: true,
   customDenyPatternsText: "",
   customAllowPatternsText: "",
@@ -167,6 +169,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       macControl.allow_open_apps === undefined
         ? EMPTY_FORM.macControlAllowOpenApps
         : asBool(macControl.allow_open_apps),
+    macControlAllowMusicPlaylists:
+      macControl.allow_music_playlists === undefined
+        ? EMPTY_FORM.macControlAllowMusicPlaylists
+        : asBool(macControl.allow_music_playlists),
     enableDenyPatterns:
       exec.enable_deny_patterns === undefined
         ? EMPTY_FORM.enableDenyPatterns

@@ -33,7 +33,7 @@ func (t *MacControlTool) Name() string {
 }
 
 func (t *MacControlTool) Description() string {
-	return "Control macOS desktop actions, especially Google Chrome browser access: open Chrome, open websites like Instagram, search the web, focus browser windows, type text, press keyboard shortcuts, open apps/URLs/files, control Finder, run Shortcuts, take screenshots, and optionally run approved AppleScript. Opening apps, URLs, searches, and paths defaults to background mode so the user's current app stays in front; pass background=false or use activate_app only when the user needs the app brought forward. Use this as the browser fallback when agent-browser or CDP automation is unavailable."
+	return "Control macOS desktop actions, especially Google Chrome browser access and Apple Music playlists: open Chrome, open websites like Instagram, search the web, focus browser windows, type text, press keyboard shortcuts, open apps/URLs/files, control Finder, run Shortcuts, create an Apple Music playlist, take screenshots, and optionally run approved AppleScript. Use create_music_playlist with playlist_name when the user asks to create an Apple Music playlist. Opening apps, URLs, searches, and paths defaults to background mode so the user's current app stays in front; pass background=false or use activate_app only when the user needs the app brought forward. Use this as the browser fallback when agent-browser or CDP automation is unavailable."
 }
 
 func (t *MacControlTool) Parameters() map[string]any {
@@ -46,7 +46,7 @@ func (t *MacControlTool) Parameters() map[string]any {
 				"enum": []string{
 					"open_app", "activate_app", "quit_app", "list_apps", "frontmost_app", "front_window_title", "front_window_bounds",
 					"open_url", "open_path", "open_finder", "reveal_path", "search",
-					"run_shortcut", "screenshot", "type_text", "keyboard_shortcut", "key_code", "mouse_click", "run_applescript",
+					"run_shortcut", "create_music_playlist", "screenshot", "type_text", "keyboard_shortcut", "key_code", "mouse_click", "run_applescript",
 				},
 			},
 			"app": map[string]any{
@@ -73,6 +73,10 @@ func (t *MacControlTool) Parameters() map[string]any {
 			"shortcut": map[string]any{
 				"type":        "string",
 				"description": "macOS Shortcut name for action=run_shortcut.",
+			},
+			"playlist_name": map[string]any{
+				"type":        "string",
+				"description": "Name of the new Apple Music playlist for action=create_music_playlist.",
 			},
 			"text": map[string]any{
 				"type":        "string",
@@ -248,6 +252,22 @@ end tell`, "Read front window bounds")
 			return "", "", fmt.Errorf("shortcut is required for action=run_shortcut")
 		}
 		return t.runWithMessage(ctx, "shortcuts", "Ran Shortcut "+shortcut, "run", shortcut)
+	case "create_music_playlist":
+		if !t.cfg.AllowMusicPlaylists {
+			return "", "", fmt.Errorf("creating Apple Music playlists is disabled by tools.mac_control.allow_music_playlists")
+		}
+		playlistName := cleanMacControlValue(getStringArg(args, "playlist_name"))
+		if playlistName == "" {
+			return "", "", fmt.Errorf("playlist_name is required for action=create_music_playlist")
+		}
+		script := fmt.Sprintf(`tell application "Music"
+	if exists user playlist %s then
+		return "Apple Music playlist already exists: " & %s
+	end if
+	make new user playlist with properties {name:%s}
+	return "Created Apple Music playlist: " & %s
+end tell`, appleScriptStringLiteral(playlistName), appleScriptStringLiteral(playlistName), appleScriptStringLiteral(playlistName), appleScriptStringLiteral(playlistName))
+		return t.runAppleScript(ctx, script, "Created Apple Music playlist "+playlistName)
 	case "screenshot":
 		if !t.cfg.AllowScreenshots {
 			return "", "", fmt.Errorf("screenshot is disabled by tools.mac_control.allow_screenshots")

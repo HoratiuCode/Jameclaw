@@ -246,6 +246,8 @@ struct JameRootView: View {
                 ChatView(port: Int(settings.port) ?? 18800)
             case .sessions:
                 SessionsView(port: Int(settings.port) ?? 18800)
+            case .automations:
+                AutomationsView(port: Int(settings.port) ?? 18800)
             case .connectors:
                 ConnectorsView(port: Int(settings.port) ?? 18800)
             case .artifacts:
@@ -257,18 +259,9 @@ struct JameRootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 820, idealWidth: 980, minHeight: 650, idealHeight: 720)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    NSApplication.shared.keyWindow?.toggleFullScreen(nil)
-                } label: {
-                    Label("Toggle Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
-                }
-                .help("Enter or exit full screen (⌃⌘F)")
-                .keyboardShortcut("f", modifiers: [.command, .control])
-            }
-        }
+        // Do not impose an application-level minimum or fixed content size.
+        // This lets people size the Jame window however they prefer, including
+        // narrow and compact layouts managed by macOS.
     }
 }
 
@@ -277,6 +270,7 @@ private enum DesktopSection: String, CaseIterable, Identifiable {
     case artifacts
     case skills
     case sessions
+    case automations
     case connectors
     case settings
 
@@ -286,11 +280,489 @@ private enum DesktopSection: String, CaseIterable, Identifiable {
         switch self {
         case .chat: return "message.fill"
         case .sessions: return "clock.arrow.circlepath"
+        case .automations: return "calendar.badge.clock"
         case .connectors: return "point.3.connected.trianglepath.dotted"
         case .artifacts: return "shippingbox.fill"
         case .skills: return "wand.and.stars"
         case .settings: return "gearshape"
         }
+    }
+}
+
+private struct NativeAutomationResponse: Codable {
+    let items: [NativeAutomation]
+}
+
+private struct NativeAutomationBlueprintResponse: Codable {
+    let blueprints: [NativeAutomationBlueprint]
+}
+
+private struct NativeAutomationBlueprint: Codable, Identifiable {
+    let key: String
+    let title: String
+    let description: String
+    let fields: [NativeAutomationBlueprintField]
+    let tags: [String]
+
+    var id: String { key }
+}
+
+private struct NativeAutomationBlueprintField: Codable, Identifiable {
+    let name: String
+    let type: String
+    let label: String
+    let defaultValue: String?
+    let options: [String]?
+    let help: String?
+
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, type, label, options, help
+        case defaultValue = "default"
+    }
+}
+
+private struct NativeAutomationBlueprintRequest: Encodable {
+    let blueprint: String
+    let values: [String: String]
+}
+
+private struct NativeAutomation: Codable, Identifiable {
+    let id: String
+    let name: String
+    let enabled: Bool
+    let status: String
+    let schedule: String
+    let prompt: String
+    let delivery: String
+    let nextRunAtMS: Int64?
+    let lastRunAtMS: Int64?
+    let lastStatus: String?
+    let lastError: String?
+    let running: Bool
+    let createdAtMS: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, enabled, status, schedule, prompt, delivery, running
+        case nextRunAtMS = "next_run_at_ms"
+        case lastRunAtMS = "last_run_at_ms"
+        case lastStatus = "last_status"
+        case lastError = "last_error"
+        case createdAtMS = "created_at_ms"
+    }
+}
+
+private struct NativeAutomationOutput: Codable {
+    let automationID: String
+    let status: String?
+    let ranAtMS: Int64?
+    let content: String
+
+    enum CodingKeys: String, CodingKey {
+        case status, content
+        case automationID = "automation_id"
+        case ranAtMS = "ran_at_ms"
+    }
+}
+
+private func nativeAutomationDate(_ timestamp: Int64?) -> String {
+    guard let timestamp, timestamp > 0 else { return "Not scheduled" }
+    return Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000)
+        .formatted(date: .abbreviated, time: .shortened)
+}
+
+@MainActor
+private final class NativeAutomationStore: ObservableObject {
+    @Published var automations: [NativeAutomation] = []
+    @Published var blueprints: [NativeAutomationBlueprint] = []
+    @Published var isLoading = false
+    @Published var error = ""
+    @Published var runningID: String?
+    @Published var output: NativeAutomationOutput?
+    @Published var outputID: String?
+    @Published var outputError = ""
+    @Published var schedulingBlueprintKey: String?
+
+    private let port: Int
+
+    init(port: Int) { self.port = port }
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/automation")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            automations = try JSONDecoder().decode(NativeAutomationResponse.self, from: data).items
+            error = ""
+        } catch {
+            self.error = "Could not load automations. Start JameClaw and try again."
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/automation/blueprints")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            blueprints = try JSONDecoder().decode(NativeAutomationBlueprintResponse.self, from: data).blueprints
+        } catch {
+            // Existing scheduled automations remain useful even when blueprints
+            // are temporarily unavailable, so keep this failure non-blocking.
+            if automations.isEmpty { self.error = "Could not load automation templates. Start JameClaw and try again." }
+        }
+    }
+
+    func schedule(_ blueprint: NativeAutomationBlueprint, values: [String: String]) async -> Bool {
+        schedulingBlueprintKey = blueprint.key
+        defer { schedulingBlueprintKey = nil }
+        do {
+            var request = authenticatedConsoleRequest(
+                port: port,
+                path: "/api/automation/blueprints/instantiate",
+                method: "POST"
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(
+                NativeAutomationBlueprintRequest(blueprint: blueprint.key, values: values)
+            )
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            await load()
+            return true
+        } catch {
+            self.error = "Could not schedule \(blueprint.title). Check the template fields and try again."
+            return false
+        }
+    }
+
+    func run(_ automation: NativeAutomation) async {
+        runningID = automation.id
+        defer { runningID = nil }
+        do {
+            let (_, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(
+                    port: port,
+                    path: "/api/automation/\(automation.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? automation.id)/run",
+                    method: "POST"
+                )
+            )
+            guard let http = response as? HTTPURLResponse, http.statusCode == 202 else {
+                throw URLError(.badServerResponse)
+            }
+            await load()
+        } catch {
+            self.error = "Could not start \(automation.name). Make sure the gateway is running."
+        }
+    }
+
+    func loadOutput(for automation: NativeAutomation) async {
+        outputID = automation.id
+        output = nil
+        outputError = ""
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(
+                    port: port,
+                    path: "/api/automation/\(automation.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? automation.id)/output"
+                )
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            output = try JSONDecoder().decode(NativeAutomationOutput.self, from: data)
+        } catch {
+            outputError = "No saved output is available for this automation yet."
+        }
+    }
+}
+
+private struct AutomationsView: View {
+    @StateObject private var store: NativeAutomationStore
+    @State private var showingTemplateGallery = false
+    @State private var blueprintToConfigure: NativeAutomationBlueprint?
+    @State private var selectedBlueprint: NativeAutomationBlueprint?
+
+    init(port: Int) { _store = StateObject(wrappedValue: NativeAutomationStore(port: port)) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Automations").font(.title2.weight(.semibold))
+                    Text("Scheduled work shared with the JameClaw Web Console")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    showingTemplateGallery = true
+                } label: {
+                    Label("New automation", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                Button { Task { await store.load() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh automations")
+            }
+            .padding(18)
+
+            if store.isLoading && store.automations.isEmpty && store.blueprints.isEmpty {
+                Spacer()
+                ProgressView("Loading automations…")
+                Spacer()
+            } else {
+                List {
+                    Section {
+                        if store.automations.isEmpty {
+                            Text("No automations have been scheduled yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(store.automations) { automation in
+                                AutomationRow(automation: automation, store: store)
+                            }
+                        }
+                    } header: {
+                        Text("Your scheduled automations")
+                    }
+                }
+                .listStyle(.inset)
+            }
+
+            if !store.error.isEmpty && !store.automations.isEmpty {
+                Text(store.error).font(.caption).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18).padding(.bottom, 10)
+            }
+        }
+        .task { await store.load() }
+        .sheet(isPresented: $showingTemplateGallery, onDismiss: {
+            if let blueprintToConfigure {
+                self.blueprintToConfigure = nil
+                selectedBlueprint = blueprintToConfigure
+            }
+        }) {
+            AutomationTemplateGallery(blueprints: store.blueprints) { blueprint in
+                blueprintToConfigure = blueprint
+                showingTemplateGallery = false
+            }
+        }
+        .sheet(item: $selectedBlueprint) { blueprint in
+            AutomationTemplateSetupView(blueprint: blueprint, store: store)
+        }
+    }
+}
+
+private struct AutomationTemplateGallery: View {
+    let blueprints: [NativeAutomationBlueprint]
+    let choose: (NativeAutomationBlueprint) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("New automation").font(.title2.weight(.bold))
+                    Text("Choose a suggestion to customize and schedule it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            .padding(20)
+            Divider()
+            if blueprints.isEmpty {
+                ContentUnavailableView(
+                    "No suggestions available",
+                    systemImage: "sparkles",
+                    description: Text("Start JameClaw and refresh this page to load automation templates.")
+                )
+            } else {
+                List(blueprints) { blueprint in
+                    AutomationTemplateRow(blueprint: blueprint) { choose(blueprint) }
+                }
+                .listStyle(.inset)
+            }
+        }
+        .frame(minWidth: 560, minHeight: 460)
+    }
+}
+
+private struct AutomationTemplateRow: View {
+    let blueprint: NativeAutomationBlueprint
+    let setUp: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.tint)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(blueprint.title).font(.headline)
+                Text(blueprint.description).font(.caption).foregroundStyle(.secondary)
+                if !blueprint.tags.isEmpty {
+                    Text(blueprint.tags.map { "#\($0)" }.joined(separator: "  "))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button("Set up", action: setUp)
+                .controlSize(.small)
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct AutomationTemplateSetupView: View {
+    let blueprint: NativeAutomationBlueprint
+    @ObservedObject var store: NativeAutomationStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var values: [String: String]
+
+    init(blueprint: NativeAutomationBlueprint, store: NativeAutomationStore) {
+        self.blueprint = blueprint
+        self.store = store
+        _values = State(initialValue: Dictionary(uniqueKeysWithValues: blueprint.fields.map { ($0.name, $0.defaultValue ?? "") }))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Set up \(blueprint.title)").font(.title2.weight(.bold))
+            Text(blueprint.description).foregroundStyle(.secondary)
+            Form {
+                ForEach(blueprint.fields) { field in
+                    if let options = field.options, !options.isEmpty {
+                        Picker(field.label, selection: valueBinding(for: field.name)) {
+                            ForEach(options, id: \.self) { option in
+                                Text(option).tag(option)
+                            }
+                        }
+                    } else {
+                        TextField(field.label, text: valueBinding(for: field.name))
+                    }
+                    if let help = field.help, !help.isEmpty {
+                        Text(help).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            if !store.error.isEmpty {
+                Text(store.error).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(store.schedulingBlueprintKey == blueprint.key ? "Scheduling…" : "Schedule") {
+                    Task {
+                        if await store.schedule(blueprint, values: values) { dismiss() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.schedulingBlueprintKey != nil)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+    }
+
+    private func valueBinding(for fieldName: String) -> Binding<String> {
+        Binding(
+            get: { values[fieldName] ?? "" },
+            set: { values[fieldName] = $0 }
+        )
+    }
+}
+
+private struct AutomationRow: View {
+    let automation: NativeAutomation
+    @ObservedObject var store: NativeAutomationStore
+
+    private var status: String { automation.running ? "Running" : (automation.enabled ? automation.status.capitalized : "Disabled") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(automation.name).font(.headline)
+                    Text(automation.schedule).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(status)
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(status == "Error" ? Color.red.opacity(0.15) : Color.secondary.opacity(0.12), in: Capsule())
+                Button(store.runningID == automation.id || automation.running ? "Running…" : "Run now") {
+                    Task { await store.run(automation) }
+                }
+                .disabled(!automation.enabled || automation.running || store.runningID != nil)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 22, verticalSpacing: 6) {
+                GridRow {
+                    Text("Request").foregroundStyle(.secondary)
+                    Text(automation.prompt.isEmpty ? "No request recorded" : automation.prompt)
+                }
+                GridRow {
+                    Text("Delivery").foregroundStyle(.secondary)
+                    Text(automation.delivery)
+                }
+                GridRow {
+                    Text("Next run").foregroundStyle(.secondary)
+                    Text(nativeAutomationDate(automation.nextRunAtMS))
+                }
+                GridRow {
+                    Text("Last result").foregroundStyle(.secondary)
+                    Text(automation.lastStatus?.isEmpty == false ? automation.lastStatus! : "No result yet")
+                }
+            }
+            .font(.caption)
+
+            if let lastError = automation.lastError, !lastError.isEmpty {
+                Label(lastError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.red)
+            }
+
+            HStack {
+                Button("View last output") { Task { await store.loadOutput(for: automation) } }
+                    .controlSize(.small)
+                    .disabled(
+                        automation.lastRunAtMS == nil ||
+                        (store.outputID == automation.id && store.output == nil && store.outputError.isEmpty)
+                    )
+                if store.outputID == automation.id && store.output == nil && store.outputError.isEmpty {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+                if let lastRun = automation.lastRunAtMS {
+                    Text("Last run \(nativeAutomationDate(lastRun))").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if store.outputID == automation.id {
+                if let output = store.output {
+                    Text(output.content.isEmpty ? "The run completed without output." : output.content)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                } else if !store.outputError.isEmpty {
+                    Text(store.outputError).font(.caption).foregroundStyle(.red)
+                }
+            }
+        }
+        .padding(.vertical, 7)
     }
 }
 
@@ -327,11 +799,20 @@ private struct NativeSessionDetail: Codable {
     let messages: [NativeSessionMessage]
 }
 
+private func sessionSourceName(_ session: NativeSessionSummary) -> String {
+    let channel = session.channel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    // The desktop app and Web Console both use the Jame channel. Their
+    // persisted sessions are intentionally shared, so show that clearly.
+    if channel == "jame" { return "Jame (Desktop / Web)" }
+    return channel.isEmpty ? "Terminal" : channel.capitalized
+}
+
 @MainActor
 private final class NativeSessionStore: ObservableObject {
     @Published var sessions: [NativeSessionSummary] = []
     @Published var selectedSessionID: String?
     @Published var selectedSession: NativeSessionDetail?
+    @Published var selectedSource = "All conversations"
     @Published var isLoading = false
     @Published var error = ""
 
@@ -349,7 +830,7 @@ private final class NativeSessionStore: ObservableObject {
                     path: "/api/sessions",
                     queryItems: [
                         URLQueryItem(name: "offset", value: "0"),
-                        URLQueryItem(name: "limit", value: "200"),
+                        URLQueryItem(name: "limit", value: "10000"),
                     ]
                 )
             )
@@ -361,6 +842,15 @@ private final class NativeSessionStore: ObservableObject {
         } catch {
             self.error = "Could not load conversation history. Start JameClaw and try again."
         }
+    }
+
+    var sources: [String] {
+        ["All conversations"] + Array(Set(sessions.map(sessionSourceName))).sorted()
+    }
+
+    var visibleSessions: [NativeSessionSummary] {
+        guard selectedSource != "All conversations" else { return sessions }
+        return sessions.filter { sessionSourceName($0) == selectedSource }
     }
 
     func select(_ id: String?) async {
@@ -390,20 +880,32 @@ private struct SessionsView: View {
         HSplitView {
             VStack(spacing: 0) {
                 HStack {
-                    Text("Sessions").font(.title2.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sessions").font(.title2.weight(.semibold))
+                        Text("All conversations from Jame, Telegram, and connected channels")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
+                    Picker("Conversation source", selection: $store.selectedSource) {
+                        ForEach(store.sources, id: \.self) { source in
+                            Text(source).tag(source)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
                     Button { Task { await store.load() } } label: {
                         Image(systemName: "arrow.clockwise")
                     }
                     .help("Refresh session history")
                 }
                 .padding()
-                List(store.sessions, selection: $store.selectedSessionID) { session in
+                List(store.visibleSessions, selection: $store.selectedSessionID) { session in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(session.title.isEmpty ? session.preview : session.title)
                             .lineLimit(1)
                             .font(.headline)
-                        Text("\(sessionSource(session)) · \(session.messageCount) messages · \(session.updated)")
+                        Text("\(sessionSourceName(session)) · \(session.messageCount) messages · \(session.updated)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -412,7 +914,13 @@ private struct SessionsView: View {
                 }
                 .overlay {
                     if store.isLoading { ProgressView() }
-                    else if store.sessions.isEmpty, !store.error.isEmpty { ContentUnavailableView("No sessions", systemImage: "clock", description: Text(store.error)) }
+                    else if store.visibleSessions.isEmpty {
+                        ContentUnavailableView(
+                            "No conversations",
+                            systemImage: "clock",
+                            description: Text(store.error.isEmpty ? "No saved conversations match this source." : store.error)
+                        )
+                    }
                 }
             }
             .frame(minWidth: 285, idealWidth: 350)
@@ -446,11 +954,6 @@ private struct SessionsView: View {
         .onChange(of: store.selectedSessionID) { _, id in Task { await store.select(id) } }
     }
 
-    private func sessionSource(_ session: NativeSessionSummary) -> String {
-        let channel = session.channel?.isEmpty == false ? session.channel! : "terminal"
-        if channel == "jame" { return "Desktop" }
-        return channel.capitalized
-    }
 }
 
 private struct MCPServerList: Codable {
@@ -1036,6 +1539,9 @@ struct QuickSettingsView: View {
     @AppStorage("launcher.design.fontScale") private var fontScale = 1.0
     @AppStorage("launcher.design.backgroundPath") private var backgroundPath = ""
     @State private var showingBackgroundPicker = false
+    @State private var allowOpenMacApps = false
+    @State private var allowMusicPlaylists = false
+    @State private var musicPlaylistStatus = ""
 
     var body: some View {
         Form {
@@ -1079,6 +1585,18 @@ struct QuickSettingsView: View {
                 }
                 if !providers.status.isEmpty {
                     Text(providers.status).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section("Desktop app commands") {
+                Toggle("Allow opening Mac apps", isOn: $allowOpenMacApps)
+                Toggle("Allow Apple Music playlists", isOn: $allowMusicPlaylists)
+                Text("Type @ in Chat to select any installed Mac app. Apple Music can also create named playlists.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Save app command permissions") { saveMusicPlaylistPermission() }
+                    if !musicPlaylistStatus.isEmpty {
+                        Text(musicPlaylistStatus).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             Section("Design") {
@@ -1125,7 +1643,11 @@ struct QuickSettingsView: View {
         }
         .formStyle(.grouped)
         .padding(.top, 6)
-        .task { await providers.load(port: Int(settings.port) ?? 18800) }
+        .task {
+            let port = Int(settings.port) ?? 18800
+            await providers.load(port: port)
+            await loadMusicPlaylistPermission(port: port)
+        }
         .onChange(of: providers.selectedModel) { _, modelName in
             guard !modelName.isEmpty else { return }
             Task { await providers.setDefaultModel(modelName, port: Int(settings.port) ?? 18800) }
@@ -1155,6 +1677,50 @@ struct QuickSettingsView: View {
             backgroundPath = destinationURL.path
         } catch {
             settings.saveStatus = "Could not save the selected background image."
+        }
+    }
+
+    private func loadMusicPlaylistPermission(port: Int) async {
+        do {
+            let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/config"))
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tools = root["tools"] as? [String: Any],
+                  let macControl = tools["mac_control"] as? [String: Any] else {
+                throw URLError(.badServerResponse)
+            }
+            allowOpenMacApps = macControl["allow_open_apps"] as? Bool ?? false
+            allowMusicPlaylists = macControl["allow_music_playlists"] as? Bool ?? false
+        } catch {
+            musicPlaylistStatus = "Could not load app command permissions."
+        }
+    }
+
+    private func saveMusicPlaylistPermission() {
+        Task {
+            do {
+                var request = URLRequest(url: authenticatedConsoleURL(port: Int(settings.port) ?? 18800, path: "/api/config"))
+                request.httpMethod = "PATCH"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "tools": ["mac_control": [
+                        "allow_open_apps": allowOpenMacApps,
+                        "allow_music_playlists": allowMusicPlaylists,
+                    ]],
+                ])
+                let (_, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                let restart = authenticatedConsoleRequest(port: Int(settings.port) ?? 18800, path: "/api/gateway/restart", method: "POST")
+                let (_, restartResponse) = try await URLSession.shared.data(for: restart)
+                guard let http = restartResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                musicPlaylistStatus = "App command permissions saved. Gateway restarted."
+            } catch {
+                musicPlaylistStatus = "Could not save app command permissions."
+            }
         }
     }
 }
@@ -1380,13 +1946,14 @@ final class NativeChatStore: ObservableObject {
         let id = "native-\(UUID().uuidString)"
         messages.append(NativeChatMessage(id: id, role: "user", content: content))
         isThinking = true
+        let outboundContent = nativeAppCommandInstruction(for: content)
         guard socket != nil else {
-            pendingMessages.append(PendingNativeChatMessage(id: id, content: content))
+            pendingMessages.append(PendingNativeChatMessage(id: id, content: outboundContent))
             status = "Connecting…"
             connect()
             return
         }
-        send(id: id, content: content)
+        send(id: id, content: outboundContent)
     }
 
     func sendSkillImported(_ skillName: String) {
@@ -1421,20 +1988,21 @@ final class NativeChatStore: ObservableObject {
         }
     }
 
-    func sendMedia(data: Data, filename: String, contentType: String, kind: String) {
+    func sendMedia(data: Data, filename: String, contentType: String, kind: String, content: String = "") {
         guard socket != nil else {
             status = "Connecting to Jame. Try the upload again in a moment."
             connect()
             return
         }
         let id = "\(kind)-\(UUID().uuidString)"
-        messages.append(NativeChatMessage(id: id, role: "user", content: "📎 \(filename)"))
+        let displayContent = content.isEmpty ? "📎 \(filename)" : "\(content)\n📎 \(filename)"
+        messages.append(NativeChatMessage(id: id, role: "user", content: displayContent))
         isThinking = true
         let envelope: [String: Any] = [
             "type": "media.send",
             "id": id,
             "payload": [
-                "content": "",
+                "content": content,
                 "data": data.base64EncodedString(),
                 "filename": filename,
                 "content_type": contentType,
@@ -1595,13 +2163,92 @@ private struct NativeFileSearchResponse: Codable {
 }
 
 private struct ChatComposerSuggestion: Identifiable {
-    enum Kind { case skill, file }
+    enum Kind { case app, skill, file }
     let id: String
     let kind: Kind
     let title: String
     let subtitle: String
     let insertion: String
-    var icon: String { kind == .skill ? "wand.and.stars" : "doc" }
+    var icon: String {
+        switch kind {
+        case .app: return "app.badge"
+        case .skill: return "wand.and.stars"
+        case .file: return "doc"
+        }
+    }
+}
+
+private struct PendingChatAttachment: Identifiable {
+    let id = UUID()
+    let data: Data
+    let filename: String
+    let contentType: String
+    let kind: String
+}
+
+private func installedMacAppNames() -> [String] {
+    let applicationDirectories = [
+        URL(fileURLWithPath: "/Applications", isDirectory: true),
+        URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
+    ]
+    var names = Set<String>()
+    for directory in applicationDirectories {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { continue }
+        for case let url as URL in enumerator where url.pathExtension == "app" {
+            names.insert(url.deletingPathExtension().lastPathComponent)
+            enumerator.skipDescendants()
+        }
+    }
+    return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+}
+
+private func desktopAppCommands() -> [ChatComposerSuggestion] {
+    installedMacAppNames().map { name in
+        let displayName = name == "Music" ? "Apple Music" : name
+        return ChatComposerSuggestion(
+            id: "app.\(name.lowercased())",
+            kind: .app,
+            title: displayName,
+            subtitle: name == "Music" ? "Open or create a playlist" : "Open this Mac app",
+            insertion: "@\(displayName) "
+        )
+    }
+}
+
+private func nativeAppCommandInstruction(for content: String) -> String {
+    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.hasPrefix("@") else { return content }
+    let unprefixed = String(trimmed.dropFirst())
+    let displayNames = installedMacAppNames().flatMap { $0 == "Music" ? [$0, "Apple Music"] : [$0] }
+    guard let matchedName = displayNames.sorted(by: { $0.count > $1.count }).first(where: {
+        unprefixed.lowercased() == $0.lowercased() || unprefixed.lowercased().hasPrefix($0.lowercased() + " ")
+    }) else { return content }
+    let appName = matchedName == "Apple Music" ? "Music" : matchedName
+
+    let command = String(unprefixed.dropFirst(matchedName.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    let lowered = command.lowercased()
+    if appName == "Music", (lowered.hasPrefix("create") || lowered.hasPrefix("make")), let playlistRange = lowered.range(of: "playlist") {
+        var playlistName = String(command[playlistRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        for namePrefix in ["named ", "called "] where playlistName.lowercased().hasPrefix(namePrefix) {
+            playlistName = String(playlistName.dropFirst(namePrefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        playlistName = playlistName.trimmingCharacters(in: CharacterSet(charactersIn: "\\\"' "))
+        if !playlistName.isEmpty {
+            return """
+            The user invoked the Music desktop app command. Create the playlist named \"\(playlistName)\" by calling mac_control with action=create_music_playlist and playlist_name=\"\(playlistName)\". Do not use run_applescript. If playlist permission is disabled, explain how to enable Allow Apple Music playlists in Desktop Settings.
+            """
+        }
+    }
+
+    let request = command.isEmpty ? "Open the app." : command
+    return """
+    The user invoked the Mac desktop app command @\(appName). Call mac_control with action=open_app, app=\"\(appName)\", and background=false. Then help with this request in that app: \(request). If opening apps is disabled, explain how to enable Allow opening Mac apps in Desktop Settings.
+    """
 }
 
 struct ChatView: View {
@@ -1617,6 +2264,8 @@ struct ChatView: View {
     @State private var recorder: AVAudioRecorder?
     @State private var recordingURL: URL?
     @State private var suggestions: [ChatComposerSuggestion] = []
+    @State private var appCommands: [ChatComposerSuggestion] = []
+    @State private var pendingAttachment: PendingChatAttachment?
 
     init(port: Int) {
         self.port = port
@@ -1631,12 +2280,16 @@ struct ChatView: View {
         guard !backgroundPath.isEmpty else { return nil }
         return NSImage(contentsOf: URL(fileURLWithPath: backgroundPath))
     }
+    private var isConnectingToJame: Bool {
+        chat.status != "Ready" && chat.messages.isEmpty && chat.lastError == nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Circle().fill(chat.status == "Ready" ? Color.green : Color.orange).frame(width: 7, height: 7)
-                Text("JAME // CHAT").font(.system(size: 13 * fontScale, weight: .bold, design: .monospaced))
+                Text("Jame.")
+                    .font(.system(size: 15 * fontScale, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
                 Spacer()
                 Text(chat.status.uppercased()).font(.system(size: 10 * fontScale, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
             }
@@ -1725,66 +2378,126 @@ struct ChatView: View {
                 .onChange(of: chat.messages.count) { _, _ in if let last = chat.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
             Divider().overlay(Color.white.opacity(0.12))
-            if !suggestions.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(suggestions) { suggestion in
-                        Button {
-                            applySuggestion(suggestion)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: suggestion.icon).frame(width: 16)
-                                Text(suggestion.title).font(.subheadline.weight(.medium))
-                                Text(suggestion.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 14).padding(.vertical, 7)
-                        }
-                        .buttonStyle(.plain)
+            if let attachment = pendingAttachment {
+                HStack(spacing: 8) {
+                    Image(systemName: attachment.kind == "image" ? "photo" : "paperclip")
+                        .foregroundStyle(accent)
+                    Text(attachment.filename)
+                        .lineLimit(1)
+                        .font(.caption)
+                    Text("Add a message, then send when ready")
+                        .lineLimit(1)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        pendingAttachment = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
                     }
+                    .buttonStyle(.borderless)
+                    .help("Remove attachment")
                 }
-                .background(theme.panel.opacity(0.96))
-                .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.12)) }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(theme.panel.opacity(0.92))
             }
-            HStack(alignment: .bottom) {
-                Button {
-                    chooseWorkspace()
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .help("Choose agent workspace")
-                .disabled(chat.isThinking)
+            ZStack(alignment: .bottomLeading) {
+                HStack(alignment: .bottom) {
+                    Button {
+                        chooseWorkspace()
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .help("Choose agent workspace")
+                    .disabled(chat.isThinking)
 
-                Button {
-                    uploadItem()
-                } label: {
-                    Image(systemName: "paperclip")
-                }
-                .help("Upload a file or workspace skill")
-                .disabled(chat.isThinking)
+                    Button {
+                        uploadItem()
+                    } label: {
+                        Image(systemName: "paperclip")
+                    }
+                    .help("Upload a file or workspace skill")
+                    .disabled(chat.isThinking)
 
-                Button {
-                    toggleRecording()
-                } label: {
-                    Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
-                        .foregroundStyle(isRecording ? Color.red : accent)
-                }
-                .help(isRecording ? "Stop and send recording" : "Record a voice message")
-                .disabled(chat.isThinking && !isRecording)
+                    Button {
+                        toggleRecording()
+                    } label: {
+                        Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
+                            .foregroundStyle(isRecording ? Color.red : accent)
+                    }
+                    .help(isRecording ? "Stop and send recording" : "Record a voice message")
+                    .disabled(chat.isThinking && !isRecording)
 
-                TextField("type a message…", text: $chat.draft, axis: .vertical)
-                    .font(.system(size: 14 * fontScale, design: .monospaced)).lineLimit(1...5)
-                    .textFieldStyle(.plain)
-                    .onChange(of: chat.draft) { _, value in updateSuggestions(for: value) }
-                Button("Send") { chat.send() }
-                    .buttonStyle(.borderedProminent).tint(accent)
-                    .keyboardShortcut(.defaultAction)
+                    TextField("type a message…", text: $chat.draft, axis: .vertical)
+                        .font(.system(size: 14 * fontScale, design: .monospaced)).lineLimit(1...5)
+                        .textFieldStyle(.plain)
+                        .onChange(of: chat.draft) { _, value in updateSuggestions(for: value) }
+                    Button("Send") { sendComposer() }
+                        .buttonStyle(.borderedProminent).tint(accent)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(14)
+
+                if !suggestions.isEmpty {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 3) {
+                            ForEach(suggestions) { suggestion in
+                                Button {
+                                    applySuggestion(suggestion)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: suggestion.icon).frame(width: 16)
+                                        Text(suggestion.title).font(.subheadline.weight(.medium))
+                                        Text(suggestion.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(width: 380, height: min(CGFloat(suggestions.count) * 38 + 10, 220))
+                    .background(theme.panel.opacity(0.98))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.14)))
+                    .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
+                    .offset(x: 56, y: -70)
+                    .zIndex(1)
+                }
             }
-            .padding(14)
             .background(theme.panel)
         }
         .background(chatBackground)
         .preferredColorScheme(theme.colorScheme)
-        .task { chat.startGatewayAndConnect() }
+        .overlay {
+            if isConnectingToJame {
+                jameLoadingScreen
+            }
+        }
+        .task {
+            appCommands = desktopAppCommands()
+            chat.startGatewayAndConnect()
+        }
+    }
+
+    private var jameLoadingScreen: some View {
+        ZStack {
+            chatBackground
+            VStack(spacing: 16) {
+                Text("Jame")
+                    .font(.system(size: 34 * fontScale, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(accent)
+                Text("Connecting to JameClaw on localhost…")
+                    .font(.system(size: 13 * fontScale, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(42)
+        }
     }
 
     private func updateSuggestions(for input: String) {
@@ -1798,6 +2511,12 @@ struct ChatView: View {
             return
         }
         let query = String(token.drop { $0 == " " || $0 == trigger }).lowercased()
+        let matchingAppItems = trigger == "@" ? appCommands.filter {
+            query.isEmpty || $0.title.lowercased().contains(query) || $0.subtitle.lowercased().contains(query)
+        } : []
+        if trigger == "@" {
+            suggestions = matchingAppItems
+        }
         Task {
             do {
                 let skillsData = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/skills")).0
@@ -1809,6 +2528,7 @@ struct ChatView: View {
                         ChatComposerSuggestion(id: skill.id, kind: .skill, title: skill.name, subtitle: skill.description.isEmpty ? "\(skill.source) skill" : skill.description, insertion: trigger == "/" ? "/\(skill.name) " : "@skill:\(skill.name) ")
                     }
                 if trigger == "@" {
+                    items.insert(contentsOf: matchingAppItems, at: 0)
                     let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
                     let fileData = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/files/search", queryItems: [URLQueryItem(name: "q", value: escaped), URLQueryItem(name: "limit", value: "8")])).0
                     let files = try JSONDecoder().decode(NativeFileSearchResponse.self, from: fileData).items
@@ -1819,7 +2539,8 @@ struct ChatView: View {
                 guard input == chat.draft else { return }
                 suggestions = items
             } catch {
-                suggestions = []
+                guard input == chat.draft else { return }
+                suggestions = matchingAppItems
             }
         }
     }
@@ -1854,10 +2575,34 @@ struct ChatView: View {
             let type = UTType(filenameExtension: url.pathExtension)
             let contentType = type?.preferredMIMEType ?? "application/octet-stream"
             let kind = type?.conforms(to: .image) == true ? "image" : "file"
-            chat.sendMedia(data: data, filename: url.lastPathComponent, contentType: contentType, kind: kind)
+            pendingAttachment = PendingChatAttachment(
+                data: data,
+                filename: url.lastPathComponent,
+                contentType: contentType,
+                kind: kind
+            )
         } catch {
             chat.status = "Could not read that file."
         }
+    }
+
+    private func sendComposer() {
+        let content = chat.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty || pendingAttachment != nil else { return }
+        guard let attachment = pendingAttachment else {
+            chat.send()
+            return
+        }
+
+        chat.draft = ""
+        pendingAttachment = nil
+        chat.sendMedia(
+            data: attachment.data,
+            filename: attachment.filename,
+            contentType: attachment.contentType,
+            kind: attachment.kind,
+            content: content
+        )
     }
 
     private func uploadItem() {

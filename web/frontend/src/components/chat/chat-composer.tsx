@@ -9,7 +9,7 @@ import {
   IconSparkles,
   IconTools,
 } from "@tabler/icons-react"
-import type { KeyboardEvent } from "react"
+import type { DragEvent, KeyboardEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
@@ -95,7 +95,9 @@ export function ChatComposer({
   const { t } = useTranslation()
   const canInput = isConnected && hasDefaultModel
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const dragDepthRef = useRef(0)
   const [caretPosition, setCaretPosition] = useState(0)
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [mentionItems, setMentionItems] = useState<MentionItem[]>([])
   const [isMentionMenuOpen, setIsMentionMenuOpen] = useState(false)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
@@ -419,9 +421,66 @@ export function ChatComposer({
     }
   }
 
+  const hasFiles = (event: DragEvent<HTMLDivElement>) =>
+    Array.from(event.dataTransfer.types).includes("Files")
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return
+    event.preventDefault()
+    dragDepthRef.current += 1
+    if (canInput && !isUploading && onFileSelect) {
+      setIsDraggingFiles(true)
+    }
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = canInput && !isUploading ? "copy" : "none"
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) {
+      setIsDraggingFiles(false)
+    }
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return
+    event.preventDefault()
+    dragDepthRef.current = 0
+    setIsDraggingFiles(false)
+    if (!canInput || isUploading || !onFileSelect) return
+    if (event.dataTransfer.files.length > 0) {
+      onFileSelect(event.dataTransfer.files)
+    }
+  }
+
   return (
     <div className="bg-background shrink-0 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8 md:pb-8 lg:px-24 xl:px-48">
-      <div className="bg-card border-border/80 relative mx-auto flex max-w-[1000px] flex-col rounded-2xl border p-3 shadow-md">
+      <div
+        className={cn(
+          "bg-card border-border/80 relative mx-auto flex max-w-[1000px] flex-col rounded-2xl border p-3 shadow-md",
+          isDraggingFiles && "border-primary ring-primary/20 ring-4",
+        )}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {isDraggingFiles && (
+          <div className="bg-background/95 absolute inset-0 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary p-4 text-center">
+            <div>
+              <IconPaperclip className="text-primary mx-auto mb-2 size-5" />
+              <p className="text-sm font-medium">{t("chat.dropFiles")}</p>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {t("chat.dropFilesHint")}
+              </p>
+            </div>
+          </div>
+        )}
         {isMentionMenuOpen && activeMention && (
           <div className="bg-popover border-border absolute right-3 bottom-[calc(100%+0.5rem)] left-3 z-20 overflow-hidden rounded-lg border shadow-lg">
             <div className="border-border bg-muted/50 flex items-center justify-between border-b px-3 py-2 text-xs">
@@ -564,8 +623,7 @@ export function ChatComposer({
             )}
             {!disabledReason && (
               <p className="text-muted-foreground text-xs">
-                Type / to call a skill, or @ for files, tools, skills, and
-                automations.
+                {t("chat.composerHint")}
               </p>
             )}
           </div>

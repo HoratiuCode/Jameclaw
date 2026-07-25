@@ -18,13 +18,14 @@ func testMacControlTool(calls *[]macCommandCall) *MacControlTool {
 	return &MacControlTool{
 		goos: "darwin",
 		cfg: config.MacControlToolsConfig{
-			ToolConfig:        config.ToolConfig{Enabled: true},
-			AllowOpenApps:     true,
-			AllowUIAutomation: true,
-			AllowTyping:       true,
-			AllowShortcuts:    true,
-			AllowScreenshots:  true,
-			AllowAppleScript:  false,
+			ToolConfig:          config.ToolConfig{Enabled: true},
+			AllowOpenApps:       true,
+			AllowUIAutomation:   true,
+			AllowTyping:         true,
+			AllowShortcuts:      true,
+			AllowScreenshots:    true,
+			AllowAppleScript:    false,
+			AllowMusicPlaylists: true,
 		},
 		run: func(_ context.Context, command string, args ...string) (string, error) {
 			*calls = append(*calls, macCommandCall{command: command, args: append([]string{}, args...)})
@@ -152,6 +153,43 @@ func TestMacControlToolRunShortcut(t *testing.T) {
 		t.Fatalf("Execute() error = %v", result.Err)
 	}
 	assertMacCommand(t, calls, "shortcuts", []string{"run", "Morning Setup"})
+}
+
+func TestMacControlToolCreateMusicPlaylist(t *testing.T) {
+	var calls []macCommandCall
+	tool := testMacControlTool(&calls)
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"action":        "create_music_playlist",
+		"playlist_name": "Road Trip",
+	})
+	if result.IsError {
+		t.Fatalf("Execute() error = %v", result.Err)
+	}
+	assertMacCommand(t, calls, "osascript", []string{"-e", `tell application "Music"
+	if exists user playlist "Road Trip" then
+		return "Apple Music playlist already exists: " & "Road Trip"
+	end if
+	make new user playlist with properties {name:"Road Trip"}
+	return "Created Apple Music playlist: " & "Road Trip"
+end tell`})
+}
+
+func TestMacControlToolBlocksMusicPlaylistsUntilEnabled(t *testing.T) {
+	var calls []macCommandCall
+	tool := testMacControlTool(&calls)
+	tool.cfg.AllowMusicPlaylists = false
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"action":        "create_music_playlist",
+		"playlist_name": "Road Trip",
+	})
+	if !result.IsError || !strings.Contains(result.ForLLM, "allow_music_playlists") {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("playlist creation ran unexpectedly: %#v", calls)
+	}
 }
 
 func TestMacControlToolKeyboardShortcut(t *testing.T) {

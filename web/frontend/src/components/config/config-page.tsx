@@ -18,6 +18,7 @@ import {
   AgentDefaultsSection,
   ChannelsSection,
   CronSection,
+  DataStorageSection,
   DesignSection,
   DevicesSection,
   ExecSection,
@@ -257,6 +258,7 @@ export function ConfigPage() {
             exec: execConfigPatch,
             mac_control: {
               allow_open_apps: form.macControlAllowOpenApps,
+              allow_music_playlists: form.macControlAllowMusicPlaylists,
             },
           },
           heartbeat: {
@@ -349,6 +351,8 @@ export function ConfigPage() {
                   {t("pages.config.unsaved_changes")}
                 </div>
               )}
+
+              <DataStorageSection workspace={form.workspace} />
 
               <AgentDefaultsSection form={form} onFieldChange={updateField} />
 
