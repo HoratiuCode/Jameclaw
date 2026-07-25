@@ -4,6 +4,10 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension Notification.Name {
+    static let jameclawNewChat = Notification.Name("jameclaw.new-chat")
+}
+
 private func authenticatedConsoleURL(
     port: Int,
     path: String = "/",
@@ -62,6 +66,15 @@ final class HomeAppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        revealMainWindow()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        revealMainWindow()
+        return true
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         var request = URLRequest(url: authenticatedConsoleURL(port: configuredLauncherPort(), path: "/api/system/quit"))
         request.httpMethod = "POST"
@@ -69,6 +82,15 @@ final class HomeAppDelegate: NSObject, NSApplicationDelegate {
         URLSession.shared.dataTask(with: request) { _, _, _ in completed.signal() }.resume()
         _ = completed.wait(timeout: .now() + 0.6)
         return .terminateNow
+    }
+
+    private func revealMainWindow() {
+        DispatchQueue.main.async {
+            guard let window = NSApp.windows.first else { return }
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }
 
@@ -216,13 +238,39 @@ final class LauncherSettingsStore: ObservableObject {
 @main
 struct JameClawHomeApp: App {
     @NSApplicationDelegateAdaptor(HomeAppDelegate.self) private var appDelegate
+    @State private var selectedSection: DesktopSection? = .chat
 
     var body: some Scene {
-        WindowGroup { JameRootView() }
+        WindowGroup { JameRootView(selectedSection: $selectedSection) }
             // A content-sized window disables the standard macOS full-screen
             // control. Keep the desktop window resizable so it can enter
             // full screen from the title bar, the toolbar, or ⌃⌘F.
             .windowResizability(.automatic)
+            .commands {
+                CommandGroup(after: .newItem) {
+                    Button("New Chat") {
+                        selectedSection = .chat
+                        NotificationCenter.default.post(name: .jameclawNewChat, object: nil)
+                    }
+                    .keyboardShortcut("n", modifiers: [.command])
+                }
+
+                CommandMenu("Automations") {
+                    Button("Show Automations") {
+                        selectedSection = .automations
+                    }
+                    .keyboardShortcut("a", modifiers: [.command, .option])
+                }
+
+                CommandMenu("View") {
+                    ForEach(DesktopSection.allCases) { section in
+                        Button(section.title) {
+                            selectedSection = section
+                        }
+                        .keyboardShortcut(section.menuShortcut, modifiers: [.command, .option])
+                    }
+                }
+            }
     }
 }
 
@@ -230,7 +278,7 @@ struct JameRootView: View {
     @StateObject private var settings = LauncherSettingsStore()
     // The native launcher is a chat app first. Keep it selected on launch,
     // while retaining a persistent, desktop-native list of supporting views.
-    @State private var selectedSection: DesktopSection? = .chat
+    @Binding var selectedSection: DesktopSection?
 
     var body: some View {
         NavigationSplitView {
@@ -265,7 +313,7 @@ struct JameRootView: View {
     }
 }
 
-private enum DesktopSection: String, CaseIterable, Identifiable {
+enum DesktopSection: String, CaseIterable, Identifiable {
     case chat
     case artifacts
     case skills
@@ -285,6 +333,18 @@ private enum DesktopSection: String, CaseIterable, Identifiable {
         case .artifacts: return "shippingbox.fill"
         case .skills: return "wand.and.stars"
         case .settings: return "gearshape"
+        }
+    }
+
+    var menuShortcut: KeyEquivalent {
+        switch self {
+        case .chat: return "1"
+        case .artifacts: return "2"
+        case .skills: return "3"
+        case .sessions: return "4"
+        case .automations: return "5"
+        case .connectors: return "6"
+        case .settings: return ","
         }
     }
 }
@@ -1878,6 +1938,15 @@ final class NativeChatStore: ObservableObject {
 
     func dismissError() { lastError = nil }
 
+    func startNewChat() {
+        messages.removeAll()
+        pendingMessages.removeAll()
+        draft = ""
+        isThinking = false
+        lastError = nil
+        status = socket == nil ? "Connecting…" : "Ready"
+    }
+
     func setWorkspace(_ workspaceURL: URL) {
         let workspacePath = workspaceURL.standardizedFileURL.path
         Task {
@@ -2479,6 +2548,9 @@ struct ChatView: View {
         .task {
             appCommands = desktopAppCommands()
             chat.startGatewayAndConnect()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawNewChat)) { _ in
+            chat.startNewChat()
         }
     }
 

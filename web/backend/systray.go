@@ -40,6 +40,8 @@ func requestLauncherQuit() {
 
 // onReady is called when the system tray is ready
 func onReady() {
+	installDesktopMenu()
+
 	// A template icon lets macOS choose the correct foreground automatically:
 	// dark on light menu bars and white on dark menu bars. The source artwork is
 	// used as an alpha mask by AppKit, so it stays legible over wallpaper too.
