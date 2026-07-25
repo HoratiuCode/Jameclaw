@@ -116,11 +116,15 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		mainHuman = summarizeHuman(mainOverride.Human)
 	}
+	mainName := "Main"
+	if strings.TrimSpace(mainHuman.AgentName) != "" {
+		mainName = strings.TrimSpace(mainHuman.AgentName)
+	}
 
 	agents := []agentSummary{
 		{
 			ID:             "main",
-			Name:           "Main",
+			Name:           mainName,
 			Default:        listDefaultID == "" || listDefaultID == "main",
 			Workspace:      cfg.Agents.Defaults.Workspace,
 			Model:          mainModel,
@@ -369,6 +373,7 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model     string `json:"model"`
 		Workspace string `json:"workspace"`
 		ParentID  string `json:"parent_id"`
+		ManagedByMain *bool `json:"managed_by_main"`
 		Human     *human `json:"human"`
 	}
 	var req createAgentRequest
@@ -382,9 +387,6 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	req.Model = strings.TrimSpace(req.Model)
 	req.Workspace = strings.TrimSpace(req.Workspace)
 	req.ParentID = strings.TrimSpace(req.ParentID)
-	if req.ParentID == "" {
-		req.ParentID = "main"
-	}
 	if req.ID == "" {
 		http.Error(w, "missing agent id", http.StatusBadRequest)
 		return
@@ -431,9 +433,17 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.Agents.List = append(cfg.Agents.List, agent)
 
-	if err := allowSubagent(cfg, req.ParentID, req.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	// Keep the existing API behavior (new agents are manageable by main) unless
+	// a caller explicitly creates an independent team member.
+	managedByMain := req.ManagedByMain == nil || *req.ManagedByMain
+	if managedByMain {
+		if req.ParentID == "" {
+			req.ParentID = "main"
+		}
+		if err := allowSubagent(cfg, req.ParentID, req.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {

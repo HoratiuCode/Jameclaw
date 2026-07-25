@@ -316,7 +316,7 @@ function AgentPanels({
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div>
-            <div className="text-muted-foreground mb-1 text-xs">Default name</div>
+            <div className="text-muted-foreground mb-1 text-xs">Agent name</div>
             <Input
               value={humanAgentName}
               onChange={(event) => setHumanAgentName(event.target.value)}
@@ -384,7 +384,7 @@ function AgentPanels({
               })
             }
           >
-            Save discussion style
+            Save agent name & discussion style
           </Button>
         </CardContent>
       </Card>

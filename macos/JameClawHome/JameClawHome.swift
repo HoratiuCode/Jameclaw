@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 extension Notification.Name {
     static let jameclawNewChat = Notification.Name("jameclaw.new-chat")
+    static let jameclawHomeNavigation = Notification.Name("com.jameclaw.home.navigate")
 }
 
 private func authenticatedConsoleURL(
@@ -292,6 +293,8 @@ struct JameRootView: View {
             switch selectedSection ?? .chat {
             case .chat:
                 ChatView(port: Int(settings.port) ?? 18800)
+            case .agent:
+                AgentManagerView(port: Int(settings.port) ?? 18800)
             case .sessions:
                 SessionsView(port: Int(settings.port) ?? 18800)
             case .automations:
@@ -307,6 +310,20 @@ struct JameRootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .onReceive(
+            DistributedNotificationCenter.default().publisher(for: .jameclawHomeNavigation)
+        ) { notification in
+            guard let sectionName = notification.userInfo?["section"] as? String,
+                  let section = DesktopSection(rawValue: sectionName) else { return }
+            selectedSection = section
+            if notification.userInfo?["new_chat"] as? Bool == true {
+                // Defer until the chat view is mounted when the launcher has
+                // just opened Jame, while immediately clearing an existing chat.
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .jameclawNewChat, object: nil)
+                }
+            }
+        }
         // Do not impose an application-level minimum or fixed content size.
         // This lets people size the Jame window however they prefer, including
         // narrow and compact layouts managed by macOS.
@@ -315,6 +332,7 @@ struct JameRootView: View {
 
 enum DesktopSection: String, CaseIterable, Identifiable {
     case chat
+    case agent
     case artifacts
     case skills
     case sessions
@@ -327,6 +345,7 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .chat: return "message.fill"
+        case .agent: return "sparkles"
         case .sessions: return "clock.arrow.circlepath"
         case .automations: return "calendar.badge.clock"
         case .connectors: return "point.3.connected.trianglepath.dotted"
@@ -339,11 +358,12 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     var menuShortcut: KeyEquivalent {
         switch self {
         case .chat: return "1"
-        case .artifacts: return "2"
-        case .skills: return "3"
-        case .sessions: return "4"
-        case .automations: return "5"
-        case .connectors: return "6"
+        case .agent: return "2"
+        case .artifacts: return "3"
+        case .skills: return "4"
+        case .sessions: return "5"
+        case .automations: return "6"
+        case .connectors: return "7"
         case .settings: return ","
         }
     }
@@ -1483,6 +1503,548 @@ struct HomeView: View {
 
 }
 
+private struct NativeAgentHuman: Codable {
+    let agentName: String?
+    let persona: String?
+    let tone: String?
+    let discussionMode: String?
+    let memoryNotes: String?
+    let statusStyle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case agentName = "agent_name"
+        case persona, tone
+        case discussionMode = "discussion_mode"
+        case memoryNotes = "memory_notes"
+        case statusStyle = "status_style"
+    }
+}
+
+private struct NativeAgentSummary: Codable, Identifiable {
+    let id: String
+    let name: String
+    let isDefault: Bool
+    let workspace: String
+    let model: String
+    let skills: [String]?
+    let subagents: [String]?
+    let human: NativeAgentHuman?
+    let sessionCount: Int?
+    let messageCount: Int?
+    let toolCalls: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, workspace, model, skills, subagents, human
+        case isDefault = "default"
+        case sessionCount = "session_count"
+        case messageCount = "message_count"
+        case toolCalls = "tool_calls"
+    }
+}
+
+private struct NativeAgentsResponse: Codable {
+    let agents: [NativeAgentSummary]
+}
+
+private struct NativeCreateAgentRequest: Encodable {
+    let id: String
+    let name: String
+    let workspace: String
+    let managedByMain: Bool
+    let parentID: String?
+    let human: NativeCreateAgentHuman
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, workspace, human
+        case managedByMain = "managed_by_main"
+        case parentID = "parent_id"
+    }
+}
+
+private struct NativeCreateAgentHuman: Encodable {
+    let agentName: String
+    let persona: String
+
+    enum CodingKeys: String, CodingKey {
+        case agentName = "agent_name"
+        case persona
+    }
+}
+
+private struct NativeLocalAgent: Identifiable {
+    let preset: TeamAgentPreset
+    let location: String
+
+    var id: String { preset.id }
+    var title: String { preset.title }
+}
+
+private func detectedLocalAgents() -> [NativeLocalAgent] {
+    let fileManager = FileManager.default
+    let pathDirectories = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+        .split(separator: ":")
+        .map { String($0) }
+    let applicationDirectories = [
+        URL(fileURLWithPath: "/Applications", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
+    ]
+    let candidates: [(TeamAgentPreset, [String], [String])] = [
+        (.codex, ["codex"], ["Codex.app", "ChatGPT.app"]),
+        (.kimi, ["kimi", "kimi-code"], ["Kimi.app"]),
+        (.claudeCode, ["claude"], ["Claude.app"]),
+        (.hermes, ["hermes"], ["Hermes.app"]),
+    ]
+
+    return candidates.compactMap { preset, commands, applications in
+        if let commandPath = commands.lazy.compactMap({ command in
+            pathDirectories
+                .map { URL(fileURLWithPath: $0).appendingPathComponent(command).path }
+                .first(where: { fileManager.isExecutableFile(atPath: $0) })
+        }).first {
+            return NativeLocalAgent(preset: preset, location: commandPath)
+        }
+        if let appPath = applicationDirectories.lazy.compactMap({ directory in
+            applications
+                .map { directory.appendingPathComponent($0).path }
+                .first(where: { fileManager.fileExists(atPath: $0) })
+        }).first {
+            return NativeLocalAgent(preset: preset, location: appPath)
+        }
+        return nil
+    }
+}
+
+private struct NativeUpdateAgentRequest: Encodable {
+    let human: NativeUpdateAgentHuman
+}
+
+private struct NativeUpdateAgentHuman: Encodable {
+    let agentName: String
+    let persona: String
+    let tone: String
+    let discussionMode: String
+    let memoryNotes: String
+    let statusStyle: String
+
+    enum CodingKeys: String, CodingKey {
+        case agentName = "agent_name"
+        case persona, tone
+        case discussionMode = "discussion_mode"
+        case memoryNotes = "memory_notes"
+        case statusStyle = "status_style"
+    }
+}
+
+@MainActor
+private final class NativeAgentStore: ObservableObject {
+    @Published var agents: [NativeAgentSummary] = []
+    @Published var localAgents: [NativeLocalAgent] = []
+    @Published var isLoading = false
+    @Published var error = ""
+    @Published var isCreating = false
+
+    private let port: Int
+
+    init(port: Int) { self.port = port }
+
+    func discoverLocalAgents() {
+        localAgents = detectedLocalAgents()
+    }
+
+    func load() async {
+        discoverLocalAgents()
+        isLoading = true
+        error = ""
+        defer { isLoading = false }
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                from: authenticatedConsoleURL(port: port, path: "/api/agents")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            agents = try JSONDecoder().decode(NativeAgentsResponse.self, from: data).agents
+        } catch {
+            self.error = "Could not load agents. Start JameClaw and try again."
+        }
+    }
+
+    func createAgent(id: String, name: String, workspace: String, persona: String, parentID: String?, managedByMain: Bool) async -> Bool {
+        let cleanID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else {
+            error = "Enter an agent ID."
+            return false
+        }
+        isCreating = true
+        error = ""
+        defer { isCreating = false }
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/agents", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(
+                NativeCreateAgentRequest(
+                    id: cleanID,
+                    name: cleanName.isEmpty ? cleanID : cleanName,
+                    workspace: workspace.trimmingCharacters(in: .whitespacesAndNewlines),
+                    managedByMain: managedByMain,
+                    parentID: parentID,
+                    human: NativeCreateAgentHuman(agentName: cleanName.isEmpty ? cleanID : cleanName, persona: persona.trimmingCharacters(in: .whitespacesAndNewlines))
+                )
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "Could not create agent."
+                throw NSError(domain: "JameClaw", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+            await load()
+            return true
+        } catch {
+            self.error = error.localizedDescription.isEmpty ? "Could not create agent." : error.localizedDescription
+            return false
+        }
+    }
+
+    func rename(_ agent: NativeAgentSummary, to name: String) async -> Bool {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            error = "Enter an agent name."
+            return false
+        }
+        error = ""
+        do {
+            var request = authenticatedConsoleRequest(
+                port: port,
+                path: "/api/agents/\(agent.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agent.id)",
+                method: "PATCH"
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(
+                NativeUpdateAgentRequest(
+                    human: NativeUpdateAgentHuman(
+                        agentName: cleanName,
+                        persona: agent.human?.persona ?? "",
+                        tone: agent.human?.tone ?? "",
+                        discussionMode: agent.human?.discussionMode ?? "",
+                        memoryNotes: agent.human?.memoryNotes ?? "",
+                        statusStyle: agent.human?.statusStyle ?? ""
+                    )
+                )
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "Could not save agent name."
+                throw NSError(domain: "JameClaw", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+            await load()
+            return true
+        } catch {
+            self.error = error.localizedDescription.isEmpty ? "Could not save agent name." : error.localizedDescription
+            return false
+        }
+    }
+}
+
+private struct AgentManagerView: View {
+    @StateObject private var store: NativeAgentStore
+    @State private var selectedID = ""
+    @State private var showingCreate = false
+    @State private var creationMode: AgentCreationMode = .team
+
+    init(port: Int) { _store = StateObject(wrappedValue: NativeAgentStore(port: port)) }
+
+    private var selected: NativeAgentSummary? {
+        store.agents.first(where: { $0.id == selectedID }) ?? store.agents.first
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Agents").font(.title3.weight(.bold))
+                    Spacer()
+                    Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Refresh agents")
+                }
+                .padding(16)
+                Divider()
+
+                if store.isLoading && store.agents.isEmpty {
+                    ProgressView("Loading agents…").padding()
+                } else if store.agents.isEmpty {
+                    ContentUnavailableView("No agents found", systemImage: "sparkles")
+                } else {
+                    List(store.agents, selection: $selectedID) { agent in
+                        HStack(spacing: 10) {
+                            Image(systemName: agent.isDefault ? "star.fill" : "sparkles")
+                                .foregroundStyle(agent.isDefault ? .yellow : .blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(agent.name.isEmpty ? agent.id : agent.name).font(.headline)
+                                Text(agent.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                        }
+                        .tag(agent.id)
+                    }
+                }
+            }
+            .frame(minWidth: 240, idealWidth: 280, maxWidth: 320)
+
+            Divider()
+
+            Group {
+                if let agent = selected {
+                    AgentDetailView(
+                        agent: agent,
+                        rename: { name in Task { _ = await store.rename(agent, to: name) } },
+                        addTeamAgent: {
+                            creationMode = .team
+                            showingCreate = true
+                        },
+                        spawnSubagent: {
+                            creationMode = .subagent
+                            showingCreate = true
+                        }
+                    )
+                    .id(agent.id)
+                } else {
+                    ContentUnavailableView("Choose an agent", systemImage: "person.3")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .overlay(alignment: .bottomLeading) {
+            if !store.error.isEmpty {
+                Text(store.error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(10)
+            }
+        }
+        .task {
+            await store.load()
+            if selectedID.isEmpty { selectedID = store.agents.first?.id ?? "" }
+        }
+        .sheet(isPresented: $showingCreate) {
+            CreateAgentView(mode: creationMode, parent: selected, store: store) { newID in
+                selectedID = newID
+                showingCreate = false
+            }
+        }
+    }
+}
+
+private struct AgentDetailView: View {
+    let agent: NativeAgentSummary
+    let rename: (String) -> Void
+    let addTeamAgent: () -> Void
+    let spawnSubagent: () -> Void
+    @State private var displayName: String
+
+    init(agent: NativeAgentSummary, rename: @escaping (String) -> Void, addTeamAgent: @escaping () -> Void, spawnSubagent: @escaping () -> Void) {
+        self.agent = agent
+        self.rename = rename
+        self.addTeamAgent = addTeamAgent
+        self.spawnSubagent = spawnSubagent
+        _displayName = State(initialValue: agent.name.isEmpty ? agent.id : agent.name)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 8) {
+                            TextField("Agent name", text: $displayName)
+                                .font(.title2.weight(.bold))
+                                .textFieldStyle(.plain)
+                            if agent.isDefault { Text("Default").font(.caption.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 3).background(.yellow.opacity(0.2)).clipShape(Capsule()) }
+                        }
+                        HStack(spacing: 8) {
+                            Text(agent.id).font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                            Button("Save name") { rename(displayName) }
+                                .controlSize(.small)
+                                .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName == agent.name)
+                        }
+                    }
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Button("Add team agent", action: addTeamAgent)
+                            .buttonStyle(.bordered)
+                        Button("Spawn subagent", action: spawnSubagent)
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+
+                GroupBox("Configuration") {
+                    Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
+                        AgentField("Model", agent.model.isEmpty ? "Inherited default" : agent.model)
+                        AgentField("Workspace", agent.workspace.isEmpty ? "Default workspace" : agent.workspace)
+                        AgentField("Persona", agent.human?.persona?.isEmpty == false ? agent.human!.persona! : "Not set")
+                        AgentField("Tone", agent.human?.tone?.isEmpty == false ? agent.human!.tone! : "Not set")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Capabilities") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Skills: \((agent.skills ?? []).isEmpty ? "None configured" : (agent.skills ?? []).joined(separator: ", "))")
+                        Text("Delegated agents: \((agent.subagents ?? []).isEmpty ? "None configured" : (agent.subagents ?? []).joined(separator: ", "))")
+                    }
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack(spacing: 28) {
+                    AgentMetric("Sessions", agent.sessionCount ?? 0)
+                    AgentMetric("Messages", agent.messageCount ?? 0)
+                    AgentMetric("Tool calls", agent.toolCalls ?? 0)
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+private func AgentField(_ label: String, _ value: String) -> some View {
+    Group {
+        Text(label).foregroundStyle(.secondary)
+        Text(value).textSelection(.enabled)
+    }
+}
+
+private func AgentMetric(_ label: String, _ value: Int) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+        Text(label).font(.caption).foregroundStyle(.secondary)
+        Text("\(value)").font(.title3.weight(.semibold))
+    }
+}
+
+private enum AgentCreationMode {
+    case team
+    case subagent
+}
+
+private struct CreateAgentView: View {
+    let mode: AgentCreationMode
+    let parent: NativeAgentSummary?
+    @ObservedObject var store: NativeAgentStore
+    let created: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var id = ""
+    @State private var name = ""
+    @State private var workspace = ""
+    @State private var persona = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(mode == .team ? "Add team agent" : "Spawn subagent").font(.title2.weight(.bold))
+            Text(mode == .team
+                ? "Create an independent full agent that appears in the JameClaw team directory. It is not nested as a subagent."
+                : "Create an agent managed by \(parent?.name.isEmpty == false ? parent!.name : parent?.id ?? "main"). It can be delegated work by its parent.")
+                .foregroundStyle(.secondary)
+            if mode == .team {
+                HStack {
+                    Text("Detected on this Mac").font(.headline)
+                    Spacer()
+                    Button { store.discoverLocalAgents() } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Scan installed agent tools again")
+                }
+                if store.localAgents.isEmpty {
+                    Text("No supported agent tools were found. Install a CLI or desktop app, then refresh this list.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.localAgents) { localAgent in
+                        Button {
+                            apply(localAgent.preset)
+                        } label: {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(localAgent.title).fontWeight(.semibold)
+                                    Text(localAgent.location).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                Text("Use").foregroundStyle(.tint)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            if mode == .team {
+                HStack(spacing: 8) {
+                Text("Quick profiles:").font(.caption).foregroundStyle(.secondary)
+                ForEach(TeamAgentPreset.allCases) { preset in
+                    Button(preset.title) {
+                        apply(preset)
+                    }
+                    .controlSize(.small)
+                }
+                }
+            }
+            TextField("Agent ID (for example, researcher)", text: $id)
+            TextField("Display name", text: $name)
+            TextField("Workspace (optional)", text: $workspace)
+            TextField("Role or persona (optional)", text: $persona, axis: .vertical)
+                .lineLimit(2...4)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(store.isCreating ? "Creating…" : (mode == .team ? "Create team agent" : "Spawn subagent")) {
+                    Task {
+                        let didCreate = await store.createAgent(
+                            id: id,
+                            name: name,
+                            workspace: workspace,
+                            persona: persona,
+                            parentID: mode == .subagent ? (parent?.id ?? "main") : nil,
+                            managedByMain: mode == .subagent
+                        )
+                        if didCreate { created(id.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.isCreating || id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+    }
+
+    private func apply(_ preset: TeamAgentPreset) {
+        id = preset.id
+        name = preset.title
+        persona = preset.persona
+    }
+}
+
+private enum TeamAgentPreset: String, CaseIterable, Identifiable {
+    case codex, kimi, claudeCode = "claude-code", hermes
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .codex: return "Codex"
+        case .kimi: return "Kimi"
+        case .claudeCode: return "Claude Code"
+        case .hermes: return "Hermes"
+        }
+    }
+    var persona: String {
+        switch self {
+        case .codex: return "Implementation-focused coding teammate."
+        case .kimi: return "Research and long-context analysis teammate."
+        case .claudeCode: return "Code review and software engineering teammate."
+        case .hermes: return "Independent planning and execution teammate."
+        }
+    }
+}
+
 private struct NativeModelInfo: Codable, Identifiable {
     let modelName: String
     let model: String
@@ -1823,6 +2385,7 @@ private enum SkillUploadError: LocalizedError {
 final class NativeChatStore: ObservableObject {
     @Published var messages: [NativeChatMessage] = []
     @Published var draft = ""
+    @Published var agentName = "Jame"
     @Published var status = "Connecting…"
     @Published var isThinking = false
     @Published var lastError: NativeAppError?
@@ -1901,6 +2464,7 @@ final class NativeChatStore: ObservableObject {
                 try await task.send(.string(pingText))
                 status = "Ready"
                 lastError = nil
+                loadDisplayName()
                 reconnectAttempt = 0
                 flushPendingMessages()
                 receive()
@@ -1937,6 +2501,18 @@ final class NativeChatStore: ObservableObject {
     }
 
     func dismissError() { lastError = nil }
+
+    private func loadDisplayName() {
+        Task {
+            guard let data = try? await URLSession.shared.data(
+                from: authenticatedConsoleURL(port: port, path: "/api/agents")
+            ).0,
+            let agents = try? JSONDecoder().decode(NativeAgentsResponse.self, from: data).agents,
+            let main = agents.first(where: { $0.id == "main" }),
+            !main.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            agentName = main.name
+        }
+    }
 
     func startNewChat() {
         messages.removeAll()
@@ -2208,6 +2784,154 @@ private enum NativeGatewayError: LocalizedError {
     }
 }
 
+@MainActor
+private final class NativeTerminalStore: ObservableObject {
+    @Published var output = ""
+    @Published var command = ""
+    @Published var isRunning = false
+
+    private var process: Process?
+    private var inputPipe: Pipe?
+    private var outputPipe: Pipe?
+
+    func start() {
+        guard process == nil else { return }
+
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let process = Process()
+        let input = Pipe()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-l"]
+        process.currentDirectoryURL = jameWorkspaceURL()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = output
+        process.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.process = nil
+                self?.inputPipe = nil
+                self?.outputPipe?.fileHandleForReading.readabilityHandler = nil
+                self?.outputPipe = nil
+                self?.isRunning = false
+            }
+        }
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async {
+                self?.append(text)
+            }
+        }
+
+        do {
+            try process.run()
+            self.process = process
+            inputPipe = input
+            outputPipe = output
+            isRunning = true
+            append("JameClaw terminal — \(jameWorkspaceURL().path)\n")
+        } catch {
+            append("Could not start terminal: \(error.localizedDescription)\n")
+        }
+    }
+
+    func send() {
+        let value = command.trimmingCharacters(in: .newlines)
+        guard !value.isEmpty else { return }
+        start()
+        guard let data = (value + "\n").data(using: .utf8) else { return }
+        append("$ \(value)\n")
+        inputPipe?.fileHandleForWriting.write(data)
+        command = ""
+    }
+
+    func clear() { output = "" }
+
+    func stop() {
+        process?.terminate()
+    }
+
+    private func append(_ text: String) {
+        output += text
+        // Keep the drawer responsive when a command emits a lot of output.
+        if output.count > 160_000 {
+            output = String(output.suffix(120_000))
+        }
+    }
+
+    deinit {
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
+        process?.terminate()
+    }
+}
+
+private struct NativeTerminalPanel: View {
+    @ObservedObject var terminal: NativeTerminalStore
+    let theme: LauncherTheme
+    let accent: Color
+    let fontScale: Double
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal.fill")
+                    .foregroundStyle(accent)
+                Text("Terminal")
+                    .font(.headline)
+                Spacer()
+                Button { terminal.clear() } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Clear terminal output")
+                Button { terminal.stop() } label: {
+                    Image(systemName: "stop.fill")
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!terminal.isRunning)
+                .help("Stop terminal")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(theme.panel)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(terminal.output.isEmpty ? "Terminal ready. Enter a command below." : terminal.output)
+                        .font(.system(size: 12 * fontScale, design: .monospaced))
+                        .foregroundStyle(theme.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .id("terminal-output")
+                        .padding(14)
+                }
+                .onChange(of: terminal.output) { _, _ in
+                    proxy.scrollTo("terminal-output", anchor: .bottom)
+                }
+            }
+            .background(theme.background)
+
+            HStack(spacing: 8) {
+                Text("$")
+                    .font(.system(size: 14 * fontScale, weight: .bold, design: .monospaced))
+                    .foregroundStyle(accent)
+                TextField("Run a command", text: $terminal.command)
+                    .font(.system(size: 13 * fontScale, design: .monospaced))
+                    .textFieldStyle(.plain)
+                    .onSubmit { terminal.send() }
+                Button("Run") { terminal.send() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent)
+            }
+            .padding(12)
+            .background(theme.panel)
+        }
+        .onAppear { terminal.start() }
+    }
+}
+
 private struct NativeSkillReference: Codable, Identifiable {
     let name: String
     let description: String
@@ -2322,6 +3046,7 @@ private func nativeAppCommandInstruction(for content: String) -> String {
 
 struct ChatView: View {
     @StateObject private var chat: NativeChatStore
+    @StateObject private var terminal = NativeTerminalStore()
     private let port: Int
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.terminal.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
@@ -2335,6 +3060,7 @@ struct ChatView: View {
     @State private var suggestions: [ChatComposerSuggestion] = []
     @State private var appCommands: [ChatComposerSuggestion] = []
     @State private var pendingAttachment: PendingChatAttachment?
+    @State private var isTerminalVisible = false
 
     init(port: Int) {
         self.port = port
@@ -2356,7 +3082,7 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("Jame.")
+                Text("\(chat.agentName).")
                     .font(.system(size: 15 * fontScale, weight: .bold, design: .rounded))
                     .foregroundStyle(accent)
                 Spacer()
@@ -2414,8 +3140,9 @@ struct ChatView: View {
                 .background(Color.orange.opacity(theme == .light ? 0.12 : 0.18))
             }
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: density.messageSpacing) {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: density.messageSpacing) {
                         if chat.messages.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("jame@local:~$ ready for your prompt")
@@ -2441,7 +3168,20 @@ struct ChatView: View {
                                 .id(message.id)
                         }
                         if chat.isThinking { Text("jame > thinking…").font(.system(size: 12 * fontScale, design: .monospaced)).foregroundStyle(Color.green) }
-                    }.padding(density.contentPadding)
+                        }.padding(density.contentPadding)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    if isTerminalVisible {
+                        Divider().overlay(Color.white.opacity(0.12))
+                        NativeTerminalPanel(
+                            terminal: terminal,
+                            theme: theme,
+                            accent: accent,
+                            fontScale: fontScale
+                        )
+                        .frame(width: 420)
+                    }
                 }
                 .background(chatBackground)
                 .onChange(of: chat.messages.count) { _, _ in if let last = chat.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
@@ -2505,6 +3245,13 @@ struct ChatView: View {
                     Button("Send") { sendComposer() }
                         .buttonStyle(.borderedProminent).tint(accent)
                         .keyboardShortcut(.defaultAction)
+                    Button {
+                        isTerminalVisible.toggle()
+                    } label: {
+                        Image(systemName: isTerminalVisible ? "rectangle.righthalf.inset.filled" : "terminal")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(isTerminalVisible ? "Close terminal" : "Open terminal")
                 }
                 .padding(14)
 

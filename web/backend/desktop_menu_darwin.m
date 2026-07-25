@@ -5,12 +5,30 @@ extern void jameclawMenuAutomations(void);
 extern void jameclawMenuShowDesktop(void);
 extern void jameclawMenuShowConsole(void);
 
+static NSString *const JameClawHomeNavigationNotification = @"com.jameclaw.home.navigate";
+
+static void requestHomeSection(NSString *section, BOOL startNewChat) {
+    // The native Jame window is a separate app process. Launch/activate it
+    // first, then send the navigation request after its SwiftUI scene has had
+    // time to become ready. Sending twice also covers a cold launch.
+    jameclawMenuShowDesktop();
+    for (NSNumber *delay in @[@0.7, @1.5]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [[NSDistributedNotificationCenter defaultCenter]
+                postNotificationName:JameClawHomeNavigationNotification
+                object:@"com.jameclaw.launcher"
+                userInfo:@{ @"section": section, @"new_chat": @(startNewChat) }
+                options:NSNotificationDeliverImmediately];
+        });
+    }
+}
+
 @interface JameClawDesktopMenuTarget : NSObject
 @end
 
 @implementation JameClawDesktopMenuTarget
-- (void)newChat:(id)sender { jameclawMenuNewChat(); }
-- (void)automations:(id)sender { jameclawMenuAutomations(); }
+- (void)newChat:(id)sender { requestHomeSection(@"chat", YES); }
+- (void)automations:(id)sender { requestHomeSection(@"automations", NO); }
 - (void)showDesktop:(id)sender { jameclawMenuShowDesktop(); }
 - (void)showConsole:(id)sender { jameclawMenuShowConsole(); }
 - (void)applicationDidBecomeActive:(NSNotification *)notification { jameclawMenuShowDesktop(); }
