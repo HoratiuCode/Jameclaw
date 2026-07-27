@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
-import { IconMessageCircle, IconRefresh } from "@tabler/icons-react"
+import { IconMessageCircle, IconPin, IconPinned, IconRefresh } from "@tabler/icons-react"
+import { useRouterState } from "@tanstack/react-router"
 
-import { getSessions } from "@/api/sessions"
+import { getSessions, setSessionPinned } from "@/api/sessions"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 
@@ -18,6 +19,7 @@ function label(value?: string) {
 }
 
 export function SessionsPage() {
+  const fixedOnly = useRouterState({ select: (state) => state.location.href.includes("fixed=1") })
   const { data, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["sessions", "dashboard"],
     queryFn: () => getSessions(0, 100),
@@ -26,7 +28,7 @@ export function SessionsPage() {
 
   return (
     <div className="bg-background/95 flex h-full flex-col">
-      <PageHeader title="Sessions">
+      <PageHeader title={fixedOnly ? "Fixed Chats" : "Sessions"}>
         <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
           <IconRefresh className={`size-4 ${isFetching ? "animate-spin" : ""}`} />
           Refresh
@@ -37,13 +39,13 @@ export function SessionsPage() {
           <div className="text-muted-foreground text-sm">Loading...</div>
         ) : error ? (
           <div className="text-destructive text-sm">Could not load sessions.</div>
-        ) : !data || data.length === 0 ? (
+        ) : !data || data.filter((session) => !fixedOnly || session.pinned).length === 0 ? (
           <div className="border-border/70 bg-card text-muted-foreground rounded-lg border p-5 text-sm">
             No saved chat sessions yet.
           </div>
         ) : (
           <div className="divide-border overflow-hidden rounded-lg border">
-            {data.map((session) => (
+            {data.filter((session) => !fixedOnly || session.pinned).map((session) => (
               <div key={session.id} className="bg-card px-4 py-3">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex min-w-0 gap-3">
@@ -68,6 +70,14 @@ export function SessionsPage() {
                     </div>
                   </div>
                   <div className="text-muted-foreground shrink-0 text-right text-xs">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={session.pinned ? "Unfix chat" : "Fix chat"}
+                      onClick={() => void setSessionPinned(session.id, !session.pinned).then(() => refetch())}
+                    >
+                      {session.pinned ? <IconPinned className="size-4" /> : <IconPin className="size-4" />}
+                    </Button>
                     <div>{session.message_count} messages</div>
                     <div className="mt-1">{formatDate(session.updated)}</div>
                   </div>

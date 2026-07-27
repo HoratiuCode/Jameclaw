@@ -140,6 +140,11 @@ export function ChatPage() {
 
   const handleSend = () => {
     if (!input.trim()) return
+    if (/^\/artifacts?$/i.test(input.trim())) {
+      setInput("")
+      void navigate({ to: "/artifacts" })
+      return
+    }
     if (!canSend) {
       if (disabledReason) {
         toast.error(disabledReason)
@@ -373,6 +378,7 @@ export function ChatPage() {
       <ChatComposer
         input={input}
         onInputChange={setInput}
+        onArtifactCommand={() => void navigate({ to: "/artifacts" })}
         onSend={handleSend}
         onFileSelect={handleFileSelect}
         onVoiceToggle={handleVoiceToggle}

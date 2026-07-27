@@ -3,6 +3,7 @@ import AVFoundation
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 extension Notification.Name {
     static let jameclawNewChat = Notification.Name("jameclaw.new-chat")
@@ -42,7 +43,11 @@ private func authenticatedConsoleRequest(
     method: String = "GET",
     queryItems: [URLQueryItem] = []
 ) -> URLRequest {
-    var request = URLRequest(url: authenticatedConsoleURL(port: port, path: path, queryItems: queryItems))
+    authenticatedConsoleRequest(url: authenticatedConsoleURL(port: port, path: path, queryItems: queryItems), method: method)
+}
+
+private func authenticatedConsoleRequest(url: URL, method: String = "GET") -> URLRequest {
+    var request = URLRequest(url: url)
     request.httpMethod = method
     let tokenURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".jameclaw/launcher_access_token")
@@ -50,6 +55,17 @@ private func authenticatedConsoleRequest(
         request.setValue("jameclaw_launcher_session=\(token)", forHTTPHeaderField: "Cookie")
     }
     return request
+}
+
+private func authenticatedSessionURL(port: Int, id: String) -> URL {
+    var components = URLComponents(url: authenticatedConsoleURL(port: port), resolvingAgainstBaseURL: false)!
+    // Session keys from group channels can contain slashes and colons. They
+    // are one API path parameter, not nested paths, so encode every reserved
+    // character before asking the native launcher to retrieve the session.
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+    let encodedID = id.addingPercentEncoding(withAllowedCharacters: allowed) ?? id
+    components.percentEncodedPath = "/api/sessions/\(encodedID)"
+    return components.url ?? authenticatedConsoleURL(port: port, path: "/api/sessions")
 }
 
 private func configuredLauncherPort() -> Int {
@@ -293,6 +309,10 @@ struct JameRootView: View {
             switch selectedSection ?? .chat {
             case .chat:
                 ChatView(port: Int(settings.port) ?? 18800)
+            case .fixedChats:
+                SessionsView(port: Int(settings.port) ?? 18800, pinnedOnly: true)
+            case .memory:
+                AgentMemoryView(port: Int(settings.port) ?? 18800)
             case .agent:
                 AgentManagerView(port: Int(settings.port) ?? 18800)
             case .sessions:
@@ -332,10 +352,12 @@ struct JameRootView: View {
 
 enum DesktopSection: String, CaseIterable, Identifiable {
     case chat
+    case fixedChats
+    case memory
+    case sessions
     case agent
     case artifacts
     case skills
-    case sessions
     case automations
     case connectors
     case settings
@@ -345,6 +367,8 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .chat: return "message.fill"
+        case .fixedChats: return "pin.fill"
+        case .memory: return "brain.head.profile"
         case .agent: return "sparkles"
         case .sessions: return "clock.arrow.circlepath"
         case .automations: return "calendar.badge.clock"
@@ -358,6 +382,8 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     var menuShortcut: KeyEquivalent {
         switch self {
         case .chat: return "1"
+        case .fixedChats: return "2"
+        case .memory: return "3"
         case .agent: return "2"
         case .artifacts: return "3"
         case .skills: return "4"
@@ -855,9 +881,10 @@ private struct NativeSessionSummary: Codable, Identifiable {
     let channel: String?
     let chatType: String?
     let chatID: String?
+    let pinned: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, title, preview, updated, channel
+        case id, title, preview, updated, channel, pinned
         case chatType = "chat_type"
         case chatID = "chat_id"
         case messageCount = "message_count"
@@ -938,8 +965,7 @@ private final class NativeSessionStore: ObservableObject {
         selectedSession = nil
         guard let id else { return }
         do {
-            let path = "/api/sessions/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)"
-            let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: path))
+            let (data, response) = try await URLSession.shared.data(from: authenticatedSessionURL(port: port, id: id))
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
             }
@@ -949,20 +975,35 @@ private final class NativeSessionStore: ObservableObject {
             self.error = "Could not open this conversation."
         }
     }
+
+    func setPinned(_ session: NativeSessionSummary, pinned: Bool) async {
+        do {
+            var request = authenticatedConsoleRequest(url: authenticatedSessionURL(port: port, id: session.id).appendingPathComponent("pin"), method: "PUT")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["pinned": pinned])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            await load()
+        } catch { self.error = "Could not update fixed chat." }
+    }
 }
 
 private struct SessionsView: View {
     @StateObject private var store: NativeSessionStore
+    let pinnedOnly: Bool
 
-    init(port: Int) { _store = StateObject(wrappedValue: NativeSessionStore(port: port)) }
+    init(port: Int, pinnedOnly: Bool = false) {
+        _store = StateObject(wrappedValue: NativeSessionStore(port: port))
+        self.pinnedOnly = pinnedOnly
+    }
 
     var body: some View {
         HSplitView {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Sessions").font(.title2.weight(.semibold))
-                        Text("All conversations from Jame, Telegram, and connected channels")
+                        Text(pinnedOnly ? "Fixed Chats" : "Sessions").font(.title2.weight(.semibold))
+                        Text(pinnedOnly ? "Important conversations you pinned from Sessions" : "All conversations from Jame, Telegram, and connected channels")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -980,14 +1021,20 @@ private struct SessionsView: View {
                     .help("Refresh session history")
                 }
                 .padding()
-                List(store.visibleSessions, selection: $store.selectedSessionID) { session in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(session.title.isEmpty ? session.preview : session.title)
-                            .lineLimit(1)
-                            .font(.headline)
-                        Text("\(sessionSourceName(session)) · \(session.messageCount) messages · \(session.updated)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                List(store.visibleSessions.filter { !pinnedOnly || $0.pinned }, selection: $store.selectedSessionID) { session in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(session.title.isEmpty ? session.preview : session.title)
+                                .lineLimit(1)
+                                .font(.headline)
+                            Text("\(sessionSourceName(session)) · \(session.messageCount) messages · \(session.updated)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button { Task { await store.setPinned(session, pinned: !session.pinned) } } label: {
+                            Image(systemName: session.pinned ? "pin.fill" : "pin")
+                        }.buttonStyle(.borderless).help(session.pinned ? "Unfix chat" : "Fix chat")
                     }
                     .padding(.vertical, 3)
                     .tag(session.id)
@@ -1311,14 +1358,186 @@ struct ArtifactsView: View {
         title: "Artifacts",
         directory: jameWorkspaceURL().appendingPathComponent("artifacts")
     )
+    @State private var selectedProject: WorkspaceEntry?
+
+    private var projects: [WorkspaceEntry] { browser.entries.filter(\.isDirectory) }
 
     var body: some View {
-        WorkspaceBrowserView(
-            browser: browser,
-            emptyTitle: "No artifacts yet",
-            emptyDescription: "Files Jame creates in the workspace artifacts folder will appear here."
-        )
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Artifacts").font(.title3.weight(.bold))
+                    Spacer()
+                    Button { browser.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                    Button("Open Folder") { browser.open() }
+                }
+                .padding(16)
+                Divider()
+                if projects.isEmpty {
+                    ContentUnavailableView(
+                        "No artifacts yet",
+                        systemImage: "shippingbox",
+                        description: Text("Save a website artifact from the Web Console and it will appear here.")
+                    )
+                } else {
+                    List(projects) { project in
+                        Button {
+                            selectedProject = project
+                        } label: {
+                            Label(artifactTitle(project.url), systemImage: "folder.fill")
+                                .lineLimit(1)
+                                .foregroundStyle(selectedProject?.id == project.id ? .primary : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.vertical, 3)
+                    }
+                    .listStyle(.sidebar)
+                }
+            }
+            .frame(minWidth: 230, idealWidth: 260, maxWidth: 310)
+            Divider()
+            if let project = selectedProject {
+                ArtifactProjectView(projectURL: project.url, title: artifactTitle(project.url))
+                    .id(project.id)
+            } else {
+                ContentUnavailableView(
+                    "Choose an artifact",
+                    systemImage: "folder",
+                    description: Text("Select an artifact folder to view its files or start its website."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task { browser.refresh() }
     }
+
+    private func artifactTitle(_ directory: URL) -> String {
+        let metadata = directory.appendingPathComponent("artifact.json")
+        guard let data = try? Data(contentsOf: metadata),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let name = object["name"] as? String,
+              !name.isEmpty else { return directory.lastPathComponent }
+        return name
+    }
+}
+
+private struct ArtifactProjectView: View {
+    let projectURL: URL
+    let title: String
+    @State private var files: [URL] = []
+    @State private var selectedFile: URL?
+    @State private var content = ""
+    @State private var isRunning = false
+    @State private var runID = UUID()
+    @State private var status = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.title3.weight(.bold))
+                    Text(projectURL.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Button { loadFiles() } label: { Image(systemName: "arrow.clockwise") }
+                if isRunning {
+                    Button("Stop", systemImage: "stop.fill") { isRunning = false }
+                } else {
+                    Button("Start app", systemImage: "play.fill") {
+                        guard FileManager.default.fileExists(atPath: indexURL.path) else {
+                            status = "This artifact does not have an index.html file yet."
+                            return
+                        }
+                        runID = UUID()
+                        isRunning = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(18)
+            Divider()
+            if isRunning {
+                ArtifactWebView(url: indexURL).id(runID)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HStack(spacing: 0) {
+                    List(files, id: \.path) { file in
+                        Button {
+                            select(file)
+                        } label: {
+                            Label(file.lastPathComponent, systemImage: file.pathExtension == "html" ? "chevron.left.forwardslash.chevron.right" : "doc.text")
+                                .foregroundStyle(selectedFile?.path == file.path ? .primary : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .frame(minWidth: 185, idealWidth: 220, maxWidth: 270)
+                    Divider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text(selectedFile?.lastPathComponent ?? "Select a file").font(.headline)
+                            Spacer()
+                            if selectedFile != nil {
+                                Button("Save") { saveFile() }.buttonStyle(.borderedProminent)
+                            }
+                        }
+                        if selectedFile != nil {
+                            TextEditor(text: $content)
+                                .font(.system(.body, design: .monospaced))
+                                .scrollContentBackground(.hidden)
+                                .padding(8)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            ContentUnavailableView("Choose a project file", systemImage: "doc.text")
+                        }
+                        if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary) }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .task { loadFiles() }
+    }
+
+    private var indexURL: URL { projectURL.appendingPathComponent("index.html") }
+
+    private func loadFiles() {
+        files = ((try? FileManager.default.contentsOfDirectory(at: projectURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+            .filter { !$0.hasDirectoryPath && $0.lastPathComponent != "artifact.json" }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        if let current = selectedFile, files.contains(where: { $0.path == current.path }) {
+            select(current)
+        } else if let first = files.first {
+            select(first)
+        }
+    }
+
+    private func select(_ file: URL) {
+        selectedFile = file
+        content = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        status = ""
+    }
+
+    private func saveFile() {
+        guard let selectedFile else { return }
+        do {
+            try content.write(to: selectedFile, atomically: true, encoding: .utf8)
+            status = "Saved \(selectedFile.lastPathComponent). Press Start app to run the latest files."
+        } catch {
+            status = "Could not save this file."
+        }
+    }
+}
+
+private struct ArtifactWebView: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {}
 }
 
 struct SkillsView: View {
@@ -1501,6 +1720,156 @@ struct HomeView: View {
         NSWorkspace.shared.open(authenticatedConsoleURL(port: Int(settings.port) ?? 18800))
     }
 
+}
+
+private struct NativeAgentMemory: Codable {
+    let longTerm: String
+    let memoryPath: String
+
+    enum CodingKeys: String, CodingKey {
+        case longTerm = "long_term"
+        case memoryPath = "memory_path"
+    }
+}
+
+@MainActor
+private final class NativeMemoryStore: ObservableObject {
+    @Published var text = ""
+    @Published var path = ""
+    @Published var status = ""
+    @Published var agentName = ""
+    @Published var persona = ""
+    @Published var tone = ""
+    @Published var discussionMode = ""
+    @Published var configuredMemoryNotes = ""
+    @Published var statusStyle = ""
+    @Published var userProfile = ""
+    @Published var peopleAndRelationships = ""
+    private let port: Int
+    init(port: Int) { self.port = port }
+
+    func load() async {
+        do {
+            let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/agents/main/memory"))
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            let memory = try JSONDecoder().decode(NativeAgentMemory.self, from: data)
+            text = memory.longTerm
+            userProfile = memorySection("User Profile", in: text)
+            peopleAndRelationships = memorySection("People & Relationships", in: text)
+            path = memory.memoryPath
+            let (agentData, _) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/agents"))
+            if let main = try? JSONDecoder().decode(NativeAgentsResponse.self, from: agentData).agents.first(where: { $0.id == "main" }) {
+                agentName = main.name
+                persona = main.human?.persona ?? ""
+                tone = main.human?.tone ?? ""
+                discussionMode = main.human?.discussionMode ?? ""
+                configuredMemoryNotes = main.human?.memoryNotes ?? ""
+                statusStyle = main.human?.statusStyle ?? ""
+            }
+            status = ""
+        } catch { status = "Could not load agent memory." }
+    }
+
+    func saveIdentity() async {
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/agents/main", method: "PATCH")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(NativeUpdateAgentRequest(human: NativeUpdateAgentHuman(agentName: agentName, persona: persona, tone: tone, discussionMode: discussionMode, memoryNotes: configuredMemoryNotes, statusStyle: statusStyle)))
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            status = "Identity saved."
+        } catch { status = "Could not save identity." }
+    }
+
+    func save() async {
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/agents/main/memory", method: "PUT")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["long_term": text])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            status = "Memory saved."
+        } catch { status = "Could not save agent memory." }
+    }
+
+    func saveUserContext() async {
+        text = replacingMemorySection("User Profile", with: userProfile, in: text)
+        text = replacingMemorySection("People & Relationships", with: peopleAndRelationships, in: text)
+        await save()
+    }
+}
+
+private func memorySection(_ title: String, in text: String) -> String {
+    let escapedTitle = NSRegularExpression.escapedPattern(for: title)
+    let pattern = "(?ms)^#{1,6}\\s+\(escapedTitle)\\s*$\\n?(.*?)(?=^#|\\z)"
+    guard let range = text.range(of: pattern, options: .regularExpression) else { return "" }
+    let block = String(text[range])
+    return block
+        .replacingOccurrences(of: "(?m)^#{1,6}\\s+\(escapedTitle)\\s*$", with: "", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func replacingMemorySection(_ title: String, with value: String, in text: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let block = trimmed.isEmpty ? "" : "# \(title)\n\(trimmed)\n"
+    let escapedTitle = NSRegularExpression.escapedPattern(for: title)
+    let pattern = "(?ms)^#{1,6}\\s+\(escapedTitle)\\s*$\\n?.*?(?=^#|\\z)"
+    let range = text.range(of: pattern, options: .regularExpression)
+    let withoutOld = range.map { text.replacingCharacters(in: $0, with: "") } ?? text
+    return (withoutOld.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + block)
+        .trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+}
+
+private struct AgentMemoryView: View {
+    @StateObject private var store: NativeMemoryStore
+    init(port: Int) { _store = StateObject(wrappedValue: NativeMemoryStore(port: port)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Memory").font(.title2.weight(.bold))
+                    Text(store.path.isEmpty ? "Main agent long-term memory" : store.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
+            }
+            TabView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Stable preferences, project facts, and standing instructions.").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $store.text).font(.system(.body, design: .monospaced)).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                    HStack { Spacer(); Button("Save memory") { Task { await store.save() } }.buttonStyle(.borderedProminent) }
+                }.tabItem { Label("Long-term Memory", systemImage: "brain.head.profile") }
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Identity defines how your agent presents itself and works with you.").foregroundStyle(.secondary)
+                    TextField("Agent name", text: $store.agentName)
+                    TextField("Persona", text: $store.persona, axis: .vertical).lineLimit(2...4)
+                    TextField("Tone", text: $store.tone)
+                    TextField("Discussion mode", text: $store.discussionMode)
+                    Text("Configured memory notes").font(.headline)
+                    Text("Persistent notes stored with the agent configuration. They are kept separate from the long-term MEMORY.md file.").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $store.configuredMemoryNotes).font(.system(.body, design: .monospaced)).frame(minHeight: 90).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                    TextField("Status style", text: $store.statusStyle)
+                    Divider()
+                    Text("User profile").font(.headline)
+                    Text("What Jame should remember about you: preferences, goals, work style, and important context.").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $store.userProfile).font(.system(.body, design: .monospaced)).frame(minHeight: 110).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                    Divider()
+                    Text("People & relationships").font(.headline)
+                    Text("People mentioned by the user and their relationship or role. Example: “Maria — user’s cofounder; handles product.”").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $store.peopleAndRelationships).font(.system(.body, design: .monospaced)).frame(minHeight: 110).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                    HStack {
+                        Spacer()
+                        Button("Save agent identity") { Task { await store.saveIdentity() } }
+                        Button("Save user context") { Task { await store.saveUserContext() } }.buttonStyle(.borderedProminent)
+                    }
+                }.padding(.top, 8).tabItem { Label("Identity", systemImage: "person.text.rectangle") }
+            }
+            if !store.status.isEmpty { Text(store.status).font(.caption).foregroundStyle(store.status == "Memory saved." ? .green : .red) }
+        }
+        .padding(22)
+        .task { await store.load() }
+    }
 }
 
 private struct NativeAgentHuman: Codable {
@@ -2064,10 +2433,12 @@ private struct NativeModelInfo: Codable, Identifiable {
 private struct NativeModelsResponse: Codable {
     let models: [NativeModelInfo]
     let defaultModel: String
+    let modelFallbacks: [String]?
 
     enum CodingKeys: String, CodingKey {
         case models
         case defaultModel = "default_model"
+        case modelFallbacks = "model_fallbacks"
     }
 }
 
@@ -2090,6 +2461,7 @@ private final class NativeProviderStore: ObservableObject {
     @Published var models: [NativeModelInfo] = []
     @Published var defaultModel = ""
     @Published var selectedModel = ""
+    @Published var selectedFallbackModel = ""
     @Published var providerNames: [String: String] = [:]
     @Published var status = ""
     @Published var isLoading = false
@@ -2099,16 +2471,24 @@ private final class NativeProviderStore: ObservableObject {
         defer { isLoading = false }
 
         do {
-            async let modelsRequest: NativeModelsResponse = fetch(path: "/api/models", port: port)
-            async let catalogRequest: NativeProviderCatalogResponse = fetch(path: "/api/models/catalog", port: port)
-            let (modelsResponse, catalogResponse) = try await (modelsRequest, catalogRequest)
+            // The configured-model list is the source of truth for the native
+            // selector. The catalog is only used for friendly provider names;
+            // a missing catalog must never hide a working CLI/local provider.
+            let modelsResponse: NativeModelsResponse = try await fetch(path: "/api/models", port: port)
             models = modelsResponse.models.filter(\.configured)
             defaultModel = modelsResponse.defaultModel
             selectedModel = modelsResponse.defaultModel
-            providerNames = Dictionary(uniqueKeysWithValues: catalogResponse.providers.flatMap { provider in
-                (provider.configuredModels ?? []).map { ($0, provider.name) }
-            })
-            status = models.isEmpty ? "No configured AI providers yet." : ""
+            selectedFallbackModel = modelsResponse.modelFallbacks?.first ?? ""
+            if let catalogResponse: NativeProviderCatalogResponse = try? await fetch(path: "/api/models/catalog", port: port) {
+                providerNames = Dictionary(uniqueKeysWithValues: catalogResponse.providers.flatMap { provider in
+                    (provider.configuredModels ?? []).map { ($0, provider.name) }
+                })
+            } else {
+                providerNames = [:]
+            }
+            status = models.isEmpty
+                ? "No configured AI providers yet."
+                : ""
         } catch {
             status = "Could not load AI providers. Start JameClaw and try again."
         }
@@ -2129,6 +2509,41 @@ private final class NativeProviderStore: ObservableObject {
             status = "Chat model updated. New chats will use it."
         } catch {
             status = "Could not change the chat model."
+        }
+    }
+
+    func setFailover(primaryModel: String, fallbackModel: String, port: Int) async {
+        guard !primaryModel.isEmpty else { return }
+        guard !fallbackModel.isEmpty else {
+            await setDefaultModel(primaryModel, port: port)
+            status = "Chat model updated without a fallback provider."
+            return
+        }
+        guard primaryModel != fallbackModel else {
+            status = "Choose a different fallback provider."
+            return
+        }
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/models/failover", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "primary_model": primaryModel,
+                "secondary_model": fallbackModel,
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let result = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            defaultModel = primaryModel
+            selectedModel = primaryModel
+            selectedFallbackModel = fallbackModel
+            let restarted = result["gateway_restarted"] as? Bool ?? false
+            status = restarted
+                ? "Failover saved. JameClaw will try the fallback provider automatically."
+                : "Failover saved. Restart the gateway to apply it."
+        } catch {
+            status = "Could not save the fallback provider."
         }
     }
 
@@ -2189,15 +2604,38 @@ struct QuickSettingsView: View {
                     Text(providers.isLoading ? "Loading configured providers…" : "No configured AI providers.")
                         .foregroundStyle(.secondary)
                 } else {
-                    Picker("Chat model", selection: $providers.selectedModel) {
+                    Picker("Primary provider", selection: $providers.selectedModel) {
                         ForEach(providers.models) { model in
                             Text("\(providers.providerName(for: model)) · \(model.modelName)")
                                 .tag(model.modelName)
                         }
                     }
-                    Text("Current provider: \(providers.models.first(where: { $0.modelName == providers.defaultModel }).map { providers.providerName(for: $0) } ?? "Not selected")")
+                    Picker("Fallback provider", selection: $providers.selectedFallbackModel) {
+                        Text("No fallback").tag("")
+                        ForEach(providers.models.filter { $0.modelName != providers.selectedModel }) { model in
+                            Text("\(providers.providerName(for: model)) · \(model.modelName)")
+                                .tag(model.modelName)
+                        }
+                    }
+                    Text("If the primary provider has a retriable failure, JameClaw will automatically try the fallback provider.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Save provider failover") {
+                            Task {
+                                await providers.setFailover(
+                                    primaryModel: providers.selectedModel,
+                                    fallbackModel: providers.selectedFallbackModel,
+                                    port: Int(settings.port) ?? 18800
+                                )
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(providers.selectedModel.isEmpty)
+                        Text("Current primary: \(providers.models.first(where: { $0.modelName == providers.defaultModel }).map { providers.providerName(for: $0) } ?? "Not selected")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 HStack {
                     Button("Refresh providers") {
@@ -2269,10 +2707,6 @@ struct QuickSettingsView: View {
             let port = Int(settings.port) ?? 18800
             await providers.load(port: port)
             await loadMusicPlaylistPermission(port: port)
-        }
-        .onChange(of: providers.selectedModel) { _, modelName in
-            guard !modelName.isEmpty else { return }
-            Task { await providers.setDefaultModel(modelName, port: Int(settings.port) ?? 18800) }
         }
         .fileImporter(
             isPresented: $showingBackgroundPicker,
@@ -3303,11 +3737,24 @@ struct ChatView: View {
 
     private var jameLoadingScreen: some View {
         ZStack {
-            chatBackground
+            if let artworkURL = Bundle.main.url(forResource: "creation-of-adam", withExtension: "jpg"),
+               let artwork = NSImage(contentsOf: artworkURL) {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+                    .overlay(.black.opacity(0.46))
+            } else {
+                chatBackground
+            }
             VStack(spacing: 16) {
-                Text("Jame")
-                    .font(.system(size: 34 * fontScale, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
+                HStack(spacing: 0) {
+                    Text("Jame")
+                        .foregroundStyle(.white)
+                    Text(".")
+                        .foregroundStyle(Color.orange)
+                }
+                .font(.system(size: 34 * fontScale, weight: .bold, design: .rounded))
                 ProgressView()
                     .controlSize(.large)
                     .tint(accent)

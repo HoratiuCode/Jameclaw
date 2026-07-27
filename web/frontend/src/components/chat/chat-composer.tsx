@@ -1,6 +1,7 @@
 import {
   IconArrowUp,
   IconCalendarTime,
+  IconCode,
   IconFile,
   IconFolder,
   IconMicrophone,
@@ -27,6 +28,7 @@ interface ChatComposerProps {
   onSend: () => void
   onFileSelect?: (files: FileList) => void
   onVoiceToggle?: () => void
+  onArtifactCommand?: () => void
   disabledReason?: string | null
   isConnected: boolean
   hasDefaultModel: boolean
@@ -69,6 +71,16 @@ type MentionItem =
       automation: AutomationItem
     }
 
+type SlashItem =
+  | MentionItem
+  | {
+      id: "artifact"
+      type: "artifact"
+      title: string
+      subtitle: string
+      insertText: string
+    }
+
 function quoteMention(value: string) {
   return `"${value.replaceAll('"', '\\"')}"`
 }
@@ -85,6 +97,7 @@ export function ChatComposer({
   onSend,
   onFileSelect,
   onVoiceToggle,
+  onArtifactCommand,
   disabledReason,
   isConnected,
   hasDefaultModel,
@@ -102,7 +115,7 @@ export function ChatComposer({
   const [isMentionMenuOpen, setIsMentionMenuOpen] = useState(false)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [mentionSearchError, setMentionSearchError] = useState(false)
-  const [skillSlashItems, setSkillSlashItems] = useState<MentionItem[]>([])
+  const [skillSlashItems, setSkillSlashItems] = useState<SlashItem[]>([])
   const [isSkillSlashMenuOpen, setIsSkillSlashMenuOpen] = useState(false)
   const [selectedSkillSlashIndex, setSelectedSkillSlashIndex] = useState(0)
   const [skillSlashSearchError, setSkillSlashSearchError] = useState(false)
@@ -263,7 +276,7 @@ export function ChatComposer({
   }, [activeMention, canInput])
 
   useEffect(() => {
-    if (!canInput || !activeSkillSlash || activeMention) {
+    if (!activeSkillSlash || activeMention) {
       setIsSkillSlashMenuOpen(false)
       setSkillSlashItems([])
       setSelectedSkillSlashIndex(0)
@@ -273,11 +286,24 @@ export function ChatComposer({
 
     let cancelled = false
     const timeoutId = window.setTimeout(() => {
+      const artifactItem: SlashItem[] = matchesMentionQuery(activeSkillSlash.query, [
+        "artifact",
+        "artifacts",
+        "create app website code",
+      ])
+        ? [{
+            id: "artifact",
+            type: "artifact",
+            title: "/artifact",
+            subtitle: "Create or open a saved app, website, or code artifact",
+            insertText: "/artifact",
+          }]
+        : []
       getLearnedSkills()
         .then(({ skills }) => {
           if (cancelled) return
           setSkillSlashItems(
-            skills
+            artifactItem.concat(skills
               .filter((skill) =>
                 matchesMentionQuery(activeSkillSlash.query, [
                   skill.name,
@@ -293,7 +319,7 @@ export function ChatComposer({
                 subtitle: skill.description || `${skill.source} skill`,
                 insertText: `@skill:${skill.name} `,
                 skill,
-              })),
+              }))),
           )
           setIsSkillSlashMenuOpen(true)
           setSelectedSkillSlashIndex(0)
@@ -301,10 +327,10 @@ export function ChatComposer({
         })
         .catch(() => {
           if (cancelled) return
-          setSkillSlashItems([])
+          setSkillSlashItems(artifactItem)
           setIsSkillSlashMenuOpen(true)
           setSelectedSkillSlashIndex(0)
-          setSkillSlashSearchError(true)
+          setSkillSlashSearchError(false)
         })
     }, 120)
 
@@ -312,7 +338,7 @@ export function ChatComposer({
       cancelled = true
       window.clearTimeout(timeoutId)
     }
-  }, [activeMention, activeSkillSlash, canInput])
+  }, [activeMention, activeSkillSlash])
 
   const syncCaretPosition = () => {
     setCaretPosition(textareaRef.current?.selectionStart ?? input.length)
@@ -337,8 +363,16 @@ export function ChatComposer({
     })
   }
 
-  const insertSkillSlash = (item: MentionItem) => {
+  const insertSkillSlash = (item: SlashItem) => {
     if (!activeSkillSlash) return
+    if (item.type === "artifact") {
+      onInputChange("")
+      setIsSkillSlashMenuOpen(false)
+      setSkillSlashItems([])
+      setSelectedSkillSlashIndex(0)
+      onArtifactCommand?.()
+      return
+    }
     const nextInput =
       input.slice(0, activeSkillSlash.start) +
       item.insertText +
@@ -547,18 +581,18 @@ export function ChatComposer({
         {isSkillSlashMenuOpen && activeSkillSlash && (
           <div className="bg-popover border-border absolute right-3 bottom-[calc(100%+0.5rem)] left-3 z-20 overflow-hidden rounded-lg border shadow-lg">
             <div className="border-border bg-muted/50 flex items-center justify-between border-b px-3 py-2 text-xs">
-              <span className="text-muted-foreground">Call a skill with /</span>
+              <span className="text-muted-foreground">Run a command or skill with /</span>
               <span className="text-muted-foreground font-mono">
                 /{activeSkillSlash.query}
               </span>
             </div>
             {skillSlashSearchError ? (
               <div className="text-muted-foreground px-3 py-3 text-sm">
-                Could not load skills.
+                Could not load commands.
               </div>
             ) : skillSlashItems.length === 0 ? (
               <div className="text-muted-foreground px-3 py-3 text-sm">
-                No matching skills found.
+                No matching commands or skills found.
               </div>
             ) : (
               <div className="max-h-72 overflow-y-auto py-1">
@@ -577,7 +611,7 @@ export function ChatComposer({
                       insertSkillSlash(item)
                     }}
                   >
-                    <IconSparkles className="text-muted-foreground size-4 shrink-0" />
+                    {item.type === "artifact" ? <IconCode className="text-muted-foreground size-4 shrink-0" /> : <IconSparkles className="text-muted-foreground size-4 shrink-0" />}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">
                         {item.title}
@@ -587,7 +621,7 @@ export function ChatComposer({
                       </span>
                     </span>
                     <span className="text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase">
-                      skill
+                      {item.type}
                     </span>
                   </button>
                 ))}

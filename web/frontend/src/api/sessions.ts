@@ -11,6 +11,16 @@ export interface SessionSummary {
   message_count: number
   created: string
   updated: string
+  pinned: boolean
+}
+
+export async function setSessionPinned(id: string, pinned: boolean): Promise<void> {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/pin`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned }),
+  })
+  if (!res.ok) throw new Error(`Failed to update fixed chat: ${res.status}`)
 }
 
 export interface SessionDetail {

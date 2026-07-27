@@ -19,6 +19,7 @@ import (
 // registerSessionRoutes binds session list and detail endpoints to the ServeMux.
 func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
+	mux.HandleFunc("PUT /api/sessions/{id}/pin", h.handlePinSession)
 	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
 }
@@ -44,6 +45,7 @@ type sessionListItem struct {
 	MessageCount int    `json:"message_count"`
 	Created      string `json:"created"`
 	Updated      string `json:"updated"`
+	Pinned       bool   `json:"pinned"`
 }
 
 type sessionRecord struct {
@@ -358,6 +360,8 @@ func (h *Handler) sessionsDir() (string, error) {
 //	GET /api/sessions
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	items := h.listAllSessionItems()
+	pinned := h.pinnedSessionIDs()
+	for i := range items { items[i].Pinned = pinned[items[i].ID] }
 
 	// Pagination parameters
 	offsetStr := r.URL.Query().Get("offset")
@@ -388,6 +392,43 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(items)
 }
+
+func (h *Handler) pinnedSessionsPath() (string, error) {
+	dir, err := h.sessionsDir()
+	if err != nil { return "", err }
+	return filepath.Join(dir, ".pinned-chats.json"), nil
+}
+
+func (h *Handler) pinnedSessionIDs() map[string]bool {
+	path, err := h.pinnedSessionsPath()
+	if err != nil { return map[string]bool{} }
+	data, err := os.ReadFile(path)
+	if err != nil { return map[string]bool{} }
+	var ids []string
+	if json.Unmarshal(data, &ids) != nil { return map[string]bool{} }
+	result := make(map[string]bool, len(ids))
+	for _, id := range ids { result[id] = true }
+	return result
+}
+
+func (h *Handler) handlePinSession(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" { http.Error(w, "missing session id", http.StatusBadRequest); return }
+	var body struct { Pinned bool `json:"pinned"` }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil { http.Error(w, "invalid JSON", http.StatusBadRequest); return }
+	pinned := h.pinnedSessionIDs()
+	if body.Pinned { pinned[id] = true } else { delete(pinned, id) }
+	ids := make([]string, 0, len(pinned))
+	for pinnedID := range pinned { ids = append(ids, pinnedID) }
+	sort.Strings(ids)
+	path, err := h.pinnedSessionsPath()
+	if err != nil { http.Error(w, "failed to resolve sessions", http.StatusInternalServerError); return }
+	if err := os.WriteFile(path, mustJSON(ids), 0600); err != nil { http.Error(w, "failed to save pinned chats", http.StatusInternalServerError); return }
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"pinned": body.Pinned})
+}
+
+func mustJSON(value any) []byte { data, _ := json.Marshal(value); return data }
 
 func (h *Handler) listAllSessions() []sessionFile {
 	records := h.listAllSessionRecords()

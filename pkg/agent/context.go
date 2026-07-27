@@ -151,6 +151,10 @@ Your workspace is at: %s
    plus MEMORY.md, USER.md, and recent daily notes.
 5. If something seems likely to matter later, write it to memory/MEMORY.md
    before finishing the turn.
+   Maintain the headings "# User Profile" for stable facts about the user
+   (preferences, goals, working style) and "# People & Relationships" for
+   people the user mentions and their relevant relationship or role. Only add
+   facts the user stated or clearly confirmed; never guess sensitive details.
 6. Do not store ephemeral task progress, one-off TODOs, or completed work logs
    in long-term memory.
 7. If you discover a reusable workflow, capture it as a skill or note instead

@@ -1,6 +1,7 @@
 import { IconChevronRight } from "@tabler/icons-react"
 import {
   IconAtom,
+  IconCode,
   IconBrain,
   IconCalendarTime,
   IconChartBar,
@@ -9,6 +10,7 @@ import {
   IconKey,
   IconListDetails,
   IconMessageCircle,
+  IconPin,
   IconReportAnalytics,
   IconSettings,
   IconSparkles,
@@ -120,6 +122,30 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             translateTitle: true,
           },
           {
+            title: "Fixed Chats",
+            url: "/sessions?fixed=1",
+            icon: IconPin,
+            translateTitle: false,
+          },
+          {
+            title: "Memory",
+            url: "/agent-memory/main",
+            icon: IconBrain,
+            translateTitle: false,
+          },
+          {
+            title: "Sessions",
+            url: "/sessions",
+            icon: IconMessageCircle,
+            translateTitle: false,
+          },
+          {
+            title: "Artifacts",
+            url: "/artifacts",
+            icon: IconCode,
+            translateTitle: false,
+          },
+          {
             title: "Automations",
             url: "/automation",
             icon: IconCalendarTime,
@@ -173,12 +199,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             title: "Profiles",
             url: "/profiles",
             icon: IconUserCircle,
-            translateTitle: false,
-          },
-          {
-            title: "Sessions",
-            url: "/sessions",
-            icon: IconMessageCircle,
             translateTitle: false,
           },
           {
