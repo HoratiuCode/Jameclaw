@@ -27,6 +27,8 @@
 
 > **JameClaw** is a local-first AI assistant written in **Go** with a browser launcher, terminal launcher, and multi-channel gateway.
 
+> **New to this repository?** Read [START_HERE.md](START_HERE.md) for a short guide to what each folder contains and where to begin.
+
 This repository is tuned around the workflow that exists in the code today:
 
 - run a local web console at `http://localhost:18800`
