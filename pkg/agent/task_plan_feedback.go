@@ -15,7 +15,7 @@ import (
 const taskPlanSystemPrompt = `Decide whether the request is clear enough to begin work.
 Proceed independently whenever a reasonable, low-risk, reversible assumption lets the work move forward. State that assumption briefly as the first plan bullet when useful.
 Return exactly "CLARIFY: " followed by one concise question only when the missing detail affects an irreversible, external, security-sensitive, or materially different outcome. Do not provide a plan in that case.
-Otherwise, return only a concise, user-visible execution plan of 3-4 Markdown bullets. Describe concrete outcomes and checks, not private reasoning. Do not perform the task, make claims of completion, or mention tools unless useful to the user.`
+Otherwise, return only a concise, user-visible execution plan of 3-4 Markdown bullets. Describe concrete outcomes and checks, not private reasoning. End every bullet with "Tools: " followed by the exact tool names expected for that step, or "none" when no tool is needed. Do not perform the task or make claims of completion.`
 
 const (
 	taskPlanTimeout        = 20 * time.Second
@@ -31,8 +31,9 @@ func (al *AgentLoop) publishTaskPlan(ctx context.Context, ts *turnState, model s
 	maxSteps := al.cfg.Agents.Defaults.GetTaskPlanMaxSteps()
 	planCtx, cancel := context.WithTimeout(ctx, taskPlanTimeout)
 	defer cancel()
+	toolNames := utils.Truncate(strings.Join(ts.agent.Tools.List(), ", "), 1400)
 	response, err := ts.agent.Provider.Chat(planCtx, []providers.Message{
-		{Role: "system", Content: fmt.Sprintf("%s Limit the plan to at most %d bullets.", taskPlanSystemPrompt, maxSteps)},
+		{Role: "system", Content: fmt.Sprintf("%s Limit the plan to at most %d bullets. Choose tool names only from this available set: %s.", taskPlanSystemPrompt, maxSteps, toolNames)},
 		{Role: "user", Content: "Request:\n" + ts.userMessage},
 	}, nil, model, map[string]any{"max_tokens": 350, "temperature": 0.2})
 	if err != nil || response == nil || strings.TrimSpace(response.Content) == "" {
@@ -54,6 +55,7 @@ func (al *AgentLoop) publishTaskPlan(ctx context.Context, ts *turnState, model s
 	}); err != nil {
 		return ""
 	}
+	ts.planPublished = true
 	al.emitReasoningStep(ts, "share_plan", "Shared the execution plan with the user before starting work.", nil)
 	return ""
 }
@@ -94,7 +96,8 @@ func normalizeTaskPlan(content string, maxSteps int) string {
 		if line == "" {
 			continue
 		}
-		bullets = append(bullets, "- "+line)
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(line, "[ ]"), "[x]"), "[X]"))
+		bullets = append(bullets, "- [ ] "+line)
 		if len(bullets) == maxSteps {
 			break
 		}

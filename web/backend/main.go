@@ -178,8 +178,9 @@ func main() {
 	apiHandler = api.NewHandler(absPath)
 	apiHandler.SetServerOptions(portNum, effectivePublic, explicitPublic, launcherCfg.AllowedCIDRs)
 	apiHandler.RegisterRoutes(mux)
-	// The native Jame app is part of the launcher lifecycle. Its authenticated
-	// quit request closes the tray app, which in turn shuts down the gateway.
+	// Keep an authenticated explicit shutdown hook for launcher controls. The
+	// native window no longer calls this while closing; its lifecycle is separate
+	// so an accidental UI termination cannot bring down the gateway.
 	mux.HandleFunc("POST /api/system/quit", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		go func() {

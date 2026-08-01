@@ -133,3 +133,48 @@ func TestJameChannelSendMediaRequiresMediaStore(t *testing.T) {
 		t.Fatalf("SendMedia() error = %v, want ErrSendFailed", err)
 	}
 }
+
+func TestPublishMemoryChangeBroadcastsDedicatedEvent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cfg := config.JameConfig{ReadTimeout: 10, PingInterval: 60}
+	cfg.SetToken("test-token")
+	ch, err := NewJameChannel(cfg, bus.NewMessageBus())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ch.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer ch.Stop(ctx)
+
+	srv := httptest.NewServer(ch)
+	defer srv.Close()
+	ws, _, err := websocket.DefaultDialer.Dial(
+		wsURL(srv.URL)+"/jame/ws?session_id=sess-memory",
+		http.Header{"Authorization": {"Bearer test-token"}},
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer ws.Close()
+
+	want := "Jame updated long-term memory for future conversations."
+	if err = ch.PublishMemoryChange(ctx, "jame:sess-memory", want); err != nil {
+		t.Fatalf("PublishMemoryChange: %v", err)
+	}
+	var got JameMessage
+	if err = ws.ReadJSON(&got); err != nil {
+		t.Fatalf("read message: %v", err)
+	}
+	if got.Type != TypeMemoryChanged {
+		t.Fatalf("type = %q, want %q", got.Type, TypeMemoryChanged)
+	}
+	if got.SessionID != "sess-memory" {
+		t.Fatalf("session_id = %q, want sess-memory", got.SessionID)
+	}
+	if got.Payload["summary"] != want {
+		t.Fatalf("summary = %q, want %q", got.Payload["summary"], want)
+	}
+}

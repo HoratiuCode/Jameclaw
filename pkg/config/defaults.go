@@ -564,8 +564,9 @@ func DefaultConfig() *Config {
 			},
 		},
 		Heartbeat: HeartbeatConfig{
-			Enabled:  true,
-			Interval: 30,
+			Enabled:    true,
+			Initiative: true,
+			Interval:   30,
 		},
 		Devices: DevicesConfig{
 			Enabled:    false,

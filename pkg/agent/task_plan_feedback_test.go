@@ -16,7 +16,7 @@ func TestHasTaskPlanningSignal(t *testing.T) {
 
 func TestNormalizeTaskPlanLimitsAndFormatsBullets(t *testing.T) {
 	plan := normalizeTaskPlan("1. Inspect the project\n2. Implement the change\n3. Run tests", 2)
-	if plan != "- Inspect the project\n- Implement the change" {
+	if plan != "- [ ] Inspect the project\n- [ ] Implement the change" {
 		t.Fatalf("plan = %q", plan)
 	}
 	if strings.Contains(plan, "Run tests") {
@@ -30,5 +30,8 @@ func TestTaskPlanPromptEncouragesIndependentExecution(t *testing.T) {
 	}
 	if !strings.Contains(taskPlanSystemPrompt, "irreversible, external, security-sensitive") {
 		t.Fatalf("task plan prompt must retain high-impact clarification boundary: %s", taskPlanSystemPrompt)
+	}
+	if !strings.Contains(taskPlanSystemPrompt, "Tools: ") || !strings.Contains(taskPlanSystemPrompt, "exact tool names") {
+		t.Fatalf("task plan prompt must disclose expected tools: %s", taskPlanSystemPrompt)
 	}
 }

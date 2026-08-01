@@ -22,6 +22,7 @@ export interface CoreConfigForm {
   summarizeTokenPercent: string
   dmScope: string
   heartbeatEnabled: boolean
+  heartbeatInitiative: boolean
   heartbeatInterval: string
   devicesEnabled: boolean
   monitorUSB: boolean
@@ -89,6 +90,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   summarizeTokenPercent: "75",
   dmScope: "per-channel-peer",
   heartbeatEnabled: true,
+  heartbeatInitiative: true,
   heartbeatInterval: "30",
   devicesEnabled: false,
   monitorUSB: true,
@@ -221,6 +223,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       heartbeat.enabled === undefined
         ? EMPTY_FORM.heartbeatEnabled
         : asBool(heartbeat.enabled),
+    heartbeatInitiative:
+      heartbeat.initiative === undefined
+        ? EMPTY_FORM.heartbeatInitiative
+        : asBool(heartbeat.initiative),
     heartbeatInterval: asNumberString(
       heartbeat.interval,
       EMPTY_FORM.heartbeatInterval,

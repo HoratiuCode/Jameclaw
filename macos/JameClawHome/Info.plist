@@ -10,6 +10,7 @@
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Jame uses the microphone when you record a voice message for your local agent.</string>
+  <key>NSUserNotificationUsageDescription</key><string>Jame notifies you when an agent finishes a task.</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsArbitraryLoads</key><true/>

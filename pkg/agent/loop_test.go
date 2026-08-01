@@ -2124,3 +2124,45 @@ func TestFilterClientWebSearch_EmptyInput(t *testing.T) {
 		t.Fatalf("len(result) = %d, want 0", len(result))
 	}
 }
+
+func TestChangedMemorySummary(t *testing.T) {
+	tests := []struct {
+		name   string
+		before map[string]string
+		after  map[string]string
+		want   string
+	}{
+		{
+			name:   "unchanged",
+			before: map[string]string{"MEMORY.md": "same"},
+			after:  map[string]string{"MEMORY.md": "same"},
+		},
+		{
+			name:   "long term",
+			before: map[string]string{"MEMORY.md": "old"},
+			after:  map[string]string{"MEMORY.md": "new"},
+			want:   "Jame updated long-term memory for future conversations.",
+		},
+		{
+			name:  "working memory",
+			after: map[string]string{"202607/20260731.md": "learning"},
+			want:  "Jame updated working memory for future conversations.",
+		},
+		{
+			name:   "both",
+			before: map[string]string{"MEMORY.md": "old"},
+			after: map[string]string{
+				"MEMORY.md":          "new",
+				"202607/20260731.md": "learning",
+			},
+			want: "Jame updated long-term and working memory for future conversations.",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := changedMemorySummary(test.before, test.after); got != test.want {
+				t.Fatalf("changedMemorySummary() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

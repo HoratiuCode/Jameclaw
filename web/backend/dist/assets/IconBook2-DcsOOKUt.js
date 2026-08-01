@@ -1,0 +1,1 @@
+import{e as o}from"./index-BlEZpHsl.js";const e=[["path",{d:"M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12",key:"svg-0"}],["path",{d:"M19 16h-12a2 2 0 0 0 -2 2",key:"svg-1"}],["path",{d:"M9 8h6",key:"svg-2"}]],a=o("outline","book-2","Book2",e);export{a as I};

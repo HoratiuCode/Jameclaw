@@ -672,7 +672,7 @@ func (cb *ContextBuilder) BuildMessages(
 		contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: skillsText})
 	}
 
-	if memoryText := cb.buildRelevantMemoryContext(currentMessage); memoryText != "" {
+	if memoryText := cb.buildRelevantMemoryContext(currentMessage, summary, history); memoryText != "" {
 		stringParts = append(stringParts, memoryText)
 		contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: memoryText})
 	}
@@ -754,8 +754,8 @@ func (cb *ContextBuilder) BuildMessages(
 	return messages
 }
 
-func (cb *ContextBuilder) buildRelevantMemoryContext(query string) string {
-	results := cb.memory.Search(query, 5, 4000)
+func (cb *ContextBuilder) buildRelevantMemoryContext(currentMessage, summary string, history []providers.Message) string {
+	results := cb.memory.Search(buildMemorySearchQuery(currentMessage, summary, history), 5, 4000)
 	if len(results) == 0 {
 		return ""
 	}
@@ -765,6 +765,29 @@ func (cb *ContextBuilder) buildRelevantMemoryContext(query string) string {
 		fmt.Fprintf(&sb, "\nSource: %s\n%s\n", result.Path, result.Snippet)
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+// buildMemorySearchQuery preserves enough conversational intent for follow-up
+// messages such as "do that again" or "what did we decide?". Searching only
+// the final message loses the subject of the conversation and causes relevant
+// memory to be missed.
+func buildMemorySearchQuery(currentMessage, summary string, history []providers.Message) string {
+	parts := make([]string, 0, 4)
+	if current := strings.TrimSpace(currentMessage); current != "" {
+		parts = append(parts, current)
+	}
+	for i := len(history) - 1; i >= 0 && len(parts) < 3; i-- {
+		if history[i].Role != "user" {
+			continue
+		}
+		if text := strings.TrimSpace(history[i].Content); text != "" {
+			parts = append(parts, utils.Truncate(text, 600))
+		}
+	}
+	if compactSummary := strings.TrimSpace(summary); compactSummary != "" {
+		parts = append(parts, utils.Truncate(compactSummary, 900))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func sanitizeHistoryForProvider(history []providers.Message) []providers.Message {

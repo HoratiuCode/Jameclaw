@@ -56,6 +56,27 @@ type ActivityCapable interface {
 	PublishActivity(ctx context.Context, chatID, label string) error
 }
 
+// PlanCapable publishes structured task-plan progress to clients. The plan
+// JSON is the todo tool's normalized result; complete marks any remaining
+// steps done when a successful turn finishes.
+type PlanCapable interface {
+	PublishPlanUpdate(ctx context.Context, chatID, planJSON string, complete bool) error
+}
+
+// TaskCompletionCapable notifies a rich client that a turn has finished so it
+// can surface a native completion alert even when its window is in background.
+type TaskCompletionCapable interface {
+	PublishTaskCompletion(ctx context.Context, chatID, content string) error
+}
+
+// MemoryChangeCapable notifies a rich client that durable or working memory
+// changed during the completed turn. The event is separate from the assistant
+// response so clients can render it as trusted product state rather than model
+// prose.
+type MemoryChangeCapable interface {
+	PublishMemoryChange(ctx context.Context, chatID, summary string) error
+}
+
 // Streamer is defined in pkg/bus to avoid circular imports.
 // This alias keeps channel implementations using channels.Streamer unchanged.
 type Streamer = bus.Streamer

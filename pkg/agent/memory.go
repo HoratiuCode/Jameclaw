@@ -36,8 +36,9 @@ type MemorySearchResult struct {
 }
 
 type memoryChunk struct {
-	path string
-	text string
+	path       string
+	text       string
+	modifiedAt time.Time
 }
 
 const (
@@ -100,6 +101,10 @@ func (ms *MemoryStore) ReadToday() string {
 // If the file doesn't exist, it creates a new file with a date header.
 func (ms *MemoryStore) AppendToday(content string) error {
 	todayFile := ms.getTodayFile()
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
 
 	// Ensure month directory exists
 	monthDir := filepath.Dir(todayFile)
@@ -110,6 +115,12 @@ func (ms *MemoryStore) AppendToday(content string) error {
 	var existingContent string
 	if data, err := os.ReadFile(todayFile); err == nil {
 		existingContent = string(data)
+	}
+	// A provider retry can submit the same compaction/research note more than
+	// once. Keep daily notes append-only for distinct facts while avoiding
+	// exact duplicate entries that dilute later retrieval.
+	if memoryEntryExists(existingContent, content) {
+		return nil
 	}
 
 	var newContent string
@@ -124,6 +135,14 @@ func (ms *MemoryStore) AppendToday(content string) error {
 
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
 	return fileutil.WriteFileAtomic(todayFile, []byte(newContent), 0o600)
+}
+
+func memoryEntryExists(existing, candidate string) bool {
+	normalize := func(text string) string {
+		return strings.Join(strings.Fields(strings.ToLower(text)), " ")
+	}
+	candidate = normalize(candidate)
+	return candidate != "" && strings.Contains(normalize(existing), candidate)
 }
 
 // GetRecentDailyNotes returns daily notes from the last N days.
@@ -192,7 +211,9 @@ func (ms *MemoryStore) Search(query string, limit, maxChars int) []MemorySearchR
 		return nil
 	}
 
-	queryTerms := memoryTerms(query)
+	// Rank on normalized concepts rather than raw filler words. Raw BM25 terms
+	// such as "I" previously created false matches between unrelated notes.
+	queryTerms := semanticMemoryTerms(query)
 	if len(queryTerms) == 0 {
 		return nil
 	}
@@ -201,7 +222,7 @@ func (ms *MemoryStore) Search(query string, limit, maxChars int) []MemorySearchR
 	docFreq := make(map[string]int)
 	totalTerms := 0
 	for i, chunk := range chunks {
-		docTerms[i] = memoryTerms(chunk.text)
+		docTerms[i] = semanticMemoryTerms(chunk.text)
 		totalTerms += len(docTerms[i])
 		seen := make(map[string]struct{})
 		for _, term := range docTerms[i] {
@@ -219,10 +240,18 @@ func (ms *MemoryStore) Search(query string, limit, maxChars int) []MemorySearchR
 	for i, chunk := range chunks {
 		lexical := bm25Score(queryTerms, docTerms[i], docFreq, len(chunks), avgLen)
 		semantic := cosineSimilarity(queryVector, memoryVector(chunk.text))
-		score := lexical + semantic*1.5
-		if score <= 0.05 {
+		// Recency can rank relevant memories, but it must never manufacture
+		// relevance. The previous additive boost let any recent daily note pass
+		// the score threshold, which made verbose task logs appear as "memory"
+		// in unrelated conversations.
+		if lexical == 0 && !memorySemanticOverlap(query, chunk.text) {
 			continue
 		}
+		baseScore := lexical + semantic*1.5
+		if baseScore <= 0.05 {
+			continue
+		}
+		score := baseScore + memoryRecencyBoost(chunk.path, chunk.modifiedAt, time.Now())*math.Min(baseScore, 1)
 		results = append(results, MemorySearchResult{Path: chunk.path, Snippet: chunk.text, Score: score})
 	}
 
@@ -265,13 +294,17 @@ func (ms *MemoryStore) loadSearchChunks() []memoryChunk {
 		if relErr != nil {
 			rel = path
 		}
-		chunks = append(chunks, splitMemoryChunks(filepath.ToSlash(rel), string(data))...)
+		info, statErr := entry.Info()
+		if statErr != nil {
+			return nil
+		}
+		chunks = append(chunks, splitMemoryChunks(filepath.ToSlash(rel), string(data), info.ModTime())...)
 		return nil
 	})
 	return chunks
 }
 
-func splitMemoryChunks(path, content string) []memoryChunk {
+func splitMemoryChunks(path, content string, modifiedAt time.Time) []memoryChunk {
 	var chunks []memoryChunk
 	var heading string
 	for _, block := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n\n") {
@@ -286,26 +319,40 @@ func splitMemoryChunks(path, content string) []memoryChunk {
 		if heading != "" {
 			block = heading + "\n\n" + block
 		}
-		chunks = append(chunks, splitLongMemoryBlock(path, block)...)
+		chunks = append(chunks, splitLongMemoryBlock(path, block, modifiedAt)...)
 	}
 	if len(chunks) == 0 && heading != "" {
-		chunks = append(chunks, memoryChunk{path: path, text: heading})
+		chunks = append(chunks, memoryChunk{path: path, text: heading, modifiedAt: modifiedAt})
 	}
 	return chunks
 }
 
-func splitLongMemoryBlock(path, content string) []memoryChunk {
+func splitLongMemoryBlock(path, content string, modifiedAt time.Time) []memoryChunk {
 	runes := []rune(content)
 	var chunks []memoryChunk
 	for start := 0; start < len(runes); {
 		end := min(start+memoryChunkRunes, len(runes))
-		chunks = append(chunks, memoryChunk{path: path, text: strings.TrimSpace(string(runes[start:end]))})
+		chunks = append(chunks, memoryChunk{path: path, text: strings.TrimSpace(string(runes[start:end])), modifiedAt: modifiedAt})
 		if end == len(runes) {
 			break
 		}
 		start = end - memoryChunkOverlap
 	}
 	return chunks
+}
+
+// memoryRecencyBoost favors recent daily notes when two memories are otherwise
+// equally relevant. Long-term memory is deliberately not decayed: it contains
+// user-confirmed, stable facts and should remain available indefinitely.
+func memoryRecencyBoost(path string, modifiedAt, now time.Time) float64 {
+	if !strings.HasPrefix(filepath.ToSlash(path), "memory/") || strings.EqualFold(filepath.Base(path), "MEMORY.md") || modifiedAt.IsZero() {
+		return 0
+	}
+	ageDays := now.Sub(modifiedAt).Hours() / 24
+	if ageDays <= 0 {
+		return 0.35
+	}
+	return 0.35 * math.Exp(-ageDays/30)
 }
 
 func memoryTerms(text string) []string {
@@ -368,6 +415,19 @@ func semanticMemoryTerms(text string) []string {
 		terms = append(terms, term)
 	}
 	return terms
+}
+
+func memorySemanticOverlap(query, document string) bool {
+	documentTerms := make(map[string]struct{})
+	for _, term := range semanticMemoryTerms(document) {
+		documentTerms[term] = struct{}{}
+	}
+	for _, term := range semanticMemoryTerms(query) {
+		if _, ok := documentTerms[term]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func addMemoryFeature(vector []float64, feature string, weight float64) {

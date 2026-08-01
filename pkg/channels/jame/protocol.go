@@ -16,6 +16,9 @@ const (
 	TypeTypingStart    = "typing.start"
 	TypeTypingStop     = "typing.stop"
 	TypeActivityUpdate = "activity.update"
+	TypePlanUpdate     = "plan.update"
+	TypeMemoryChanged  = "memory.changed"
+	TypeTaskComplete   = "task.complete"
 	TypeError          = "error"
 	TypePong           = "pong"
 )

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sipeed/jameclaw/pkg/config"
@@ -27,6 +28,93 @@ func sessionsTestDir(t *testing.T, configPath string) string {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	return dir
+}
+
+func TestHandleArchiveSessionPersistsAndListsState(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+	sessionKey := jameSessionPrefix + "archive-me"
+	if err := store.AddFullMessage(nil, sessionKey, providers.Message{Role: "user", Content: "Archive this chat"}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	archiveRec := httptest.NewRecorder()
+	archiveReq := httptest.NewRequest(http.MethodPut, "/api/sessions/archive-me/archive", strings.NewReader(`{"archived":true}`))
+	mux.ServeHTTP(archiveRec, archiveReq)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive status = %d, body=%s", archiveRec.Code, archiveRec.Body.String())
+	}
+
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))
+	var items []sessionListItem
+	if err := json.Unmarshal(listRec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal(list) error = %v", err)
+	}
+	if len(items) != 1 || !items[0].Archived {
+		t.Fatalf("items = %#v, want one archived session", items)
+	}
+
+	restoreRec := httptest.NewRecorder()
+	restoreReq := httptest.NewRequest(http.MethodPut, "/api/sessions/archive-me/archive", strings.NewReader(`{"archived":false}`))
+	mux.ServeHTTP(restoreRec, restoreReq)
+	if restoreRec.Code != http.StatusOK {
+		t.Fatalf("restore status = %d, body=%s", restoreRec.Code, restoreRec.Body.String())
+	}
+}
+
+func TestHandleRenameSessionPersistsCustomTitle(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+	sessionKey := jameSessionPrefix + "rename-me"
+	if err := store.AddFullMessage(nil, sessionKey, providers.Message{Role: "user", Content: "Original generated title"}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	renameRec := httptest.NewRecorder()
+	renameReq := httptest.NewRequest(http.MethodPut, "/api/sessions/rename-me/title", strings.NewReader(`{"title":"Quarterly launch plan"}`))
+	mux.ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("rename status = %d, body=%s", renameRec.Code, renameRec.Body.String())
+	}
+
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))
+	var items []sessionListItem
+	if err := json.Unmarshal(listRec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal(list) error = %v", err)
+	}
+	if len(items) != 1 || items[0].Title != "Quarterly launch plan" {
+		t.Fatalf("items = %#v, want persisted custom title", items)
+	}
+
+	titlesData, err := os.ReadFile(filepath.Join(dir, ".session-titles.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(.session-titles.json) error = %v", err)
+	}
+	if !strings.Contains(string(titlesData), "Quarterly launch plan") {
+		t.Fatalf("stored titles = %s", titlesData)
+	}
 }
 
 func TestHandleListSessions_JSONLStorage(t *testing.T) {
@@ -523,5 +611,109 @@ func TestHandleSessions_FiltersEmptyJSONLFiles(t *testing.T) {
 
 	if detailRec.Code != http.StatusNotFound {
 		t.Fatalf("detail status = %d, want %d, body=%s", detailRec.Code, http.StatusNotFound, detailRec.Body.String())
+	}
+}
+
+func TestHandleResumeSession_ReusesJameSession(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+	if err := store.AddFullMessage(nil, jameSessionPrefix+"resume-existing", providers.Message{
+		Role: "user", Content: "Continue this desktop conversation.",
+	}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/resume-existing/resume", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response struct {
+		SessionID string `json:"session_id"`
+		Cloned    bool   `json:"cloned"`
+		Messages  []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if response.SessionID != "resume-existing" || response.Cloned {
+		t.Fatalf("response = %#v, want original Jame session", response)
+	}
+	if len(response.Messages) != 1 || response.Messages[0].Content != "Continue this desktop conversation." {
+		t.Fatalf("messages = %#v", response.Messages)
+	}
+}
+
+func TestHandleResumeSession_ClonesExternalChannelIntoJame(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+	sourceKey := "agent:main:telegram:direct:telegram:resume-me"
+	for _, msg := range []providers.Message{
+		{Role: "user", Content: "Telegram question"},
+		{Role: "assistant", Content: "Telegram answer"},
+		{Role: "tool", Content: "preserved tool context"},
+	} {
+		if err := store.AddFullMessage(nil, sourceKey, msg); err != nil {
+			t.Fatalf("AddFullMessage() error = %v", err)
+		}
+	}
+	if err := store.SetSummary(nil, sourceKey, "Telegram summary"); err != nil {
+		t.Fatalf("SetSummary() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sourceKey+"/resume", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response struct {
+		SessionID string `json:"session_id"`
+		Cloned    bool   `json:"cloned"`
+		Messages  []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !response.Cloned || response.SessionID == "" || response.SessionID == sourceKey {
+		t.Fatalf("response = %#v, want a cloned Jame session", response)
+	}
+	if len(response.Messages) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(response.Messages))
+	}
+
+	cloned, err := h.readJSONLSessionByKey(dir, jameSessionPrefix+response.SessionID)
+	if err != nil {
+		t.Fatalf("readJSONLSessionByKey() error = %v", err)
+	}
+	if cloned.Summary != "Telegram summary" || len(cloned.Messages) != 3 {
+		t.Fatalf("cloned session = %#v", cloned)
 	}
 }

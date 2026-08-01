@@ -3,11 +3,15 @@ import AVFoundation
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 import WebKit
 
 extension Notification.Name {
     static let jameclawNewChat = Notification.Name("jameclaw.new-chat")
+    static let jameclawResumeSession = Notification.Name("jameclaw.resume-session")
     static let jameclawHomeNavigation = Notification.Name("com.jameclaw.home.navigate")
+    static let jameclawCommandPalette = Notification.Name("jameclaw.command-palette")
+    static let jameclawWorkspaceChanged = Notification.Name("jameclaw.workspace-changed")
 }
 
 private func authenticatedConsoleURL(
@@ -68,19 +72,124 @@ private func authenticatedSessionURL(port: Int, id: String) -> URL {
     return components.url ?? authenticatedConsoleURL(port: port, path: "/api/sessions")
 }
 
-private func configuredLauncherPort() -> Int {
-    let configURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".jameclaw/launcher-config.json")
-    guard let data = try? Data(contentsOf: configURL),
-          let settings = try? JSONDecoder().decode(LauncherSettings.self, from: data) else {
-        return 18800
-    }
-    return settings.port
+// JameClaw's desktop identity is intentionally narrow: ink, paper, and one
+// unmistakable orange. Keeping these tokens in one place prevents supporting
+// screens from drifting into unrelated purple/blue/green accent systems.
+private enum JameBrand {
+    static let orange = Color(red: 1.00, green: 0.37, blue: 0.04)
+    static let orangeSoft = Color(red: 1.00, green: 0.45, blue: 0.12)
+    static let ink = Color(red: 0.035, green: 0.035, blue: 0.038)
+    static let panel = Color(red: 0.072, green: 0.072, blue: 0.078)
+    static let elevated = Color(red: 0.105, green: 0.105, blue: 0.115)
+    static let paper = Color(red: 0.97, green: 0.965, blue: 0.95)
+    static let muted = Color.white.opacity(0.58)
+    static let rule = Color.white.opacity(0.10)
 }
 
-final class HomeAppDelegate: NSObject, NSApplicationDelegate {
+private struct SquareSegmentedPicker<Value: Hashable>: View {
+    let options: [(label: String, value: Value)]
+    @Binding var selection: Value
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var panel: Color { colorScheme == .light ? .white : JameBrand.elevated }
+    private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
+    private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options.indices, id: \.self) { index in
+                let option = options[index]
+                Button {
+                    selection = option.value
+                } label: {
+                    Text(option.label)
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selection == option.value ? JameBrand.ink : primary)
+                .background(selection == option.value ? JameBrand.orange : panel)
+                .overlay(Rectangle().stroke(rule, lineWidth: 1))
+            }
+        }
+        .overlay(Rectangle().stroke(JameBrand.orange.opacity(0.42), lineWidth: 1))
+    }
+}
+
+private struct SquareTextFieldStyle: TextFieldStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(colorScheme == .light ? Color.white : JameBrand.elevated)
+            .overlay(Rectangle().stroke(colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule, lineWidth: 1))
+    }
+}
+
+private struct WindowOpacityConfigurator: NSViewRepresentable {
+    let opacity: Double
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        apply(to: nsView)
+    }
+
+    private func apply(to view: NSView) {
+        DispatchQueue.main.async {
+            view.window?.alphaValue = CGFloat(min(max(opacity, 0.65), 1.0))
+        }
+    }
+}
+
+private struct WindowBehaviorConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        apply(to: nsView)
+    }
+
+    private func apply(to view: NSView) {
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.styleMask.formUnion([.titled, .closable, .miniaturizable, .resizable])
+            window.isMovable = true
+            window.isMovableByWindowBackground = true
+            window.minSize = NSSize(width: 660, height: 440)
+            window.setFrameAutosaveName("JameClawMainWindow")
+        }
+    }
+}
+
+final class HomeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let key = "jame.notifications.taskCompletion"
+        let notificationsEnabled = UserDefaults.standard.object(forKey: key) == nil || UserDefaults.standard.bool(forKey: key)
+        if notificationsEnabled {
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // The launcher owns the gateway lifecycle. Closing the last native
+        // window must not stop the background service as well; the Dock icon
+        // can reopen the window through applicationShouldHandleReopen.
+        false
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -92,19 +201,37 @@ final class HomeAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        var request = URLRequest(url: authenticatedConsoleURL(port: configuredLauncherPort(), path: "/api/system/quit"))
-        request.httpMethod = "POST"
-        let completed = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { _, _, _ in completed.signal() }.resume()
-        _ = completed.wait(timeout: .now() + 0.6)
-        return .terminateNow
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        revealMainWindow()
+        completionHandler()
     }
 
     private func revealMainWindow() {
         DispatchQueue.main.async {
             guard let window = NSApp.windows.first else { return }
-            window.center()
+            let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame.insetBy(dx: 12, dy: 12)
+            if let visibleFrame {
+                var frame = window.frame
+                frame.size.width = min(frame.width, visibleFrame.width)
+                frame.size.height = min(frame.height, visibleFrame.height)
+                frame.origin.x = min(max(frame.origin.x, visibleFrame.minX), visibleFrame.maxX - frame.width)
+                frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
+                window.setFrame(frame, display: true)
+            } else {
+                window.center()
+            }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -124,51 +251,54 @@ private struct LauncherSettings: Codable {
 }
 
 private enum LauncherTheme: String, CaseIterable, Identifiable {
-    case terminal
-    case midnight
     case light
-    case forest
-    case lavender
+    case dark
+    case system
 
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .terminal: return "Terminal"
-        case .midnight: return "Midnight"
         case .light: return "Light"
-        case .forest: return "Forest"
-        case .lavender: return "Lavender"
+        case .dark: return "Dark"
+        case .system: return "Match This Mac"
         }
     }
-    var colorScheme: ColorScheme { self == .light ? .light : .dark }
+    var preferredColorScheme: ColorScheme? {
+        switch self {
+        case .light: return .light
+        case .dark: return .dark
+        case .system: return nil
+        }
+    }
+    func resolved(for systemScheme: ColorScheme) -> LauncherTheme {
+        self == .system ? (systemScheme == .dark ? .dark : .light) : self
+    }
     var accent: Color {
         switch self {
-        case .terminal: return Color(red: 0.95, green: 0.42, blue: 0.36)
-        case .midnight: return Color(red: 0.36, green: 0.55, blue: 0.98)
         case .light: return Color(red: 0.72, green: 0.18, blue: 0.15)
-        case .forest: return Color(red: 0.31, green: 0.78, blue: 0.53)
-        case .lavender: return Color(red: 0.67, green: 0.52, blue: 0.98)
+        case .dark, .system: return JameBrand.orange
         }
     }
     var background: Color {
         switch self {
-        case .terminal: return Color(red: 0.045, green: 0.05, blue: 0.055)
-        case .midnight: return Color(red: 0.035, green: 0.06, blue: 0.12)
         case .light: return Color(red: 0.96, green: 0.97, blue: 0.98)
-        case .forest: return Color(red: 0.025, green: 0.08, blue: 0.055)
-        case .lavender: return Color(red: 0.09, green: 0.07, blue: 0.15)
+        case .dark, .system: return JameBrand.ink
         }
     }
     var panel: Color {
         switch self {
-        case .terminal: return Color(red: 0.075, green: 0.08, blue: 0.09)
-        case .midnight: return Color(red: 0.065, green: 0.10, blue: 0.19)
         case .light: return .white
-        case .forest: return Color(red: 0.045, green: 0.13, blue: 0.09)
-        case .lavender: return Color(red: 0.14, green: 0.11, blue: 0.23)
+        case .dark, .system: return JameBrand.panel
         }
     }
-    var text: Color { self == .light ? Color(red: 0.13, green: 0.15, blue: 0.18) : Color(red: 0.9, green: 0.92, blue: 0.88) }
+    var text: Color { self == .light ? Color(red: 0.13, green: 0.15, blue: 0.18) : JameBrand.paper }
+}
+
+private func launcherThemePreference(from rawValue: String) -> LauncherTheme {
+    if let theme = LauncherTheme(rawValue: rawValue) { return theme }
+    // Preserve pre-update dark choices such as Terminal, Midnight, Forest,
+    // and Lavender when migrating to the simpler Light/Dark/Mac selector.
+    return rawValue == "light" ? .light : .dark
 }
 
 private enum LauncherAccent: String, CaseIterable, Identifiable {
@@ -191,6 +321,69 @@ private enum LauncherAccent: String, CaseIterable, Identifiable {
         case .gold: return Color(red: 0.94, green: 0.68, blue: 0.22)
         }
     }
+}
+
+private enum DocumentApprovalPolicy: String, CaseIterable, Identifiable {
+    case alwaysAsk
+    case outsideWorkspace
+    case explicitSelection
+    case workspaceOnly
+    case yolo
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .alwaysAsk: return "Ask every time"
+        case .outsideWorkspace: return "Ask outside workspace"
+        case .explicitSelection: return "Selecting an item approves it"
+        case .workspaceOnly: return "Current workspace only"
+        case .yolo: return "YOLO — Never ask"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .alwaysAsk:
+            return "Show an approval before Jame changes to any folder or document."
+        case .outsideWorkspace:
+            return "Work inside the current workspace without interruption; ask before using anything outside it."
+        case .explicitSelection:
+            return "A Finder drop or a click in Terminal + Documents counts as approval for that location."
+        case .workspaceOnly:
+            return "Block document access outside the current workspace until you change this safety policy."
+        case .yolo:
+            return "Never show document approval prompts and allow file tools outside the active workspace. Use only when you fully trust the agent and task."
+        }
+    }
+}
+
+@MainActor
+private func approveDocumentAccess(to targetURL: URL, action: String) -> Bool {
+    let rawPolicy = UserDefaults.standard.string(forKey: "launcher.safety.documentApprovalPolicy")
+        ?? DocumentApprovalPolicy.outsideWorkspace.rawValue
+    let policy = DocumentApprovalPolicy(rawValue: rawPolicy) ?? .outsideWorkspace
+    let target = targetURL.standardizedFileURL.resolvingSymlinksInPath()
+    let workspace = jameWorkspaceURL().standardizedFileURL.resolvingSymlinksInPath()
+    let isInsideWorkspace = target.path == workspace.path || target.path.hasPrefix(workspace.path + "/")
+
+    if policy == .workspaceOnly && !isInsideWorkspace {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Document access blocked"
+        alert.informativeText = "JameClaw is restricted to \(workspace.path). Change the document approval policy in Settings > Safety to use this location."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        return false
+    }
+
+    let shouldAsk = policy == .alwaysAsk || (policy == .outsideWorkspace && !isInsideWorkspace)
+    guard shouldAsk else { return true }
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    alert.messageText = "Allow JameClaw document access?"
+    alert.informativeText = "Jame wants to \(action):\n\n\(target.path)\n\nApproving sets the containing folder as the restricted agent workspace."
+    alert.addButton(withTitle: "Allow")
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
 }
 
 private enum ChatDensity: String, CaseIterable, Identifiable {
@@ -262,9 +455,19 @@ struct JameClawHomeApp: App {
             // A content-sized window disables the standard macOS full-screen
             // control. Keep the desktop window resizable so it can enter
             // full screen from the title bar, the toolbar, or ⌃⌘F.
+            // Let AppKit own interactive resizing. SwiftUI's contentMinSize
+            // mode can animate through a negative intermediate size when the
+            // NavigationSplitView updates, which AppKit treats as a fatal
+            // invalid-geometry error.
             .windowResizability(.automatic)
+            .defaultSize(width: 1120, height: 720)
             .commands {
                 CommandGroup(after: .newItem) {
+                    Button("Quick Actions…") {
+                        NotificationCenter.default.post(name: .jameclawCommandPalette, object: nil)
+                    }
+                    .keyboardShortcut("k", modifiers: [.command])
+
                     Button("New Chat") {
                         selectedSection = .chat
                         NotificationCenter.default.post(name: .jameclawNewChat, object: nil)
@@ -293,48 +496,117 @@ struct JameClawHomeApp: App {
 
 struct JameRootView: View {
     @StateObject private var settings = LauncherSettingsStore()
+    @State private var showingCommandPalette = false
+    @State private var showingTerminalWorkspace = false
+    @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
+    @AppStorage("launcher.design.windowOpacity") private var windowOpacity = 1.0
+    @Environment(\.colorScheme) private var systemColorScheme
     // The native launcher is a chat app first. Keep it selected on launch,
     // while retaining a persistent, desktop-native list of supporting views.
     @Binding var selectedSection: DesktopSection?
 
+    private var chromeTheme: LauncherTheme {
+        launcherThemePreference(from: savedTheme).resolved(for: systemColorScheme)
+    }
+    private var chromeBackground: Color { chromeTheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
+    private var chromePanel: Color { chromeTheme == .light ? .white : JameBrand.elevated }
+    private var chromeRule: Color { chromeTheme == .light ? Color.black.opacity(0.14) : JameBrand.rule }
+    private var chromeForeground: Color { chromeTheme == .light ? JameBrand.ink : JameBrand.paper }
+
     var body: some View {
         NavigationSplitView {
-            List(DesktopSection.allCases, selection: $selectedSection) { section in
-                Label(section.title, systemImage: section.symbol)
-                    .tag(section)
+            DesktopSidebar(selectedSection: $selectedSection) {
+                showingCommandPalette = true
             }
-            .navigationTitle("JameClaw")
-            .listStyle(.sidebar)
         } detail: {
-            switch selectedSection ?? .chat {
-            case .chat:
-                ChatView(port: Int(settings.port) ?? 18800)
-            case .fixedChats:
-                SessionsView(port: Int(settings.port) ?? 18800, pinnedOnly: true)
-            case .memory:
-                AgentMemoryView(port: Int(settings.port) ?? 18800)
-            case .agent:
-                AgentManagerView(port: Int(settings.port) ?? 18800)
-            case .sessions:
-                SessionsView(port: Int(settings.port) ?? 18800)
-            case .automations:
-                AutomationsView(port: Int(settings.port) ?? 18800)
-            case .connectors:
-                ConnectorsView(port: Int(settings.port) ?? 18800)
-            case .artifacts:
-                ArtifactsView()
-            case .skills:
-                SkillsView(port: Int(settings.port) ?? 18800)
-            case .settings:
-                QuickSettingsView(settings: settings)
+            ZStack {
+                LinearGradient(
+                    colors: [chromeBackground, JameBrand.orange.opacity(chromeTheme == .light ? 0.045 : 0.075), chromeBackground],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                switch selectedSection ?? .chat {
+                case .chat:
+                    ChatView(port: Int(settings.port) ?? 18800)
+                case .fixedChats:
+                    SessionsView(port: Int(settings.port) ?? 18800, pinnedOnly: true, resumeSession: openSessionInChat)
+                case .memory:
+                    AgentMemoryView(port: Int(settings.port) ?? 18800)
+                case .agent:
+                    AgentManagerView(port: Int(settings.port) ?? 18800)
+                case .sessions:
+                    SessionsView(port: Int(settings.port) ?? 18800, resumeSession: openSessionInChat)
+                case .archivedChats:
+                    SessionsView(port: Int(settings.port) ?? 18800, archivedOnly: true, resumeSession: openSessionInChat)
+                case .automations:
+                    AutomationsView(port: Int(settings.port) ?? 18800)
+                case .capabilities:
+                    CapabilitiesView(port: Int(settings.port) ?? 18800)
+                case .artifacts:
+                    ArtifactsView()
+                case .settings:
+                    QuickSettingsView(settings: settings) {
+                        selectedSection = .archivedChats
+                    }
+                }
             }
         }
+        .tint(JameBrand.orange)
+        .buttonBorderShape(.roundedRectangle(radius: 0))
+        .textFieldStyle(SquareTextFieldStyle())
+        .preferredColorScheme(launcherThemePreference(from: savedTheme).preferredColorScheme)
+        .background {
+            ZStack {
+                WindowOpacityConfigurator(opacity: windowOpacity)
+                WindowBehaviorConfigurator()
+            }
+            .frame(width: 0, height: 0)
+        }
         .navigationSplitViewStyle(.balanced)
+        .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 290)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 6) {
+                    Button {
+                        showingTerminalWorkspace = true
+                    } label: {
+                        Image(systemName: "terminal")
+                            .frame(width: 28, height: 24)
+                            .foregroundStyle(chromeForeground)
+                            .background(chromePanel)
+                            .overlay(Rectangle().stroke(chromeRule, lineWidth: 1))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open terminal and choose where Jame works")
+                    .accessibilityLabel("Terminal and documents")
+
+                    Button {
+                        selectedSection = .settings
+                    } label: {
+                        Image(systemName: selectedSection == .settings ? "gearshape.fill" : "gearshape")
+                            .frame(width: 28, height: 24)
+                            .background(selectedSection == .settings ? JameBrand.orange : chromePanel)
+                            .foregroundStyle(selectedSection == .settings ? JameBrand.ink : chromeForeground)
+                            .overlay(Rectangle().stroke(chromeRule, lineWidth: 1))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open JameClaw Settings")
+                    .accessibilityLabel("Settings")
+                }
+            }
+        }
         .onReceive(
             DistributedNotificationCenter.default().publisher(for: .jameclawHomeNavigation)
         ) { notification in
-            guard let sectionName = notification.userInfo?["section"] as? String,
-                  let section = DesktopSection(rawValue: sectionName) else { return }
+            guard let sectionName = notification.userInfo?["section"] as? String else { return }
+            let section = (sectionName == "skills" || sectionName == "connectors")
+                ? DesktopSection.capabilities
+                : DesktopSection(rawValue: sectionName)
+            guard let section else { return }
             selectedSection = section
             if notification.userInfo?["new_chat"] as? Bool == true {
                 // Defer until the chat view is mounted when the launcher has
@@ -344,9 +616,245 @@ struct JameRootView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawCommandPalette)) { _ in
+            showingCommandPalette = true
+        }
+        .sheet(isPresented: $showingCommandPalette) {
+            QuickActionPalette(selectedSection: $selectedSection) {
+                showingCommandPalette = false
+            }
+        }
+        .sheet(isPresented: $showingTerminalWorkspace) {
+            TerminalWorkspaceView(
+                port: Int(settings.port) ?? 18800,
+                isPresented: $showingTerminalWorkspace
+            )
+        }
         // Do not impose an application-level minimum or fixed content size.
         // This lets people size the Jame window however they prefer, including
         // narrow and compact layouts managed by macOS.
+    }
+
+    private func openSessionInChat(_ request: NativeSessionResumeRequest) {
+        selectedSection = .chat
+        // The session list and Chat are mutually exclusive detail views. Post
+        // after SwiftUI mounts Chat so its store receives the handoff.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .jameclawResumeSession, object: request)
+        }
+    }
+}
+
+private struct DesktopSidebar: View {
+    @Binding var selectedSection: DesktopSection?
+    let openCommandPalette: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var background: Color { colorScheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
+    private var panel: Color { colorScheme == .light ? .white : JameBrand.elevated }
+    private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
+    private var muted: Color { colorScheme == .light ? JameBrand.ink.opacity(0.58) : JameBrand.muted }
+    private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                DesktopNavigationHeader(title: "Workspace")
+                    .padding(.horizontal, 14)
+                ForEach(DesktopSection.workspace) { section in
+                    navigationButton(section)
+                }
+                DesktopNavigationHeader(title: "Agent")
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                ForEach(DesktopSection.agentTools) { section in
+                    navigationButton(section)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .background(background)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 0) {
+                            Text("JameClaw").foregroundStyle(primary)
+                            Text(".").foregroundStyle(JameBrand.orange)
+                        }
+                        .font(.system(.headline, design: .rounded).weight(.semibold))
+                        Label("Local agent", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(muted)
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    Spacer()
+                }
+                Button(action: openCommandPalette) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "magnifyingglass")
+                        Text("Quick actions")
+                        Spacer()
+                        Text("⌘K").font(.caption.monospaced()).foregroundStyle(.tertiary)
+                    }
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 9).padding(.vertical, 7)
+                    .foregroundStyle(primary)
+                    .background(panel, in: Rectangle())
+                    .overlay(Rectangle().stroke(rule))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(background.opacity(0.97))
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 7) {
+                Circle().fill(JameBrand.orange).frame(width: 7, height: 7)
+                Text("Ready on this Mac")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .background(background.opacity(0.97))
+        }
+        .navigationTitle("")
+    }
+
+    private func navigationButton(_ section: DesktopSection) -> some View {
+        Button {
+            selectedSection = section
+        } label: {
+            DesktopNavigationRow(section: section)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .foregroundStyle(primary)
+                .background(selectedSection == section ? panel : Color.clear)
+                .overlay(alignment: .leading) {
+                    if selectedSection == section {
+                        Rectangle().fill(JameBrand.orange).frame(width: 3)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct QuickActionPalette: View {
+    @Binding var selectedSection: DesktopSection?
+    let dismiss: () -> Void
+    @State private var search = ""
+    @FocusState private var isSearchFocused: Bool
+
+    private struct Action: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let symbol: String
+        let section: DesktopSection
+        let createsChat: Bool
+    }
+
+    private let actions: [Action] = [
+        Action(id: "new-chat", title: "Start a new chat", detail: "Ask JameClaw for help", symbol: "square.and.pencil", section: .chat, createsChat: true),
+        Action(id: "chat", title: "Open chat", detail: "Continue a conversation", symbol: "message.fill", section: .chat, createsChat: false),
+        Action(id: "agents", title: "Manage agents", detail: "Team agents and subagents", symbol: "sparkles", section: .agent, createsChat: false),
+        Action(id: "mcp", title: "Open capabilities", detail: "Manage skills and MCP servers", symbol: "wand.and.stars.inverse", section: .capabilities, createsChat: false),
+        Action(id: "memory", title: "Review memory", detail: "See and edit what JameClaw remembers", symbol: "brain.head.profile", section: .memory, createsChat: false),
+        Action(id: "automation", title: "Open automations", detail: "Create and manage scheduled work", symbol: "calendar.badge.clock", section: .automations, createsChat: false),
+        Action(id: "sessions", title: "Browse sessions", detail: "Find a past conversation", symbol: "clock.arrow.circlepath", section: .sessions, createsChat: false),
+        Action(id: "settings", title: "Open settings", detail: "Configure JameClaw Desktop", symbol: "gearshape", section: .settings, createsChat: false),
+    ]
+
+    private var filteredActions: [Action] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return actions }
+        return actions.filter { $0.title.lowercased().contains(query) || $0.detail.lowercased().contains(query) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "command").foregroundStyle(.tint)
+                TextField("Search actions…", text: $search)
+                    .textFieldStyle(.plain)
+                    .font(.title3)
+                    .focused($isSearchFocused)
+                Text("⌘K").font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+            .padding(16)
+            Divider()
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(filteredActions) { action in
+                        Button { perform(action) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: action.symbol)
+                                    .foregroundStyle(action.section.tint)
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(action.title).font(.body.weight(.semibold))
+                                    Text(action.detail).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "return").font(.caption).foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(height: 360)
+            if filteredActions.isEmpty {
+                Text("No matching actions").font(.caption).foregroundStyle(.secondary).padding(.bottom, 18)
+            }
+        }
+        .frame(width: 500)
+        .onAppear { isSearchFocused = true }
+    }
+
+    private func perform(_ action: Action) {
+        selectedSection = action.section
+        if action.createsChat {
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .jameclawNewChat, object: nil) }
+        }
+        dismiss()
+    }
+}
+
+private struct DesktopNavigationHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title.uppercased())
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(.tertiary)
+            .tracking(0.8)
+            .padding(.top, 7)
+    }
+}
+
+private struct DesktopNavigationRow: View {
+    let section: DesktopSection
+
+    var body: some View {
+        Label {
+            Text(section.title).font(.system(.body, design: .rounded).weight(.medium))
+        } icon: {
+            Image(systemName: section.symbol)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(section.tint)
+                .frame(width: 18)
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -355,15 +863,35 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     case fixedChats
     case memory
     case sessions
+    case archivedChats
     case agent
     case artifacts
-    case skills
+    case capabilities
     case automations
-    case connectors
     case settings
 
     var id: Self { self }
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .chat: return "Chat"
+        case .fixedChats: return "Fixed Chats"
+        case .memory: return "Memory"
+        case .sessions: return "Sessions"
+        case .archivedChats: return "Archived Chats"
+        case .agent: return "Agent"
+        case .artifacts: return "Artifacts"
+        case .capabilities: return "Capabilities"
+        case .automations: return "Automations"
+        case .settings: return "Settings"
+        }
+    }
+
+    static let workspace: [DesktopSection] = [.chat, .fixedChats, .sessions, .artifacts]
+    static let agentTools: [DesktopSection] = [.agent, .memory, .capabilities, .automations]
+
+    var tint: Color {
+        JameBrand.orange
+    }
     var symbol: String {
         switch self {
         case .chat: return "message.fill"
@@ -371,10 +899,10 @@ enum DesktopSection: String, CaseIterable, Identifiable {
         case .memory: return "brain.head.profile"
         case .agent: return "sparkles"
         case .sessions: return "clock.arrow.circlepath"
+        case .archivedChats: return "archivebox.fill"
         case .automations: return "calendar.badge.clock"
-        case .connectors: return "point.3.connected.trianglepath.dotted"
+        case .capabilities: return "wand.and.stars.inverse"
         case .artifacts: return "shippingbox.fill"
-        case .skills: return "wand.and.stars"
         case .settings: return "gearshape"
         }
     }
@@ -386,10 +914,10 @@ enum DesktopSection: String, CaseIterable, Identifiable {
         case .memory: return "3"
         case .agent: return "2"
         case .artifacts: return "3"
-        case .skills: return "4"
+        case .capabilities: return "4"
         case .sessions: return "5"
+        case .archivedChats: return "8"
         case .automations: return "6"
-        case .connectors: return "7"
         case .settings: return ","
         }
     }
@@ -676,7 +1204,7 @@ private struct AutomationTemplateGallery: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("New automation").font(.title2.weight(.bold))
+                    Text("New automation").font(.title2.weight(.semibold))
                     Text("Choose a suggestion to customize and schedule it.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -741,7 +1269,7 @@ private struct AutomationTemplateSetupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Set up \(blueprint.title)").font(.title2.weight(.bold))
+            Text("Set up \(blueprint.title)").font(.title2.weight(.semibold))
             Text(blueprint.description).foregroundStyle(.secondary)
             Form {
                 ForEach(blueprint.fields) { field in
@@ -804,7 +1332,7 @@ private struct AutomationRow: View {
                 Text(status)
                     .font(.caption.weight(.medium))
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(status == "Error" ? Color.red.opacity(0.15) : Color.secondary.opacity(0.12), in: Capsule())
+                    .background(status == "Error" ? Color.red.opacity(0.15) : Color.secondary.opacity(0.12), in: Rectangle())
                 Button(store.runningID == automation.id || automation.running ? "Running…" : "Run now") {
                     Task { await store.run(automation) }
                 }
@@ -862,7 +1390,7 @@ private struct AutomationRow: View {
                         .lineLimit(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                        .background(Color.secondary.opacity(0.08), in: Rectangle())
                 } else if !store.outputError.isEmpty {
                     Text(store.outputError).font(.caption).foregroundStyle(.red)
                 }
@@ -882,9 +1410,10 @@ private struct NativeSessionSummary: Codable, Identifiable {
     let chatType: String?
     let chatID: String?
     let pinned: Bool
+    let archived: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, title, preview, updated, channel, pinned
+        case id, title, preview, updated, channel, pinned, archived
         case chatType = "chat_type"
         case chatID = "chat_id"
         case messageCount = "message_count"
@@ -906,6 +1435,24 @@ private struct NativeSessionDetail: Codable {
     let messages: [NativeSessionMessage]
 }
 
+private struct NativeSessionResumeResponse: Codable {
+    let sessionID: String
+    let messages: [NativeSessionMessage]
+    let cloned: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case messages, cloned
+        case sessionID = "session_id"
+    }
+}
+
+private struct NativeSessionResumeRequest {
+    let sessionID: String
+    let title: String
+    let messages: [NativeSessionMessage]
+    let cloned: Bool
+}
+
 private func sessionSourceName(_ session: NativeSessionSummary) -> String {
     let channel = session.channel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     // The desktop app and Web Console both use the Jame channel. Their
@@ -920,6 +1467,7 @@ private final class NativeSessionStore: ObservableObject {
     @Published var selectedSessionID: String?
     @Published var selectedSession: NativeSessionDetail?
     @Published var selectedSource = "All conversations"
+    @Published var searchText = ""
     @Published var isLoading = false
     @Published var error = ""
 
@@ -956,8 +1504,15 @@ private final class NativeSessionStore: ObservableObject {
     }
 
     var visibleSessions: [NativeSessionSummary] {
-        guard selectedSource != "All conversations" else { return sessions }
-        return sessions.filter { sessionSourceName($0) == selectedSource }
+        sessions.filter { session in
+            let matchesSource = selectedSource == "All conversations" || sessionSourceName(session) == selectedSource
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matchesQuery = query.isEmpty
+                || session.title.localizedCaseInsensitiveContains(query)
+                || session.preview.localizedCaseInsensitiveContains(query)
+                || sessionSourceName(session).localizedCaseInsensitiveContains(query)
+            return matchesSource && matchesQuery
+        }
     }
 
     func select(_ id: String?) async {
@@ -986,99 +1541,404 @@ private final class NativeSessionStore: ObservableObject {
             await load()
         } catch { self.error = "Could not update fixed chat." }
     }
+
+    func setArchived(_ session: NativeSessionSummary, archived: Bool) async {
+        do {
+            var request = authenticatedConsoleRequest(
+                url: authenticatedSessionURL(port: port, id: session.id).appendingPathComponent("archive"),
+                method: "PUT"
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["archived": archived])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            if selectedSessionID == session.id {
+                selectedSessionID = nil
+                selectedSession = nil
+            }
+            await load()
+        } catch {
+            self.error = archived ? "Could not archive this chat." : "Could not restore this chat."
+        }
+    }
+
+    func rename(_ session: NativeSessionSummary, title: String) async -> Bool {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else {
+            self.error = "Enter a session name."
+            return false
+        }
+        do {
+            var request = authenticatedConsoleRequest(
+                url: authenticatedSessionURL(port: port, id: session.id).appendingPathComponent("title"),
+                method: "PUT"
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["title": cleanTitle])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            await load()
+            self.error = ""
+            return true
+        } catch {
+            self.error = "Could not rename this session."
+            return false
+        }
+    }
+
+    func resume(_ session: NativeSessionSummary) async -> NativeSessionResumeRequest? {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            var request = authenticatedConsoleRequest(
+                url: authenticatedSessionURL(port: port, id: session.id).appendingPathComponent("resume"),
+                method: "POST"
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let resumed = try JSONDecoder().decode(NativeSessionResumeResponse.self, from: data)
+            self.error = ""
+            return NativeSessionResumeRequest(
+                sessionID: resumed.sessionID,
+                title: session.title.isEmpty ? session.preview : session.title,
+                messages: resumed.messages,
+                cloned: resumed.cloned
+            )
+        } catch {
+            self.error = "Could not continue this conversation in Chat."
+            return nil
+        }
+    }
+}
+
+private func sessionRelativeDate(_ raw: String) -> String {
+    let precise = ISO8601DateFormatter()
+    precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let standard = ISO8601DateFormatter()
+    standard.formatOptions = [.withInternetDateTime]
+    guard let date = precise.date(from: raw) ?? standard.date(from: raw) else { return raw }
+    let relative = RelativeDateTimeFormatter()
+    relative.unitsStyle = .full
+    return relative.localizedString(for: date, relativeTo: Date())
 }
 
 private struct SessionsView: View {
     @StateObject private var store: NativeSessionStore
     let pinnedOnly: Bool
+    let archivedOnly: Bool
+    let resumeSession: (NativeSessionResumeRequest) -> Void
+    @State private var sessionToRename: NativeSessionSummary?
+    @State private var renameTitle = ""
+    @State private var sessionScrollIndex = 0
+    @Environment(\.colorScheme) private var colorScheme
 
-    init(port: Int, pinnedOnly: Bool = false) {
+    private var pageBackground: Color { colorScheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
+    private var panel: Color { colorScheme == .light ? Color(red: 0.985, green: 0.985, blue: 0.975) : JameBrand.panel }
+    private var elevated: Color { colorScheme == .light ? .white : JameBrand.elevated }
+    private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
+    private var muted: Color { colorScheme == .light ? JameBrand.ink.opacity(0.58) : JameBrand.muted }
+    private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
+
+    init(
+        port: Int,
+        pinnedOnly: Bool = false,
+        archivedOnly: Bool = false,
+        resumeSession: @escaping (NativeSessionResumeRequest) -> Void
+    ) {
         _store = StateObject(wrappedValue: NativeSessionStore(port: port))
         self.pinnedOnly = pinnedOnly
+        self.archivedOnly = archivedOnly
+        self.resumeSession = resumeSession
+    }
+
+    private var displayedSessions: [NativeSessionSummary] {
+        store.visibleSessions.filter { session in
+            if archivedOnly { return session.archived }
+            return !session.archived && (!pinnedOnly || session.pinned)
+        }
     }
 
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(pinnedOnly ? "Fixed Chats" : "Sessions").font(.title2.weight(.semibold))
-                        Text(pinnedOnly ? "Important conversations you pinned from Sessions" : "All conversations from Jame, Telegram, and connected channels")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("Conversation source", selection: $store.selectedSource) {
-                        ForEach(store.sources, id: \.self) { source in
-                            Text(source).tag(source)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    Button { Task { await store.load() } } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .help("Refresh session history")
-                }
-                .padding()
-                List(store.visibleSessions.filter { !pinnedOnly || $0.pinned }, selection: $store.selectedSessionID) { session in
-                    HStack {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(session.title.isEmpty ? session.preview : session.title)
-                                .lineLimit(1)
-                                .font(.headline)
-                            Text("\(sessionSourceName(session)) · \(session.messageCount) messages · \(session.updated)")
+                            Text(archivedOnly ? "Archived Chats" : pinnedOnly ? "Fixed Chats" : "Sessions")
+                                .font(.system(size: 25, weight: .semibold, design: .rounded))
+                            Text(archivedOnly ? "Chats kept out of the active timeline." : pinnedOnly ? "The conversations worth keeping close." : "Every conversation, one searchable timeline.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(muted)
+                            Text("Double-click a session to continue it in Chat")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(JameBrand.orange)
+                            Text("All \(displayedSessions.count) matching sessions are loaded — scroll to see the complete list.")
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(muted)
                         }
                         Spacer()
-                        Button { Task { await store.setPinned(session, pinned: !session.pinned) } } label: {
-                            Image(systemName: session.pinned ? "pin.fill" : "pin")
-                        }.buttonStyle(.borderless).help(session.pinned ? "Unfix chat" : "Fix chat")
+                        Text("\(displayedSessions.count)")
+                            .font(.system(size: 22, weight: .semibold, design: .rounded))
+                            .foregroundStyle(JameBrand.orange)
                     }
-                    .padding(.vertical, 3)
-                    .tag(session.id)
+
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 7) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(JameBrand.orange)
+                            TextField("Search conversations", text: $store.searchText)
+                                .textFieldStyle(.plain)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .background(elevated, in: Rectangle())
+                        .overlay(Rectangle().stroke(rule))
+
+                        HStack {
+                            Picker("Conversation source", selection: $store.selectedSource) {
+                                ForEach(store.sources, id: \.self) { source in Text(source).tag(source) }
+                            }
+                            .labelsHidden().pickerStyle(.menu).frame(maxWidth: 150)
+
+                            Spacer()
+                            Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
+                                .buttonStyle(.bordered)
+                                .help("Refresh session history")
+                        }
+                    }
                 }
-                .overlay {
-                    if store.isLoading { ProgressView() }
-                    else if store.visibleSessions.isEmpty {
-                        ContentUnavailableView(
-                            "No conversations",
-                            systemImage: "clock",
-                            description: Text(store.error.isEmpty ? "No saved conversations match this source." : store.error)
-                        )
+                .padding(20)
+
+                Rectangle().fill(rule).frame(height: 1)
+
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(displayedSessions) { session in
+                            HStack(alignment: .top, spacing: 11) {
+                                HStack(alignment: .top, spacing: 11) {
+                                    Circle()
+                                        .fill(store.selectedSessionID == session.id ? JameBrand.ink : JameBrand.orange)
+                                        .frame(width: 8, height: 8)
+                                        .padding(.top, 6)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(session.title.isEmpty ? session.preview : session.title)
+                                            .font(.system(.body, design: .rounded).weight(.semibold))
+                                            .foregroundStyle(store.selectedSessionID == session.id ? JameBrand.ink : primary)
+                                            .lineLimit(2)
+                                        HStack(spacing: 6) {
+                                            Text(sessionSourceName(session).uppercased())
+                                            Text("•")
+                                            Text("\(session.messageCount) MSG")
+                                            Spacer()
+                                            Text(sessionRelativeDate(session.updated))
+                                        }
+                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(store.selectedSessionID == session.id ? JameBrand.ink.opacity(0.65) : muted)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    TapGesture(count: 2)
+                                        .exclusively(before: TapGesture(count: 1))
+                                        .onEnded { gesture in
+                                            switch gesture {
+                                            case .first:
+                                                Task {
+                                                    guard let request = await store.resume(session) else { return }
+                                                    resumeSession(request)
+                                                }
+                                            case .second:
+                                                Task { await store.select(session.id) }
+                                            }
+                                        }
+                                )
+                                Menu {
+                                    Button {
+                                        renameTitle = session.title.isEmpty ? session.preview : session.title
+                                        sessionToRename = session
+                                    } label: {
+                                        Label("Rename Session", systemImage: "pencil")
+                                    }
+                                    Divider()
+                                    Button {
+                                        Task { await store.setPinned(session, pinned: !session.pinned) }
+                                    } label: {
+                                        Label(
+                                            session.pinned ? "Unfix Chat" : "Fix Chat",
+                                            systemImage: session.pinned ? "pin.slash" : "pin"
+                                        )
+                                    }
+                                    Divider()
+                                    Button {
+                                        Task { await store.setArchived(session, archived: !session.archived) }
+                                    } label: {
+                                        Label(
+                                            session.archived ? "Restore to Sessions" : "Archive Chat",
+                                            systemImage: session.archived ? "arrow.uturn.backward" : "archivebox"
+                                        )
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(store.selectedSessionID == session.id ? JameBrand.ink : JameBrand.orange)
+                                        .frame(width: 28, height: 24)
+                                        .background(store.selectedSessionID == session.id ? JameBrand.ink.opacity(0.08) : elevated)
+                                        .overlay(Rectangle().stroke(store.selectedSessionID == session.id ? JameBrand.ink.opacity(0.18) : rule))
+                                        .contentShape(Rectangle())
+                                }
+                                .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .fixedSize()
+                                .help("Session actions")
+                                .accessibilityLabel("Session actions")
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 13)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(store.selectedSessionID == session.id ? JameBrand.orange : Color.clear)
+                            .contentShape(Rectangle())
+                            .id(session.id)
+                            Rectangle().fill(rule).frame(height: 1).padding(.leading, 35)
+                        }
+                    }
+                        }
+                        .scrollIndicators(.visible)
+                        .overlay {
+                            if store.isLoading { ProgressView().tint(JameBrand.orange) }
+                            else if displayedSessions.isEmpty {
+                                ContentUnavailableView(
+                                    archivedOnly ? "No archived chats" : "No conversations",
+                                    systemImage: archivedOnly ? "archivebox" : "clock",
+                                    description: Text(store.error.isEmpty ? "Try another search or source." : store.error)
+                                )
+                            }
+                        }
+                        .frame(maxHeight: .infinity)
+
+                        HStack(spacing: 10) {
+                            Button {
+                                jumpSessions(by: -10, proxy: proxy)
+                            } label: {
+                                Label("Newer 10", systemImage: "arrow.up")
+                            }
+                            .disabled(sessionScrollIndex == 0 || displayedSessions.isEmpty)
+                            Spacer()
+                            Text("\(displayedSessions.count) sessions loaded")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(muted)
+                            Spacer()
+                            Button {
+                                jumpSessions(by: 10, proxy: proxy)
+                            } label: {
+                                Label("Older 10", systemImage: "arrow.down")
+                            }
+                            .disabled(sessionScrollIndex + 10 >= displayedSessions.count)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(panel)
                     }
                 }
             }
-            .frame(minWidth: 285, idealWidth: 350)
+            .frame(minWidth: 230, idealWidth: 330, maxWidth: 430, maxHeight: .infinity)
+            .background(panel)
+
+            Rectangle().fill(rule).frame(width: 1)
 
             Group {
                 if let session = store.selectedSession {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(session.messages) { message in
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(message.role.capitalized)
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(message.role == "user" ? .blue : .green)
-                                    Text(message.content.isEmpty ? "(no text content)" : message.content)
-                                        .textSelection(.enabled)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                    VStack(spacing: 0) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("CONVERSATION")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .tracking(1.2).foregroundStyle(JameBrand.orange)
+                                Text("\(session.messages.count) saved messages")
+                                    .font(.caption).foregroundStyle(muted)
                             }
+                            Spacer()
                         }
-                        .padding()
+                        .padding(20)
+                        Rectangle().fill(rule).frame(height: 1)
+
+                        ScrollView {
+                            LazyVStack(spacing: 15) {
+                                ForEach(session.messages) { message in
+                                    let isUser = message.role == "user"
+                                    VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
+                                        Text(isUser ? "YOU" : "JAME")
+                                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                            .tracking(1)
+                                            .foregroundStyle(isUser ? JameBrand.orange : muted)
+                                        Text(message.content.isEmpty ? "(no text content)" : message.content)
+                                            .foregroundStyle(isUser ? JameBrand.ink : primary)
+                                            .textSelection(.enabled)
+                                            .padding(.horizontal, 14).padding(.vertical, 11)
+                                            .background(isUser ? JameBrand.orange : elevated, in: Rectangle())
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                                }
+                            }
+                            .padding(22)
+                        }
                     }
                 } else {
-                    ContentUnavailableView("Select a session", systemImage: "bubble.left.and.bubble.right", description: Text("Choose a conversation to see its complete history."))
+                    ContentUnavailableView(
+                        "Select a session",
+                        systemImage: "bubble.left.and.bubble.right",
+                        description: Text("Choose a conversation to read its full history.")
+                    )
                 }
             }
-            .frame(minWidth: 420)
+            .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
+            .background(pageBackground)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(primary)
         .task { await store.load() }
-        .onChange(of: store.selectedSessionID) { _, id in Task { await store.select(id) } }
+        .sheet(item: $sessionToRename) { session in
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Rename Session").font(.title2.weight(.semibold))
+                Text("Give this conversation a clear name. The original messages are not changed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Session name", text: $renameTitle)
+                    .onSubmit { submitRename(session) }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { sessionToRename = nil }
+                    Button("Rename") { submitRename(session) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(renameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(24)
+            .frame(width: 430)
+        }
+    }
+
+    private func submitRename(_ session: NativeSessionSummary) {
+        Task {
+            if await store.rename(session, title: renameTitle) {
+                sessionToRename = nil
+            }
+        }
+    }
+
+    private func jumpSessions(by amount: Int, proxy: ScrollViewProxy) {
+        guard !displayedSessions.isEmpty else { return }
+        sessionScrollIndex = min(max(sessionScrollIndex + amount, 0), displayedSessions.count - 1)
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(displayedSessions[sessionScrollIndex].id, anchor: .top)
+        }
     }
 
 }
@@ -1171,10 +2031,89 @@ private final class ConnectorsStore: ObservableObject {
             self.error = "Could not load connectors. Check that JameClaw is running."
         }
     }
+
+    func addMCPServer(name: String, apiKey: String, url: String) async -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            error = "Enter a server name."
+            return false
+        }
+        guard let endpoint = URL(string: trimmedURL), let scheme = endpoint.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+            error = "Enter a valid HTTP or HTTPS MCP link."
+            return false
+        }
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/tools/mcp/servers", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "name": trimmedName,
+                "api_key": apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                "url": trimmedURL,
+                "transport": "http",
+                "enabled": true,
+            ])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            await load()
+            return true
+        } catch {
+            self.error = "Could not add the MCP server. Check the link and try again."
+            return false
+        }
+    }
+}
+
+private enum CapabilitiesPage: String, CaseIterable, Identifiable {
+    case skills = "Skills"
+    case mcp = "MCP"
+
+    var id: Self { self }
+}
+
+private struct CapabilitiesView: View {
+    let port: Int
+    @State private var selectedPage = CapabilitiesPage.skills
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 18) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Capabilities")
+                        .font(.system(size: 25, weight: .semibold, design: .rounded))
+                    Text("Teach Jame new workflows and connect external tools.")
+                        .font(.caption)
+                        .foregroundStyle(JameBrand.muted)
+                }
+                Spacer()
+                SquareSegmentedPicker(
+                    options: CapabilitiesPage.allCases.map { (label: $0.rawValue, value: $0) },
+                    selection: $selectedPage
+                )
+                .frame(width: 260)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
+            .background(JameBrand.panel)
+
+            Rectangle().fill(JameBrand.rule).frame(height: 1)
+
+            Group {
+                switch selectedPage {
+                case .skills:
+                    SkillsView(port: port)
+                case .mcp:
+                    ConnectorsView(port: port)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
 }
 
 private struct ConnectorsView: View {
     @StateObject private var store: ConnectorsStore
+    @State private var showAddMCP = false
 
     init(port: Int) { _store = StateObject(wrappedValue: ConnectorsStore(port: port)) }
 
@@ -1183,11 +2122,13 @@ private struct ConnectorsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Connectors").font(.title2.weight(.semibold))
+                        Text("MCP").font(.title2.weight(.semibold))
                         Text("MCP servers and CLI providers available to this agent.")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button("Add MCP", systemImage: "plus") { showAddMCP = true }
+                        .buttonStyle(.borderedProminent)
                     Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
                         .help("Refresh connectors")
                 }
@@ -1212,12 +2153,58 @@ private struct ConnectorsView: View {
                     }
                 }
 
-                if store.isLoading { ProgressView("Loading connectors…") }
+                if store.isLoading { ProgressView("Loading MCP capabilities…") }
                 if !store.error.isEmpty { Text(store.error).foregroundStyle(.red) }
             }
             .padding(24)
         }
         .task { await store.load() }
+        .sheet(isPresented: $showAddMCP) {
+            AddMCPServerSheet(store: store, isPresented: $showAddMCP)
+        }
+    }
+}
+
+private struct AddMCPServerSheet: View {
+    @ObservedObject var store: ConnectorsStore
+    @Binding var isPresented: Bool
+    @State private var name = ""
+    @State private var apiKey = ""
+    @State private var url = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Add MCP server").font(.title2.weight(.semibold))
+                Text("Connect a remote MCP server so Jame can use its tools.")
+                    .foregroundStyle(.secondary)
+            }
+            Form {
+                TextField("Server name", text: $name, prompt: Text("e.g. linear"))
+                SecureField("Server key (optional)", text: $apiKey, prompt: Text("API key or bearer token"))
+                TextField("MCP link", text: $url, prompt: Text("https://example.com/mcp"))
+            }
+            Text("The server key is stored as an Authorization header and is not shown again in this screen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !store.error.isEmpty { Text(store.error).font(.caption).foregroundStyle(.red) }
+            HStack {
+                Spacer()
+                Button("Cancel") { isPresented = false }
+                Button(isSaving ? "Adding…" : "Add MCP") {
+                    isSaving = true
+                    Task {
+                        if await store.addMCPServer(name: name, apiKey: apiKey, url: url) { isPresented = false }
+                        isSaving = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSaving)
+            }
+        }
+        .padding(24)
+        .frame(width: 500)
     }
 }
 
@@ -1233,7 +2220,7 @@ private struct ConnectorSection<Content: View>: View {
             VStack(alignment: .leading, spacing: 8) { content }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                .background(.quaternary, in: Rectangle())
         }
     }
 }
@@ -1272,7 +2259,39 @@ private func jameWorkspaceURL() -> URL {
     return URL(fileURLWithPath: configuredPath)
 }
 
-private struct WorkspaceEntry: Identifiable {
+private let jameTaskFolderDefaultsKey = "jameclaw.native-chat.task-folder"
+
+private func jameInternalWorkspaceURL() -> URL {
+    FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".jameclaw/workspace", isDirectory: true)
+        .standardizedFileURL
+}
+
+private func jameTaskFolderURL() -> URL {
+    if let storedPath = UserDefaults.standard.string(forKey: jameTaskFolderDefaultsKey), !storedPath.isEmpty {
+        return URL(fileURLWithPath: storedPath, isDirectory: true).standardizedFileURL
+    }
+    let configured = jameWorkspaceURL().standardizedFileURL
+    let internalWorkspace = jameInternalWorkspaceURL()
+    if configured.path == internalWorkspace.path {
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/JameClaw", isDirectory: true)
+            .standardizedFileURL
+    }
+    return configured
+}
+
+private func organizedJameTaskFolder(for selectedURL: URL) -> URL {
+    let selected = selectedURL.standardizedFileURL.resolvingSymlinksInPath()
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let collectionFolders = ["Desktop", "Documents", "Downloads"].map {
+        home.appendingPathComponent($0, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
+    }
+    guard collectionFolders.contains(where: { $0.path == selected.path }) else { return selected }
+    return selected.appendingPathComponent("JameClaw", isDirectory: true)
+}
+
+private struct WorkspaceEntry: Identifiable, Sendable {
     let url: URL
     let isDirectory: Bool
     var id: String { url.path }
@@ -1323,7 +2342,7 @@ private struct WorkspaceBrowserView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(browser.title).font(.title3.weight(.bold))
+                    Text(browser.title).font(.title3.weight(.semibold))
                     Text(browser.directory.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
@@ -1366,7 +2385,7 @@ struct ArtifactsView: View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 HStack {
-                    Text("Artifacts").font(.title3.weight(.bold))
+                    Text("Artifacts").font(.title3.weight(.semibold))
                     Spacer()
                     Button { browser.refresh() } label: { Image(systemName: "arrow.clockwise") }
                     Button("Open Folder") { browser.open() }
@@ -1394,7 +2413,7 @@ struct ArtifactsView: View {
                     .listStyle(.sidebar)
                 }
             }
-            .frame(minWidth: 230, idealWidth: 260, maxWidth: 310)
+            .frame(minWidth: 180, idealWidth: 240, maxWidth: 300)
             Divider()
             if let project = selectedProject {
                 ArtifactProjectView(projectURL: project.url, title: artifactTitle(project.url))
@@ -1434,7 +2453,7 @@ private struct ArtifactProjectView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title3.weight(.bold))
+                    Text(title).font(.title3.weight(.semibold))
                     Text(projectURL.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
@@ -1469,7 +2488,7 @@ private struct ArtifactProjectView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .frame(minWidth: 185, idealWidth: 220, maxWidth: 270)
+                    .frame(minWidth: 150, idealWidth: 200, maxWidth: 250)
                     Divider()
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -1484,7 +2503,7 @@ private struct ArtifactProjectView: View {
                                 .font(.system(.body, design: .monospaced))
                                 .scrollContentBackground(.hidden)
                                 .padding(8)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                                .background(.quaternary, in: Rectangle())
                         } else {
                             ContentUnavailableView("Choose a project file", systemImage: "doc.text")
                         }
@@ -1540,6 +2559,195 @@ private struct ArtifactWebView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {}
 }
 
+private struct ProviderSetupSheet: View {
+    let port: Int
+    @ObservedObject var providers: NativeProviderStore
+    let done: () -> Void
+    @State private var step: Step = .configure
+    @State private var providerID = ""
+    @State private var presetID = ""
+    @State private var apiKey = ""
+
+    private enum Step { case configure, select }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(step == .configure ? "Add AI provider" : "Set global fallback provider")
+                        .font(.title3.weight(.semibold))
+                    Text(step == .configure
+                         ? "Configure a second provider, then choose it as JameClaw's fallback."
+                         : "This fallback is saved globally for Desktop, Web Console, agents, and channels.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done", action: done)
+                    .buttonStyle(.bordered)
+            }
+            .padding(16)
+            Divider()
+            if step == .configure {
+                NativeProviderSetupForm(
+                    providers: providers,
+                    port: port,
+                    providerID: $providerID,
+                    presetID: $presetID,
+                    apiKey: $apiKey,
+                    continueToFallback: { step = .select }
+                )
+            } else {
+                GlobalFallbackSelection(providers: providers, port: port, configureAgain: { step = .configure }, done: done)
+            }
+        }
+        .frame(minWidth: 680, minHeight: 500)
+    }
+}
+
+private struct NativeProviderSetupForm: View {
+    @ObservedObject var providers: NativeProviderStore
+    let port: Int
+    @Binding var providerID: String
+    @Binding var presetID: String
+    @Binding var apiKey: String
+    let continueToFallback: () -> Void
+
+    private var selectedProvider: NativeProviderInfo? {
+        providers.catalog.first(where: { $0.id == providerID })
+    }
+    private var presets: [NativeProviderModelPreset] { selectedProvider?.recommendedModels ?? [] }
+    private var selectedPreset: NativeProviderModelPreset? { presets.first(where: { $0.id == presetID }) }
+    private var requiresKey: Bool { selectedPreset?.requiresAPIKey ?? selectedProvider?.requiresAPIKey ?? false }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("Configure a provider in Desktop", systemImage: "desktopcomputer.and.macbook")
+                .font(.headline)
+            Text("This setup writes directly to JameClaw's shared provider configuration. No Web Console is opened.")
+                .font(.subheadline).foregroundStyle(.secondary)
+            if providers.catalog.isEmpty {
+                ProgressView("Loading available providers…")
+                    .task { await providers.load(port: port) }
+            } else {
+                Form {
+                    Picker("Provider", selection: $providerID) {
+                        Text("Choose a provider").tag("")
+                        ForEach(providers.catalog) { provider in
+                            Text(provider.name).tag(provider.id)
+                        }
+                    }
+                    .onChange(of: providerID) { _, _ in
+                        presetID = presets.first?.id ?? ""
+                        apiKey = ""
+                    }
+                    Picker("Model", selection: $presetID) {
+                        Text("Choose a model").tag("")
+                        ForEach(presets) { preset in
+                            Text(preset.name).tag(preset.id)
+                        }
+                    }
+                    if let provider = selectedProvider {
+                        Text(provider.description).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if requiresKey {
+                        SecureField(selectedPreset?.keyLabel ?? selectedProvider?.keyLabel ?? "API key", text: $apiKey)
+                    }
+                }
+                .formStyle(.grouped)
+                HStack {
+                    Button("Refresh providers") { Task { await providers.load(port: port) } }
+                    Spacer()
+                    Button("Add provider") {
+                        guard let provider = selectedProvider, let preset = selectedPreset else { return }
+                        Task {
+                            if await providers.addCatalogModel(provider: provider, preset: preset, apiKey: apiKey, port: port) {
+                                continueToFallback()
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedProvider == nil || selectedPreset == nil || (requiresKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                }
+            }
+            if !providers.status.isEmpty { Text(providers.status).font(.caption).foregroundStyle(.secondary) }
+            Spacer()
+        }
+        .padding(24)
+        .onAppear {
+            if providerID.isEmpty { providerID = providers.catalog.first?.id ?? "" }
+            if presetID.isEmpty { presetID = selectedProvider?.recommendedModels.first?.id ?? "" }
+        }
+        .onChange(of: providers.catalog.count) { _, _ in
+            if providerID.isEmpty { providerID = providers.catalog.first?.id ?? "" }
+            if presetID.isEmpty { presetID = selectedProvider?.recommendedModels.first?.id ?? "" }
+        }
+    }
+}
+
+private struct GlobalFallbackSelection: View {
+    @ObservedObject var providers: NativeProviderStore
+    let port: Int
+    let configureAgain: () -> Void
+    let done: () -> Void
+
+    private var fallbackModels: [NativeModelInfo] {
+        providers.models.filter { $0.modelName != providers.selectedModel }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("Global fallback coverage", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.headline)
+            Text("When the primary provider has a retriable error, every JameClaw entry point uses this fallback automatically: Desktop Chat, Web Console, team agents, automations, and connected channels.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if providers.models.count < 2 {
+                ContentUnavailableView(
+                    "Add one more provider first",
+                    systemImage: "plus.circle",
+                    description: Text("A global fallback must be different from the primary provider.")
+                )
+            } else {
+                Form {
+                    Picker("Primary provider", selection: $providers.selectedModel) {
+                        ForEach(providers.models) { model in
+                            Text("\(providers.providerName(for: model)) · \(model.modelName)").tag(model.modelName)
+                        }
+                    }
+                    Picker("Global fallback", selection: $providers.selectedFallbackModel) {
+                        Text("Choose a provider").tag("")
+                        ForEach(fallbackModels) { model in
+                            Text("\(providers.providerName(for: model)) · \(model.modelName)").tag(model.modelName)
+                        }
+                    }
+                }
+                .formStyle(.grouped)
+                HStack {
+                    Button("Back to provider setup", action: configureAgain)
+                    Spacer()
+                    Button("Apply global fallback") {
+                        Task {
+                            await providers.setFailover(
+                                primaryModel: providers.selectedModel,
+                                fallbackModel: providers.selectedFallbackModel,
+                                port: port
+                            )
+                            if !providers.selectedFallbackModel.isEmpty { done() }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(providers.selectedModel.isEmpty || providers.selectedFallbackModel.isEmpty)
+                }
+            }
+            if !providers.status.isEmpty {
+                Text(providers.status).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(24)
+    }
+}
+
 struct SkillsView: View {
     @StateObject private var browser = WorkspaceBrowser(
         title: "Skills",
@@ -1557,7 +2765,7 @@ struct SkillsView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Skills").font(.title3.weight(.bold))
+                    Text("Skills").font(.title3.weight(.semibold))
                     Text(browser.directory.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
@@ -1597,7 +2805,7 @@ struct SkillsView: View {
         .task { refreshAgentSkills() }
         .sheet(isPresented: $showingAddSkill) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Add a Skill").font(.title2.weight(.bold))
+                Text("Add a Skill").font(.title2.weight(.semibold))
                 Text("This creates a workspace skill that JameClaw loads from \(browser.directory.path).")
                     .foregroundStyle(.secondary)
                 TextField("Skill name (for example, release-notes)", text: $skillName)
@@ -1680,7 +2888,7 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 18) {
             Image(systemName: "sparkles").font(.system(size: 34)).foregroundStyle(.red)
-            Text("Jame").font(.title2.weight(.bold))
+            Text("Jame").font(.title2.weight(.semibold))
             Text(status).multilineTextAlignment(.center).foregroundStyle(.secondary)
             HStack(spacing: 10) {
                 Button("Open Web Console") { openConsole() }
@@ -1732,6 +2940,77 @@ private struct NativeAgentMemory: Codable {
     }
 }
 
+private struct NativeLearningCandidate: Codable, Identifiable {
+    let id: String
+    let kind: String
+    let title: String
+    let lesson: String
+    let evidence: String
+    let scope: String
+    let confidence: Double
+    let status: String
+    let occurrences: Int
+    let requiresApproval: Bool
+    let tools: [String]?
+    let skillPath: String?
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, lesson, evidence, scope, confidence, status, occurrences, tools
+        case requiresApproval = "requires_approval"
+        case skillPath = "skill_path"
+        case updatedAt = "updated_at"
+    }
+}
+
+private struct NativeTurnReflection: Codable, Identifiable {
+    let id: String
+    let objective: String
+    let outcome: String
+    let resultSummary: String
+    let tools: [String]?
+    let toolFailures: [String]?
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, objective, outcome, tools
+        case resultSummary = "result_summary"
+        case toolFailures = "tool_failures"
+        case createdAt = "created_at"
+    }
+}
+
+private struct NativeImprovementMetrics: Codable {
+    let reflections: Int
+    let pendingCandidates: Int
+    let promotedCandidates: Int
+    let repeatedFailureCount: Int
+    let skillsCreated: Int
+    let completionRate: Double
+    let correctionRate: Double
+
+    enum CodingKeys: String, CodingKey {
+        case reflections
+        case pendingCandidates = "pending_candidates"
+        case promotedCandidates = "promoted_candidates"
+        case repeatedFailureCount = "repeated_failure_count"
+        case skillsCreated = "skills_created"
+        case completionRate = "completion_rate"
+        case correctionRate = "correction_rate"
+    }
+
+    static let empty = NativeImprovementMetrics(
+        reflections: 0, pendingCandidates: 0, promotedCandidates: 0,
+        repeatedFailureCount: 0, skillsCreated: 0, completionRate: 0, correctionRate: 0
+    )
+}
+
+private struct NativeSelfImprovementSnapshot: Codable {
+    let candidates: [NativeLearningCandidate]
+    let reflections: [NativeTurnReflection]
+    let metrics: NativeImprovementMetrics
+}
+
 @MainActor
 private final class NativeMemoryStore: ObservableObject {
     @Published var text = ""
@@ -1745,6 +3024,9 @@ private final class NativeMemoryStore: ObservableObject {
     @Published var statusStyle = ""
     @Published var userProfile = ""
     @Published var peopleAndRelationships = ""
+    @Published var improvementCandidates: [NativeLearningCandidate] = []
+    @Published var reflections: [NativeTurnReflection] = []
+    @Published var improvementMetrics = NativeImprovementMetrics.empty
     private let port: Int
     init(port: Int) { self.port = port }
 
@@ -1766,8 +3048,49 @@ private final class NativeMemoryStore: ObservableObject {
                 configuredMemoryNotes = main.human?.memoryNotes ?? ""
                 statusStyle = main.human?.statusStyle ?? ""
             }
+            await loadSelfImprovement()
             status = ""
         } catch { status = "Could not load agent memory." }
+    }
+
+    func loadSelfImprovement() async {
+        do {
+            let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/agents/main/self-improvement"))
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            let snapshot = try JSONDecoder().decode(NativeSelfImprovementSnapshot.self, from: data)
+            improvementCandidates = snapshot.candidates
+            reflections = snapshot.reflections
+            improvementMetrics = snapshot.metrics
+        } catch {
+            status = "Could not load self-improvement history."
+        }
+    }
+
+    func updateCandidate(_ candidate: NativeLearningCandidate, action: String) async {
+        do {
+            let candidateID = candidate.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? candidate.id
+            var request = authenticatedConsoleRequest(port: port, path: "/api/agents/main/self-improvement/candidates/\(candidateID)", method: "PUT")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["action": action])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            await loadSelfImprovement()
+            status = action == "create_skill" ? "Reusable skill created." : "Learning decision saved."
+        } catch {
+            status = "Could not update this learning candidate."
+        }
+    }
+
+    func runMaintenance() async {
+        do {
+            let request = authenticatedConsoleRequest(port: port, path: "/api/agents/main/self-improvement/maintenance", method: "POST")
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            await loadSelfImprovement()
+            status = "Learning history reviewed."
+        } catch {
+            status = "Could not run learning maintenance."
+        }
     }
 
     func saveIdentity() async {
@@ -1822,53 +3145,280 @@ private func replacingMemorySection(_ title: String, with value: String, in text
 
 private struct AgentMemoryView: View {
     @StateObject private var store: NativeMemoryStore
+    @State private var selectedTab = "memory"
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var pageBackground: Color { colorScheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
+    private var panel: Color { colorScheme == .light ? .white : JameBrand.panel }
+    private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
+    private var muted: Color { colorScheme == .light ? JameBrand.ink.opacity(0.58) : JameBrand.muted }
+    private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
+
     init(port: Int) { _store = StateObject(wrappedValue: NativeMemoryStore(port: port)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Memory").font(.title2.weight(.bold))
-                    Text(store.path.isEmpty ? "Main agent long-term memory" : store.path).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("LOCAL CONTEXT")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .tracking(1.4)
+                        .foregroundStyle(JameBrand.orange)
+                    Text("Memory")
+                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    Text("The durable facts Jame can carry into a new conversation.")
+                        .font(.subheadline)
+                        .foregroundStyle(muted)
                 }
                 Spacer()
-                Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
+                Button { Task { await store.load() } } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                    .buttonStyle(.bordered)
             }
-            TabView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Stable preferences, project facts, and standing instructions.").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $store.text).font(.system(.body, design: .monospaced)).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                    HStack { Spacer(); Button("Save memory") { Task { await store.save() } }.buttonStyle(.borderedProminent) }
-                }.tabItem { Label("Long-term Memory", systemImage: "brain.head.profile") }
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Identity defines how your agent presents itself and works with you.").foregroundStyle(.secondary)
-                    TextField("Agent name", text: $store.agentName)
-                    TextField("Persona", text: $store.persona, axis: .vertical).lineLimit(2...4)
-                    TextField("Tone", text: $store.tone)
-                    TextField("Discussion mode", text: $store.discussionMode)
-                    Text("Configured memory notes").font(.headline)
-                    Text("Persistent notes stored with the agent configuration. They are kept separate from the long-term MEMORY.md file.").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $store.configuredMemoryNotes).font(.system(.body, design: .monospaced)).frame(minHeight: 90).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                    TextField("Status style", text: $store.statusStyle)
-                    Divider()
-                    Text("User profile").font(.headline)
-                    Text("What Jame should remember about you: preferences, goals, work style, and important context.").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $store.userProfile).font(.system(.body, design: .monospaced)).frame(minHeight: 110).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                    Divider()
-                    Text("People & relationships").font(.headline)
-                    Text("People mentioned by the user and their relationship or role. Example: “Maria — user’s cofounder; handles product.”").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $store.peopleAndRelationships).font(.system(.body, design: .monospaced)).frame(minHeight: 110).overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+            .padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 18)
+
+            HStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(store.text.count.formatted())")
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(primary)
+                    Text("CHARACTERS SAVED").font(.system(size: 9, weight: .semibold, design: .rounded)).foregroundStyle(muted)
+                }
+                Rectangle().fill(rule).frame(width: 1, height: 34)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Relevant snippets")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(JameBrand.orange)
+                    Text("RECALLED PER MESSAGE").font(.system(size: 9, weight: .semibold, design: .rounded)).foregroundStyle(muted)
+                }
+                Spacer()
+                Text(store.path.isEmpty ? "memory/MEMORY.md" : store.path)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(muted)
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: 360)
+            }
+            .padding(.horizontal, 24).padding(.vertical, 13)
+            .background(panel)
+            .overlay(alignment: .leading) { Rectangle().fill(JameBrand.orange).frame(width: 3) }
+
+            SquareSegmentedPicker(
+                options: [
+                    (label: "Long-term memory", value: "memory"),
+                    (label: "Identity & preferences", value: "identity"),
+                    (label: "Self-improvement", value: "improvement"),
+                ],
+                selection: $selectedTab
+            )
+            .frame(maxWidth: 590)
+            .padding(.horizontal, 24).padding(.vertical, 16)
+
+            Rectangle().fill(rule).frame(height: 1)
+
+            if selectedTab == "memory" {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Durable memory").font(.headline)
+                            Text("Keep stable preferences, decisions, people, and recurring workflows here. Daily task logs should stay out.")
+                                .font(.caption).foregroundStyle(muted)
+                        }
                         Spacer()
-                        Button("Save agent identity") { Task { await store.saveIdentity() } }
-                        Button("Save user context") { Task { await store.saveUserContext() } }.buttonStyle(.borderedProminent)
+                        Button("Save memory") { Task { await store.save() } }
+                            .buttonStyle(.borderedProminent)
+                            .tint(JameBrand.orange)
                     }
-                }.padding(.top, 8).tabItem { Label("Identity", systemImage: "person.text.rectangle") }
+                    TextEditor(text: $store.text)
+                        .font(.system(size: 13, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(panel, in: Rectangle())
+                        .overlay(Rectangle().stroke(rule))
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if selectedTab == "identity" {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        memoryFieldGroup("Agent identity", detail: "How Jame presents itself in every discussion") {
+                            TextField("Agent name", text: $store.agentName)
+                            TextField("Persona", text: $store.persona, axis: .vertical).lineLimit(2...4)
+                            TextField("Tone", text: $store.tone)
+                            TextField("Discussion mode", text: $store.discussionMode)
+                            TextField("Status style", text: $store.statusStyle)
+                        }
+                        memoryFieldGroup("Configured notes", detail: "Short standing instructions stored with the agent configuration") {
+                            memoryEditor($store.configuredMemoryNotes, minHeight: 90)
+                        }
+                        memoryFieldGroup("User profile", detail: "Preferences, goals, working style, and durable context") {
+                            memoryEditor($store.userProfile, minHeight: 120)
+                        }
+                        memoryFieldGroup("People & relationships", detail: "Only people the user explicitly mentioned and their role") {
+                            memoryEditor($store.peopleAndRelationships, minHeight: 110)
+                        }
+                        HStack {
+                            Spacer()
+                            Button("Save agent identity") { Task { await store.saveIdentity() } }
+                            Button("Save user context") { Task { await store.saveUserContext() } }
+                                .buttonStyle(.borderedProminent).tint(JameBrand.orange)
+                        }
+                    }
+                    .padding(24)
+                }
+            } else {
+                selfImprovementView
             }
-            if !store.status.isEmpty { Text(store.status).font(.caption).foregroundStyle(store.status == "Memory saved." ? .green : .red) }
+
+            if !store.status.isEmpty {
+                Text(store.status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(store.status.contains("saved") ? JameBrand.orange : .red)
+                    .padding(.horizontal, 24).padding(.bottom, 12)
+            }
         }
-        .padding(22)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(primary)
+        .background(pageBackground)
         .task { await store.load() }
+    }
+
+    private var selfImprovementView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 0) {
+                    improvementMetric("COMPLETION", value: "\(Int((store.improvementMetrics.completionRate * 100).rounded()))%")
+                    Rectangle().fill(rule).frame(width: 1, height: 44)
+                    improvementMetric("PENDING REVIEW", value: "\(store.improvementMetrics.pendingCandidates)")
+                    Rectangle().fill(rule).frame(width: 1, height: 44)
+                    improvementMetric("LEARNED", value: "\(store.improvementMetrics.promotedCandidates)")
+                    Rectangle().fill(rule).frame(width: 1, height: 44)
+                    improvementMetric("SKILLS CREATED", value: "\(store.improvementMetrics.skillsCreated)")
+                    Rectangle().fill(rule).frame(width: 1, height: 44)
+                    improvementMetric("REPEATED ERRORS", value: "\(store.improvementMetrics.repeatedFailureCount)")
+                }
+                .background(panel)
+                .overlay(Rectangle().stroke(rule))
+
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Learning review").font(.headline)
+                        Text("Jame reflects after completed tasks. Explicit memory requests are learned immediately; corrections and reusable workflows stay here until you approve them.")
+                            .font(.caption).foregroundStyle(muted)
+                    }
+                    Spacer()
+                    Button("Run maintenance") { Task { await store.runMaintenance() } }
+                        .buttonStyle(.bordered)
+                }
+
+                if store.improvementCandidates.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No learning candidates yet").font(.headline)
+                        Text("Candidates will appear after corrections, repeated tool failures, preferences, and repeated successful workflows.")
+                            .font(.caption).foregroundStyle(muted)
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(panel).overlay(Rectangle().stroke(rule))
+                } else {
+                    ForEach(store.improvementCandidates) { candidate in
+                        improvementCandidateCard(candidate)
+                    }
+                }
+
+                if !store.reflections.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Recent reflections").font(.headline)
+                        ForEach(Array(store.reflections.prefix(8))) { reflection in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(reflection.outcome.uppercased())
+                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(reflection.outcome == "completed" ? JameBrand.orange : muted)
+                                    Spacer()
+                                    Text(reflection.createdAt).font(.caption2.monospaced()).foregroundStyle(muted)
+                                }
+                                Text(reflection.objective).font(.subheadline.weight(.semibold)).lineLimit(2)
+                                if let tools = reflection.tools, !tools.isEmpty {
+                                    Text("Tools: " + tools.joined(separator: " · ")).font(.caption).foregroundStyle(muted)
+                                }
+                            }
+                            .padding(12).background(panel).overlay(Rectangle().stroke(rule))
+                        }
+                    }
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private func improvementMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(.system(size: 19, weight: .semibold, design: .rounded)).foregroundStyle(primary)
+            Text(title).font(.system(size: 8, weight: .semibold, design: .rounded)).foregroundStyle(muted)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func improvementCandidateCard(_ candidate: NativeLearningCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text(candidate.kind.replacingOccurrences(of: "_", with: " ").uppercased())
+                    .font(.system(size: 9, weight: .semibold, design: .rounded)).tracking(0.8)
+                    .foregroundStyle(JameBrand.orange)
+                Text(candidate.status.uppercased())
+                    .font(.system(size: 9, weight: .semibold, design: .rounded)).foregroundStyle(muted)
+                Spacer()
+                Text("\(Int((candidate.confidence * 100).rounded()))% confidence · \(candidate.occurrences)x")
+                    .font(.caption2.monospaced()).foregroundStyle(muted)
+            }
+            Text(candidate.title).font(.headline)
+            Text(candidate.lesson).font(.subheadline).textSelection(.enabled)
+            Text(candidate.evidence).font(.caption).foregroundStyle(muted).lineLimit(3)
+            if let tools = candidate.tools, !tools.isEmpty {
+                Text("Observed tools: " + tools.joined(separator: " · ")).font(.caption).foregroundStyle(muted)
+            }
+            HStack {
+                Text("Scope: \(candidate.scope)").font(.caption2).foregroundStyle(muted)
+                Spacer()
+                if candidate.status == "pending" || candidate.status == "stale" {
+                    Button("Reject") { Task { await store.updateCandidate(candidate, action: "reject") } }
+                        .buttonStyle(.bordered)
+                    Button("Approve") { Task { await store.updateCandidate(candidate, action: "approve") } }
+                        .buttonStyle(.borderedProminent).tint(JameBrand.orange)
+                } else if candidate.status == "promoted", (candidate.skillPath ?? "").isEmpty {
+                    Button("Create reusable skill") { Task { await store.updateCandidate(candidate, action: "create_skill") } }
+                        .buttonStyle(.bordered).tint(JameBrand.orange)
+                } else if let skillPath = candidate.skillPath, !skillPath.isEmpty {
+                    Text(skillPath).font(.caption2.monospaced()).foregroundStyle(JameBrand.orange).lineLimit(1)
+                }
+            }
+        }
+        .padding(14)
+        .background(panel)
+        .overlay(alignment: .leading) { Rectangle().fill(candidate.status == "promoted" ? JameBrand.orange : rule).frame(width: 3) }
+        .overlay(Rectangle().stroke(rule))
+    }
+
+    private func memoryEditor(_ value: Binding<String>, minHeight: CGFloat) -> some View {
+        TextEditor(text: value)
+            .font(.system(.body, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .frame(minHeight: minHeight)
+            .padding(7)
+            .background(panel, in: Rectangle())
+            .overlay(Rectangle().stroke(rule))
+    }
+
+    private func memoryFieldGroup<Content: View>(
+        _ title: String,
+        detail: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title).font(.headline)
+            Text(detail).font(.caption).foregroundStyle(muted)
+            content()
+        }
+        .padding(.leading, 14)
+        .overlay(alignment: .leading) { Rectangle().fill(JameBrand.orange.opacity(0.72)).frame(width: 2) }
     }
 }
 
@@ -1952,9 +3502,23 @@ private func detectedLocalAgents() -> [NativeLocalAgent] {
     let fileManager = FileManager.default
     let pathDirectories = (ProcessInfo.processInfo.environment["PATH"] ?? "")
         .split(separator: ":")
-        .map { String($0) }
+        .map { URL(fileURLWithPath: String($0), isDirectory: true) }
+    let commonExecutableDirectories = [
+        URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true),
+        URL(fileURLWithPath: "/usr/local/bin", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".npm-global/bin", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".bun/bin", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cargo/bin", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("bin", isDirectory: true),
+    ]
+    var seenExecutableDirectories = Set<String>()
+    let executableDirectories = (pathDirectories + commonExecutableDirectories).filter {
+        seenExecutableDirectories.insert($0.path).inserted
+    }
     let applicationDirectories = [
         URL(fileURLWithPath: "/Applications", isDirectory: true),
+        URL(fileURLWithPath: "/System/Applications", isDirectory: true),
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
     ]
     let candidates: [(TeamAgentPreset, [String], [String])] = [
@@ -1962,25 +3526,51 @@ private func detectedLocalAgents() -> [NativeLocalAgent] {
         (.kimi, ["kimi", "kimi-code"], ["Kimi.app"]),
         (.claudeCode, ["claude"], ["Claude.app"]),
         (.hermes, ["hermes"], ["Hermes.app"]),
+        (.grok, ["grok", "xai"], []),
+        (.nanobot, ["nanobot"], []),
+        (.openCode, ["opencode"], ["OpenCode.app"]),
+        (.aider, ["aider"], []),
+        (.gemini, ["gemini"], ["Gemini.app"]),
+        (.goose, ["goose"], ["Goose.app"]),
+        (.qwenCode, ["qwen", "qwen-code"], []),
+        (.cursor, ["cursor-agent", "cursor"], ["Cursor.app"]),
     ]
 
     return candidates.compactMap { preset, commands, applications in
         if let commandPath = commands.lazy.compactMap({ command in
-            pathDirectories
-                .map { URL(fileURLWithPath: $0).appendingPathComponent(command).path }
+            executableDirectories
+                .map { $0.appendingPathComponent(command).path }
                 .first(where: { fileManager.isExecutableFile(atPath: $0) })
         }).first {
             return NativeLocalAgent(preset: preset, location: commandPath)
         }
-        if let appPath = applicationDirectories.lazy.compactMap({ directory in
-            applications
-                .map { directory.appendingPathComponent($0).path }
-                .first(where: { fileManager.fileExists(atPath: $0) })
-        }).first {
+        if let appPath = discoveredMacApp(named: applications, in: applicationDirectories, fileManager: fileManager) {
             return NativeLocalAgent(preset: preset, location: appPath)
         }
         return nil
     }
+}
+
+private func discoveredMacApp(named appNames: [String], in directories: [URL], fileManager: FileManager) -> String? {
+    guard !appNames.isEmpty else { return nil }
+    let wanted = Set(appNames.map { $0.lowercased() })
+    for directory in directories {
+        // Direct lookup is fast for normal /Applications installs.
+        for name in appNames {
+            let path = directory.appendingPathComponent(name).path
+            if fileManager.fileExists(atPath: path) { return path }
+        }
+        // Some app managers place apps one folder deeper. Search only package
+        // names, skip descendants, and stop at the first matching app bundle.
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
+        for case let url as URL in enumerator where url.pathExtension.lowercased() == "app" {
+            if wanted.contains(url.lastPathComponent.lowercased()) {
+                return url.path
+            }
+            enumerator.skipDescendants()
+        }
+    }
+    return nil
 }
 
 private struct NativeUpdateAgentRequest: Encodable {
@@ -2116,11 +3706,16 @@ private final class NativeAgentStore: ObservableObject {
 
 private struct AgentManagerView: View {
     @StateObject private var store: NativeAgentStore
+    private let port: Int
     @State private var selectedID = ""
     @State private var showingCreate = false
+    @State private var showingTeamGrid = false
     @State private var creationMode: AgentCreationMode = .team
 
-    init(port: Int) { _store = StateObject(wrappedValue: NativeAgentStore(port: port)) }
+    init(port: Int) {
+        self.port = port
+        _store = StateObject(wrappedValue: NativeAgentStore(port: port))
+    }
 
     private var selected: NativeAgentSummary? {
         store.agents.first(where: { $0.id == selectedID }) ?? store.agents.first
@@ -2130,7 +3725,7 @@ private struct AgentManagerView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("Agents").font(.title3.weight(.bold))
+                    Text("Agents").font(.title3.weight(.semibold))
                     Spacer()
                     Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
                         .help("Refresh agents")
@@ -2156,7 +3751,7 @@ private struct AgentManagerView: View {
                     }
                 }
             }
-            .frame(minWidth: 240, idealWidth: 280, maxWidth: 320)
+            .frame(minWidth: 180, idealWidth: 240, maxWidth: 300)
 
             Divider()
 
@@ -2172,6 +3767,9 @@ private struct AgentManagerView: View {
                         spawnSubagent: {
                             creationMode = .subagent
                             showingCreate = true
+                        },
+                        showTeamGrid: {
+                            showingTeamGrid = true
                         }
                     )
                     .id(agent.id)
@@ -2199,6 +3797,9 @@ private struct AgentManagerView: View {
                 showingCreate = false
             }
         }
+        .sheet(isPresented: $showingTeamGrid) {
+            TeamGridView(store: store, port: port)
+        }
     }
 }
 
@@ -2207,26 +3808,28 @@ private struct AgentDetailView: View {
     let rename: (String) -> Void
     let addTeamAgent: () -> Void
     let spawnSubagent: () -> Void
+    let showTeamGrid: () -> Void
     @State private var displayName: String
 
-    init(agent: NativeAgentSummary, rename: @escaping (String) -> Void, addTeamAgent: @escaping () -> Void, spawnSubagent: @escaping () -> Void) {
+    init(agent: NativeAgentSummary, rename: @escaping (String) -> Void, addTeamAgent: @escaping () -> Void, spawnSubagent: @escaping () -> Void, showTeamGrid: @escaping () -> Void) {
         self.agent = agent
         self.rename = rename
         self.addTeamAgent = addTeamAgent
         self.spawnSubagent = spawnSubagent
+        self.showTeamGrid = showTeamGrid
         _displayName = State(initialValue: agent.name.isEmpty ? agent.id : agent.name)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 8) {
                             TextField("Agent name", text: $displayName)
-                                .font(.title2.weight(.bold))
+                                .font(.title2.weight(.semibold))
                                 .textFieldStyle(.plain)
-                            if agent.isDefault { Text("Default").font(.caption.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 3).background(.yellow.opacity(0.2)).clipShape(Capsule()) }
+                            if agent.isDefault { Text("Default").font(.caption.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 3).background(.yellow.opacity(0.2)).clipShape(Rectangle()) }
                         }
                         HStack(spacing: 8) {
                             Text(agent.id).font(.subheadline.monospaced()).foregroundStyle(.secondary)
@@ -2235,13 +3838,18 @@ private struct AgentDetailView: View {
                                 .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName == agent.name)
                         }
                     }
-                    Spacer()
-                    HStack(spacing: 8) {
-                        Button("Add team agent", action: addTeamAgent)
-                            .buttonStyle(.bordered)
-                        Button("Spawn subagent", action: spawnSubagent)
-                            .buttonStyle(.borderedProminent)
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 8) {
+                            Button("Add team agent", action: addTeamAgent)
+                                .buttonStyle(.bordered)
+                            Button("Spawn subagent", action: spawnSubagent)
+                                .buttonStyle(.borderedProminent)
+                            Button("Team grid", systemImage: "point.3.connected.trianglepath.dotted", action: showTeamGrid)
+                                .buttonStyle(.bordered)
+                                .help("See how team and spawned agents are connected")
+                        }
                     }
+                    .scrollIndicators(.hidden)
                 }
 
                 GroupBox("Configuration") {
@@ -2274,6 +3882,1348 @@ private struct AgentDetailView: View {
     }
 }
 
+private struct TeamGridActivityResponse: Codable {
+    let files: [TeamGridFileAccess]
+    let sources: [TeamGridInformationSource]
+}
+
+private struct TeamGridFileAccess: Codable, Identifiable {
+    let path: String
+    let accesses: Int
+    let agents: [String]
+    var id: String { path }
+}
+
+private struct TeamGridInformationSource: Codable, Identifiable {
+    let id: String
+    let name: String
+    let sessions: Int
+    let messages: Int
+    let agents: [String]
+}
+
+private struct TeamGridInitiativeRecord: Codable, Identifiable {
+    let checkedAt: String
+    let status: String
+    let summary: String
+    var id: String { "\(checkedAt)-\(status)" }
+
+    enum CodingKeys: String, CodingKey {
+        case status, summary
+        case checkedAt = "checked_at"
+    }
+}
+
+private struct TeamGridInitiativeResponse: Codable {
+    let enabled: Bool
+    let initiative: Bool
+    let intervalMinutes: Int
+    let latest: TeamGridInitiativeRecord?
+    let history: [TeamGridInitiativeRecord]
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, initiative, latest, history
+        case intervalMinutes = "interval_minutes"
+    }
+}
+
+private struct TeamOperationsGoal: Codable, Identifiable {
+    let id: String
+    let title: String
+    let outcome: String
+    let leadAgentID: String
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, outcome, status
+        case leadAgentID = "lead_agent_id"
+    }
+}
+
+private struct TeamOperationsTask: Codable, Identifiable {
+    let id: String
+    let goalID: String
+    let title: String
+    let description: String?
+    let ownerAgentID: String?
+    let status: String
+    let dependsOn: [String]
+    let acceptanceCriteria: [String]
+    let fileScopes: [String]
+    let timeBudgetMinutes: Int
+    let tokenBudget: Int64
+    let result: String?
+    let verification: String?
+    let blockedReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, description, status, result, verification
+        case goalID = "goal_id"
+        case ownerAgentID = "owner_agent_id"
+        case dependsOn = "depends_on"
+        case acceptanceCriteria = "acceptance_criteria"
+        case fileScopes = "file_scopes"
+        case timeBudgetMinutes = "time_budget_minutes"
+        case tokenBudget = "token_budget"
+        case blockedReason = "blocked_reason"
+    }
+}
+
+private struct TeamOperationsSnapshot: Codable {
+    let goal: TeamOperationsGoal?
+    let tasks: [TeamOperationsTask]
+    static let empty = TeamOperationsSnapshot(goal: nil, tasks: [])
+}
+
+private func teamPageBackground(_ scheme: ColorScheme) -> Color {
+    scheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink
+}
+
+private func teamPanel(_ scheme: ColorScheme) -> Color {
+    scheme == .light ? .white : JameBrand.panel
+}
+
+private func teamSurface(_ scheme: ColorScheme) -> Color {
+    scheme == .light ? JameBrand.ink.opacity(0.035) : JameBrand.ink
+}
+
+private func teamPrimary(_ scheme: ColorScheme) -> Color {
+    scheme == .light ? JameBrand.ink : JameBrand.paper
+}
+
+private func teamMuted(_ scheme: ColorScheme) -> Color {
+    scheme == .light ? JameBrand.ink.opacity(0.58) : JameBrand.muted
+}
+
+private func teamRule(_ scheme: ColorScheme) -> Color {
+    scheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule
+}
+
+@MainActor
+private final class TeamGridActivityStore: ObservableObject {
+    @Published var servers: [MCPServer] = []
+    @Published var files: [TeamGridFileAccess] = []
+    @Published var sources: [TeamGridInformationSource] = []
+    @Published var initiative: TeamGridInitiativeResponse?
+    @Published var operations = TeamOperationsSnapshot.empty
+    @Published var error = ""
+    @Published var operationsStatus = ""
+
+    func load(port: Int) async {
+        error = ""
+        do {
+            async let serverResponse: (Data, URLResponse) = URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/tools/mcp/servers")
+            )
+            async let activityResponse: (Data, URLResponse) = URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/agents/activity-map")
+            )
+            async let initiativeResponse: (Data, URLResponse) = URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/agents/initiative")
+            )
+            async let operationsResponse: (Data, URLResponse) = URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/agents/team-operations")
+            )
+            let (serverData, serverHTTP) = try await serverResponse
+            let (activityData, activityHTTP) = try await activityResponse
+            let (initiativeData, initiativeHTTP) = try await initiativeResponse
+            let (operationsData, operationsHTTP) = try await operationsResponse
+            guard let serverHTTP = serverHTTP as? HTTPURLResponse, (200..<300).contains(serverHTTP.statusCode),
+                  let activityHTTP = activityHTTP as? HTTPURLResponse, (200..<300).contains(activityHTTP.statusCode),
+                  let initiativeHTTP = initiativeHTTP as? HTTPURLResponse, (200..<300).contains(initiativeHTTP.statusCode),
+                  let operationsHTTP = operationsHTTP as? HTTPURLResponse, (200..<300).contains(operationsHTTP.statusCode) else {
+                throw NSError(domain: "JameClaw", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not load team-grid activity."])
+            }
+            servers = try JSONDecoder().decode(MCPServerList.self, from: serverData).servers
+            let activity = try JSONDecoder().decode(TeamGridActivityResponse.self, from: activityData)
+            files = activity.files
+            sources = activity.sources
+            initiative = try JSONDecoder().decode(TeamGridInitiativeResponse.self, from: initiativeData)
+            operations = try JSONDecoder().decode(TeamOperationsSnapshot.self, from: operationsData)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func saveGoal(port: Int, title: String, outcome: String, leadAgentID: String) async -> Bool {
+        await sendOperation(
+            port: port,
+            path: "/api/agents/team-operations/goal",
+            method: "PUT",
+            payload: ["title": title, "outcome": outcome, "lead_agent_id": leadAgentID],
+            success: "Team goal saved."
+        )
+    }
+
+    func createTask(
+        port: Int,
+        title: String,
+        description: String,
+        ownerAgentID: String,
+        dependsOn: [String],
+        acceptanceCriteria: [String],
+        fileScopes: [String],
+        timeBudgetMinutes: Int,
+        tokenBudget: Int
+    ) async -> Bool {
+        await sendOperation(
+            port: port,
+            path: "/api/agents/team-operations/tasks",
+            method: "POST",
+            payload: [
+                "title": title,
+                "description": description,
+                "owner_agent_id": ownerAgentID,
+                "depends_on": dependsOn,
+                "acceptance_criteria": acceptanceCriteria,
+                "file_scopes": fileScopes,
+                "time_budget_minutes": timeBudgetMinutes,
+                "token_budget": tokenBudget,
+            ],
+            success: "Team task created."
+        )
+    }
+
+    func updateTask(
+        port: Int,
+        task: TeamOperationsTask,
+        title: String,
+        description: String,
+        ownerAgentID: String,
+        dependsOn: [String],
+        acceptanceCriteria: [String],
+        fileScopes: [String],
+        timeBudgetMinutes: Int,
+        tokenBudget: Int
+    ) async -> Bool {
+        await sendOperation(
+            port: port,
+            path: "/api/agents/team-operations/tasks/\(task.id)",
+            method: "PATCH",
+            payload: [
+                "title": title,
+                "description": description,
+                "owner_agent_id": ownerAgentID,
+                "depends_on": dependsOn,
+                "acceptance_criteria": acceptanceCriteria,
+                "file_scopes": fileScopes,
+                "time_budget_minutes": timeBudgetMinutes,
+                "token_budget": tokenBudget,
+            ],
+            success: "Task contract updated."
+        )
+    }
+
+    func taskAction(port: Int, task: TeamOperationsTask, action: String, detail: String = "") async -> Bool {
+        var payload: [String: Any] = ["action": action]
+        switch action {
+        case "submit_review": payload["result"] = detail
+        case "complete": payload["verification"] = detail
+        case "block": payload["blocked_reason"] = detail
+        default: break
+        }
+        return await sendOperation(
+            port: port,
+            path: "/api/agents/team-operations/tasks/\(task.id)/action",
+            method: "POST",
+            payload: payload,
+            success: "Task moved to \(action.replacingOccurrences(of: "_", with: " "))."
+        )
+    }
+
+    private func sendOperation(port: Int, path: String, method: String, payload: [String: Any], success: String) async -> Bool {
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: path, method: method)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                operationsStatus = message?.isEmpty == false ? message! : "Team operation was rejected."
+                return false
+            }
+            operationsStatus = success
+            await load(port: port)
+            return true
+        } catch {
+            operationsStatus = error.localizedDescription
+            return false
+        }
+    }
+}
+
+private struct TeamGridView: View {
+    @ObservedObject var store: NativeAgentStore
+    let port: Int
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var activity = TeamGridActivityStore()
+    @State private var selectedAgentID = "main"
+    @State private var showingCreate = false
+    @State private var creationMode: AgentCreationMode = .subagent
+    @State private var showingGoalEditor = false
+    @State private var showingTaskEditor = false
+    @State private var editingTask: TeamOperationsTask?
+    @State private var taskActionRequest: TeamTaskActionRequest?
+
+    private var agents: [NativeAgentSummary] { store.agents }
+
+    private var agentsByID: [String: NativeAgentSummary] {
+        Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+    }
+    private var mainAgent: NativeAgentSummary? { agentsByID["main"] ?? agents.first(where: \ .isDefault) }
+    private var selectedAgent: NativeAgentSummary? {
+        agentsByID[selectedAgentID] ?? mainAgent ?? agents.first
+    }
+    private var spawnedIDs: Set<String> {
+        Set(agents.flatMap { $0.subagents ?? [] })
+    }
+    private var independentTeam: [NativeAgentSummary] {
+        agents.filter { $0.id != "main" && !spawnedIDs.contains($0.id) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("TEAM OPERATIONS")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .tracking(1.4).foregroundStyle(JameBrand.orange)
+                    Text("Team grid").font(.system(size: 27, weight: .semibold, design: .rounded))
+                    Text("Inspect activity, move through the hierarchy, and create agents without leaving the map.")
+                        .font(.caption)
+                        .foregroundStyle(teamMuted(colorScheme))
+                }
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        Button { Task { await refreshGrid() } } label: { Image(systemName: "arrow.clockwise") }
+                            .buttonStyle(.bordered).help("Refresh agents and activity")
+                        Button(activity.operations.goal == nil ? "Set team goal" : "Edit goal") {
+                            showingGoalEditor = true
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Add task") {
+                            editingTask = nil
+                            showingTaskEditor = true
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(activity.operations.goal == nil)
+                        Button("Add team agent") {
+                            creationMode = .team
+                            showingCreate = true
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Spawn subagent") {
+                            creationMode = .subagent
+                            showingCreate = true
+                        }
+                        .buttonStyle(.borderedProminent).tint(JameBrand.orange)
+                        Button("Done") { dismiss() }.buttonStyle(.bordered)
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+            .padding(22)
+            Rectangle().fill(teamRule(colorScheme)).frame(height: 1)
+
+            HStack(spacing: 0) {
+                ScrollView([.horizontal, .vertical]) {
+                    VStack(spacing: 28) {
+                        TeamOperationsBoard(
+                            snapshot: activity.operations,
+                            agents: agents,
+                            editTask: { task in
+                                editingTask = task
+                                showingTaskEditor = true
+                            },
+                            act: { task, action in
+                                if action == "start" || action == "pause" || action == "reopen" {
+                                    Task { _ = await activity.taskAction(port: port, task: task, action: action) }
+                                } else {
+                                    taskActionRequest = TeamTaskActionRequest(task: task, action: action)
+                                }
+                            }
+                        )
+                        TeamGridFlowLine(length: 24)
+                        if let initiative = activity.initiative {
+                            TeamGridInitiativeSection(initiative: initiative)
+                            TeamGridFlowLine(length: 24)
+                        }
+                        if let mainAgent {
+                            if !activity.sources.isEmpty {
+                                TeamGridInformationSources(sources: activity.sources)
+                                TeamGridFlowLine(length: 30)
+                            }
+                            AgentTreeBranch(
+                                agent: mainAgent,
+                                agentsByID: agentsByID,
+                                visited: [],
+                                selectedAgentID: selectedAgentID,
+                                select: { selectedAgentID = $0 }
+                            )
+                        } else {
+                            ContentUnavailableView("No main agent", systemImage: "person.3")
+                        }
+
+                        TeamGridMCPSection(servers: activity.servers)
+
+                        if !independentTeam.isEmpty {
+                            VStack(spacing: 14) {
+                                Label("Independent team agents", systemImage: "person.3.fill")
+                                    .font(.headline)
+                                    .foregroundStyle(teamPrimary(colorScheme))
+                                HStack(alignment: .top, spacing: 16) {
+                                    ForEach(independentTeam) { agent in
+                                        TeamGridNode(
+                                            agent: agent,
+                                            kind: .team,
+                                            isSelected: selectedAgentID == agent.id,
+                                            select: { selectedAgentID = agent.id }
+                                        )
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
+
+                        TeamGridFileSection(files: activity.files)
+
+                        if !activity.error.isEmpty {
+                            Label(activity.error, systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(JameBrand.orange)
+                        }
+                        if !activity.operationsStatus.isEmpty {
+                            Text(activity.operationsStatus)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(JameBrand.orange)
+                        }
+                    }
+                    .padding(36)
+                    .frame(minWidth: 440, minHeight: 400)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Rectangle().fill(teamRule(colorScheme)).frame(width: 1)
+
+                TeamGridInspector(
+                    agent: selectedAgent,
+                    sources: activity.sources,
+                    files: activity.files,
+                    initiative: activity.initiative,
+                    spawnSubagent: {
+                        creationMode = .subagent
+                        showingCreate = true
+                    },
+                    addTeamAgent: {
+                        creationMode = .team
+                        showingCreate = true
+                    }
+                )
+                .frame(width: 250)
+                .frame(maxHeight: .infinity)
+                .background(teamPanel(colorScheme))
+            }
+        }
+        .foregroundStyle(teamPrimary(colorScheme))
+        .background(teamPageBackground(colorScheme))
+        .frame(minWidth: 720, minHeight: 500)
+        .task {
+            await refreshGrid()
+            if agentsByID[selectedAgentID] == nil { selectedAgentID = mainAgent?.id ?? agents.first?.id ?? "" }
+        }
+        .sheet(isPresented: $showingCreate) {
+            CreateAgentView(mode: creationMode, parent: selectedAgent ?? mainAgent, store: store) { newID in
+                selectedAgentID = newID
+                showingCreate = false
+                Task { await refreshGrid() }
+            }
+        }
+        .sheet(isPresented: $showingGoalEditor) {
+            TeamGoalEditor(
+                goal: activity.operations.goal,
+                agents: agents,
+                save: { title, outcome, leadAgentID in
+                    let saved = await activity.saveGoal(port: port, title: title, outcome: outcome, leadAgentID: leadAgentID)
+                    if saved { showingGoalEditor = false }
+                }
+            )
+        }
+        .sheet(isPresented: $showingTaskEditor) {
+            TeamTaskEditor(
+                task: editingTask,
+                tasks: activity.operations.tasks,
+                agents: agents,
+                save: { title, description, owner, dependencies, criteria, scopes, minutes, tokens in
+                    let saved: Bool
+                    if let editingTask {
+                        saved = await activity.updateTask(
+                            port: port, task: editingTask, title: title, description: description,
+                            ownerAgentID: owner, dependsOn: dependencies, acceptanceCriteria: criteria,
+                            fileScopes: scopes, timeBudgetMinutes: minutes, tokenBudget: tokens
+                        )
+                    } else {
+                        saved = await activity.createTask(
+                            port: port, title: title, description: description,
+                            ownerAgentID: owner, dependsOn: dependencies, acceptanceCriteria: criteria,
+                            fileScopes: scopes, timeBudgetMinutes: minutes, tokenBudget: tokens
+                        )
+                    }
+                    if saved { showingTaskEditor = false }
+                }
+            )
+        }
+        .sheet(item: $taskActionRequest) { request in
+            TeamTaskEvidenceEditor(request: request) { detail in
+                let saved = await activity.taskAction(port: port, task: request.task, action: request.action, detail: detail)
+                if saved { taskActionRequest = nil }
+            }
+        }
+    }
+
+    private func refreshGrid() async {
+        await store.load()
+        await activity.load(port: port)
+    }
+}
+
+private struct TeamTaskActionRequest: Identifiable {
+    let task: TeamOperationsTask
+    let action: String
+    var id: String { "\(task.id)-\(action)" }
+}
+
+private struct TeamOperationsBoard: View {
+    let snapshot: TeamOperationsSnapshot
+    let agents: [NativeAgentSummary]
+    let editTask: (TeamOperationsTask) -> Void
+    let act: (TeamOperationsTask, String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var panel: Color { colorScheme == .light ? .white : JameBrand.panel }
+    private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
+    private var muted: Color { colorScheme == .light ? JameBrand.ink.opacity(0.58) : JameBrand.muted }
+    private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
+    private var agentNames: [String: String] {
+        Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0.name.isEmpty ? $0.id : $0.name) })
+    }
+    private var taskTitles: [String: String] {
+        Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0.title) })
+    }
+    private let lanes: [(String, [String])] = [
+        ("BACKLOG", ["unassigned", "planned"]),
+        ("WORKING", ["working"]),
+        ("REVIEW", ["review"]),
+        ("BLOCKED", ["blocked", "paused"]),
+        ("DONE", ["done"]),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("TEAM LEAD")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .tracking(1.1).foregroundStyle(JameBrand.orange)
+                    if let goal = snapshot.goal {
+                        Text(goal.title).font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(primary)
+                        Text(goal.outcome).font(.caption).foregroundStyle(muted).lineLimit(3)
+                    } else {
+                        Text("No operating goal yet").font(.headline).foregroundStyle(primary)
+                        Text("Set a measurable goal, then assign dependency-aware tasks to the team.")
+                            .font(.caption).foregroundStyle(muted)
+                    }
+                }
+                Spacer()
+                if let goal = snapshot.goal {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(goal.status.uppercased()).font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(JameBrand.orange)
+                        Text("Lead · \(agentNames[goal.leadAgentID] ?? goal.leadAgentID)")
+                            .font(.caption.weight(.semibold)).foregroundStyle(primary)
+                        Text("\(snapshot.tasks.filter { $0.status == "done" }.count)/\(snapshot.tasks.count) tasks verified")
+                            .font(.caption2).foregroundStyle(muted)
+                    }
+                }
+            }
+
+            if snapshot.goal != nil {
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(lanes, id: \.0) { lane in
+                        TeamTaskLane(
+                            title: lane.0,
+                            tasks: snapshot.tasks.filter { lane.1.contains($0.status) },
+                            agentNames: agentNames,
+                            taskTitles: taskTitles,
+                            editTask: editTask,
+                            act: act
+                        )
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 1110, alignment: .leading)
+        .background(panel)
+        .overlay(Rectangle().stroke(rule))
+        .overlay(alignment: .leading) { Rectangle().fill(JameBrand.orange).frame(width: 3) }
+    }
+}
+
+private struct TeamTaskLane: View {
+    let title: String
+    let tasks: [TeamOperationsTask]
+    let agentNames: [String: String]
+    let taskTitles: [String: String]
+    let editTask: (TeamOperationsTask) -> Void
+    let act: (TeamOperationsTask, String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var surface: Color { colorScheme == .light ? JameBrand.ink.opacity(0.035) : JameBrand.ink }
+    private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
+    private var muted: Color { colorScheme == .light ? JameBrand.ink.opacity(0.55) : JameBrand.muted }
+    private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.13) : JameBrand.rule }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text(title).font(.system(size: 9, weight: .semibold, design: .rounded)).tracking(0.9).foregroundStyle(muted)
+                Spacer()
+                Text("\(tasks.count)").font(.caption2.monospaced()).foregroundStyle(JameBrand.orange)
+            }
+            if tasks.isEmpty {
+                Text("No tasks").font(.caption2).foregroundStyle(muted).padding(.vertical, 8)
+            } else {
+                ForEach(tasks) { task in
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(task.title).font(.subheadline.weight(.semibold)).foregroundStyle(primary).lineLimit(2)
+                        Label(agentNames[task.ownerAgentID ?? ""] ?? "Unassigned", systemImage: "person.fill")
+                            .font(.caption2).foregroundStyle(muted)
+                        if !task.dependsOn.isEmpty {
+                            Text("After: " + task.dependsOn.compactMap { taskTitles[$0] }.joined(separator: ", "))
+                                .font(.caption2).foregroundStyle(muted).lineLimit(2)
+                        }
+                        if let reason = task.blockedReason, !reason.isEmpty {
+                            Text(reason).font(.caption2).foregroundStyle(.red).lineLimit(2)
+                        }
+                        HStack(spacing: 5) {
+                            if task.timeBudgetMinutes > 0 {
+                                Text("\(task.timeBudgetMinutes)m").font(.caption2.monospaced()).foregroundStyle(muted)
+                            }
+                            if task.tokenBudget > 0 {
+                                Text("\(task.tokenBudget) tok").font(.caption2.monospaced()).foregroundStyle(muted)
+                            }
+                            Spacer()
+                        }
+                        taskActions(task)
+                    }
+                    .padding(10)
+                    .background(colorScheme == .light ? Color.white : JameBrand.panel)
+                    .overlay(Rectangle().stroke(task.status == "working" ? JameBrand.orange : rule))
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .frame(width: 204, alignment: .topLeading)
+        .frame(minHeight: 160, alignment: .topLeading)
+        .background(surface)
+        .overlay(Rectangle().stroke(rule))
+    }
+
+    @ViewBuilder
+    private func taskActions(_ task: TeamOperationsTask) -> some View {
+        HStack(spacing: 6) {
+            switch task.status {
+            case "unassigned":
+                Button("Assign") { editTask(task) }
+            case "planned", "blocked", "paused":
+                Button("Start") { act(task, "start") }
+            case "working":
+                Button("Review") { act(task, "submit_review") }
+            case "review":
+                Button("Verify") { act(task, "complete") }
+            case "done":
+                Button("Reopen") { act(task, "reopen") }
+            default:
+                EmptyView()
+            }
+            if task.status != "done" {
+                Menu {
+                    if task.status != "working" && task.status != "review" { Button("Edit contract") { editTask(task) } }
+                    Button("Mark blocked") { act(task, "block") }
+                    Button("Pause") { act(task, "pause") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(.borderlessButton)
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+}
+
+private struct TeamGoalEditor: View {
+    let goal: TeamOperationsGoal?
+    let agents: [NativeAgentSummary]
+    let save: (String, String, String) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var outcome: String
+    @State private var leadAgentID: String
+    @State private var saving = false
+
+    init(goal: TeamOperationsGoal?, agents: [NativeAgentSummary], save: @escaping (String, String, String) async -> Void) {
+        self.goal = goal
+        self.agents = agents
+        self.save = save
+        _title = State(initialValue: goal?.title ?? "")
+        _outcome = State(initialValue: goal?.outcome ?? "")
+        _leadAgentID = State(initialValue: goal?.leadAgentID ?? "main")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(goal == nil ? "Set team goal" : "Edit team goal").font(.title2.weight(.semibold))
+            Text("The Team Lead owns this outcome and coordinates every dependent task.").font(.caption).foregroundStyle(.secondary)
+            TextField("Goal", text: $title)
+            TextField("Measurable outcome", text: $outcome, axis: .vertical).lineLimit(3...6)
+            Picker("Team Lead", selection: $leadAgentID) {
+                ForEach(agents) { agent in Text(agent.name.isEmpty ? agent.id : agent.name).tag(agent.id) }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(saving ? "Saving…" : "Save goal") {
+                    saving = true
+                    Task { await save(title, outcome, leadAgentID); saving = false }
+                }
+                .buttonStyle(.borderedProminent).tint(JameBrand.orange)
+                .disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24).frame(width: 520)
+    }
+}
+
+private struct TeamTaskEditor: View {
+    let task: TeamOperationsTask?
+    let tasks: [TeamOperationsTask]
+    let agents: [NativeAgentSummary]
+    let save: (String, String, String, [String], [String], [String], Int, Int) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var taskDescription: String
+    @State private var ownerAgentID: String
+    @State private var dependencyIDs: Set<String>
+    @State private var criteriaText: String
+    @State private var scopesText: String
+    @State private var timeBudgetMinutes: Int
+    @State private var tokenBudget: Int
+    @State private var saving = false
+
+    init(task: TeamOperationsTask?, tasks: [TeamOperationsTask], agents: [NativeAgentSummary], save: @escaping (String, String, String, [String], [String], [String], Int, Int) async -> Void) {
+        self.task = task
+        self.tasks = tasks
+        self.agents = agents
+        self.save = save
+        _title = State(initialValue: task?.title ?? "")
+        _taskDescription = State(initialValue: task?.description ?? "")
+        _ownerAgentID = State(initialValue: task?.ownerAgentID ?? "")
+        _dependencyIDs = State(initialValue: Set(task?.dependsOn ?? []))
+        _criteriaText = State(initialValue: (task?.acceptanceCriteria ?? []).joined(separator: "\n"))
+        _scopesText = State(initialValue: (task?.fileScopes ?? []).joined(separator: "\n"))
+        _timeBudgetMinutes = State(initialValue: task?.timeBudgetMinutes ?? 30)
+        _tokenBudget = State(initialValue: Int(task?.tokenBudget ?? 8000))
+    }
+
+    private var dependencyOptions: [TeamOperationsTask] { tasks.filter { $0.id != task?.id } }
+    private func lines(_ value: String) -> [String] {
+        value.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 15) {
+                Text(task == nil ? "Create team task" : "Edit task contract").font(.title2.weight(.semibold))
+                Text("Define one owner, completion evidence, dependencies, scope, and budget before work starts.")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("Task title", text: $title)
+                TextField("Deliverable", text: $taskDescription, axis: .vertical).lineLimit(2...5)
+                Picker("Owner", selection: $ownerAgentID) {
+                    Text("Unassigned").tag("")
+                    ForEach(agents) { agent in Text(agent.name.isEmpty ? agent.id : agent.name).tag(agent.id) }
+                }
+                if !dependencyOptions.isEmpty {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("DEPENDENCIES").font(.caption.weight(.semibold)).foregroundStyle(JameBrand.orange)
+                        ForEach(dependencyOptions) { dependency in
+                            Toggle(dependency.title, isOn: Binding(
+                                get: { dependencyIDs.contains(dependency.id) },
+                                set: { enabled in
+                                    if enabled { dependencyIDs.insert(dependency.id) } else { dependencyIDs.remove(dependency.id) }
+                                }
+                            ))
+                        }
+                    }
+                }
+                TextField("Acceptance criteria — one per line", text: $criteriaText, axis: .vertical).lineLimit(3...7)
+                TextField("File scopes — one path per line", text: $scopesText, axis: .vertical).lineLimit(2...5)
+                Stepper("Time budget: \(timeBudgetMinutes) minutes", value: $timeBudgetMinutes, in: 0...1440, step: 15)
+                TextField("Token budget", value: $tokenBudget, format: .number)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }
+                    Button(saving ? "Saving…" : (task == nil ? "Create task" : "Save contract")) {
+                        saving = true
+                        Task {
+                            await save(title, taskDescription, ownerAgentID, Array(dependencyIDs), lines(criteriaText), lines(scopesText), timeBudgetMinutes, tokenBudget)
+                            saving = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent).tint(JameBrand.orange)
+                    .disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(24)
+        }
+        .frame(width: 560, height: 650)
+    }
+}
+
+private struct TeamTaskEvidenceEditor: View {
+    let request: TeamTaskActionRequest
+    let save: (String) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var detail = ""
+    @State private var saving = false
+
+    private var title: String {
+        switch request.action {
+        case "submit_review": return "Submit result for review"
+        case "complete": return "Verify and complete"
+        case "block": return "Mark task blocked"
+        default: return "Update task"
+        }
+    }
+    private var prompt: String {
+        switch request.action {
+        case "submit_review": return "Describe the concrete deliverable and where the reviewer can find it."
+        case "complete": return "Provide test output, review evidence, or another concrete verification."
+        case "block": return "Explain the blocker and what is needed to continue."
+        default: return "Add evidence."
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title).font(.title2.weight(.semibold))
+            Text(request.task.title).font(.headline).foregroundStyle(JameBrand.orange)
+            Text(prompt).font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $detail).frame(minHeight: 150).overlay(Rectangle().stroke(teamRule(colorScheme)))
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(saving ? "Saving…" : "Save") {
+                    saving = true
+                    Task { await save(detail); saving = false }
+                }
+                .buttonStyle(.borderedProminent).tint(JameBrand.orange)
+                .disabled(saving || detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24).frame(width: 500)
+    }
+}
+
+private struct TeamGridInitiativeSection: View {
+    let initiative: TeamGridInitiativeResponse
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var statusLabel: String {
+        guard initiative.enabled else { return "Heartbeat off" }
+        guard initiative.initiative else { return "Task-list mode" }
+        switch initiative.latest?.status {
+        case "working": return "Working"
+        case "needs_approval": return "Needs approval"
+        case "error": return "Check failed"
+        case "completed": return "Problem solved"
+        case "idle": return "Monitoring"
+        default: return "Initiative ready"
+        }
+    }
+
+    private var statusIcon: String {
+        switch initiative.latest?.status {
+        case "working": return "bolt.fill"
+        case "needs_approval": return "hand.raised.fill"
+        case "error": return "exclamationmark.triangle.fill"
+        case "completed": return "checkmark.circle.fill"
+        default: return "sparkles"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Agent initiative", systemImage: statusIcon)
+                    .font(.headline)
+                    .foregroundStyle(JameBrand.orange)
+                Spacer()
+                Text(statusLabel.uppercased())
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(initiative.enabled && initiative.initiative ? JameBrand.ink : teamPrimary(colorScheme))
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(
+                        initiative.enabled && initiative.initiative ? JameBrand.orange : teamSurface(colorScheme),
+                        in: Rectangle()
+                    )
+            }
+            Text("Jame checks every \(initiative.intervalMinutes) minutes, finds one evidence-backed problem, and can solve safe local work without waiting for a prompt.")
+                .font(.caption)
+                .foregroundStyle(teamMuted(colorScheme))
+            if let latest = initiative.latest {
+                Text(latest.summary.isEmpty ? "Latest check completed without a report." : latest.summary)
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(teamPrimary(colorScheme))
+                    .lineLimit(6)
+                    .textSelection(.enabled)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(teamSurface(colorScheme), in: Rectangle())
+            } else {
+                Text("Waiting for the first initiative check. The first one runs shortly after the gateway starts.")
+                    .font(.caption)
+                    .foregroundStyle(teamMuted(colorScheme))
+            }
+        }
+        .padding(16)
+        .frame(width: 540, alignment: .leading)
+        .background(teamPanel(colorScheme), in: Rectangle())
+        .overlay(Rectangle().stroke(JameBrand.orange.opacity(0.45)))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TeamGridFlowLine: View {
+    let length: CGFloat
+    @State private var moving = false
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Rectangle().fill(JameBrand.orange.opacity(0.28)).frame(width: 2, height: length)
+            Circle()
+                .fill(JameBrand.orange)
+                .frame(width: 7, height: 7)
+                .shadow(color: JameBrand.orange.opacity(0.7), radius: 5)
+                .offset(y: moving ? max(0, length - 7) : 0)
+        }
+        .frame(width: 12, height: length)
+        .onAppear {
+            withAnimation(.linear(duration: 1.35).repeatForever(autoreverses: false)) {
+                moving = true
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct TeamGridInspector: View {
+    let agent: NativeAgentSummary?
+    let sources: [TeamGridInformationSource]
+    let files: [TeamGridFileAccess]
+    let initiative: TeamGridInitiativeResponse?
+    let spawnSubagent: () -> Void
+    let addTeamAgent: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var agentSources: [TeamGridInformationSource] {
+        guard let agent else { return [] }
+        return sources.filter { $0.agents.contains(agent.id) }
+    }
+
+    private var agentFiles: [TeamGridFileAccess] {
+        guard let agent else { return [] }
+        return Array(files.filter { $0.agents.contains(agent.id) }.prefix(5))
+    }
+
+    var body: some View {
+        if let agent {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("SELECTED AGENT")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .tracking(1.2).foregroundStyle(JameBrand.orange)
+                        Text(agent.name.isEmpty ? agent.id : agent.name)
+                            .font(.system(size: 23, weight: .semibold, design: .rounded))
+                        Text(agent.id).font(.caption.monospaced()).foregroundStyle(teamMuted(colorScheme))
+                    }
+
+                    HStack(spacing: 18) {
+                        TeamGridMetric(value: agent.sessionCount ?? 0, label: "SESSIONS")
+                        TeamGridMetric(value: agent.messageCount ?? 0, label: "MESSAGES")
+                        TeamGridMetric(value: agent.toolCalls ?? 0, label: "TOOLS")
+                    }
+
+                    inspectorSection("Role") {
+                        Text(agent.human?.persona?.isEmpty == false ? agent.human!.persona! : "No persona configured")
+                            .font(.subheadline).foregroundStyle(teamPrimary(colorScheme))
+                    }
+                    inspectorSection("Runtime") {
+                        Label(agent.model.isEmpty ? "Inherited default model" : agent.model, systemImage: "cpu")
+                        Label(agent.workspace.isEmpty ? "Default workspace" : agent.workspace, systemImage: "folder")
+                            .lineLimit(2).truncationMode(.middle)
+                    }
+                    inspectorSection("Skills & delegation") {
+                        Text((agent.skills ?? []).isEmpty ? "No dedicated skills" : (agent.skills ?? []).joined(separator: ", "))
+                        Text((agent.subagents ?? []).isEmpty ? "No spawned agents" : "Delegates to: \((agent.subagents ?? []).joined(separator: ", "))")
+                    }
+                    if agent.id == "main", let initiative {
+                        inspectorSection("Initiative") {
+                            Label(
+                                initiative.initiative ? "Proactive discovery enabled" : "Task-list checks only",
+                                systemImage: initiative.initiative ? "sparkles" : "pause.circle"
+                            )
+                            Text("Checks every \(initiative.intervalMinutes) minutes")
+                            if let latest = initiative.latest {
+                                Text(latest.summary)
+                                    .lineLimit(5)
+                                    .foregroundStyle(teamPrimary(colorScheme))
+                            } else {
+                                Text("Waiting for the first proactive check.")
+                            }
+                        }
+                    }
+                    inspectorSection("Information movement") {
+                        if agentSources.isEmpty && agentFiles.isEmpty {
+                            Text("No recorded source or file movement yet.")
+                                .foregroundStyle(teamMuted(colorScheme))
+                        } else {
+                            ForEach(agentSources) { source in
+                                Label("\(source.name) · \(source.messages) messages", systemImage: "arrow.down.right")
+                            }
+                            ForEach(agentFiles) { file in
+                                Label(URL(fileURLWithPath: file.path).lastPathComponent, systemImage: "doc")
+                                    .help(file.path)
+                            }
+                        }
+                    }
+
+                    VStack(spacing: 9) {
+                        Button("Spawn under \(agent.name.isEmpty ? agent.id : agent.name)", action: spawnSubagent)
+                            .buttonStyle(.borderedProminent).tint(JameBrand.orange)
+                            .frame(maxWidth: .infinity)
+                        Button("Add independent team agent", action: addTeamAgent)
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(22)
+            }
+        } else {
+            ContentUnavailableView("Select an agent", systemImage: "person.crop.circle.badge.questionmark")
+        }
+    }
+
+    @ViewBuilder
+    private func inspectorSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .tracking(1).foregroundStyle(JameBrand.orange)
+            VStack(alignment: .leading, spacing: 7) { content() }
+                .font(.caption).foregroundStyle(teamMuted(colorScheme))
+        }
+        .padding(.leading, 12)
+        .overlay(alignment: .leading) { Rectangle().fill(JameBrand.orange.opacity(0.7)).frame(width: 2) }
+    }
+}
+
+private struct TeamGridMetric: View {
+    let value: Int
+    let label: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)").font(.title3.weight(.semibold)).foregroundStyle(teamPrimary(colorScheme))
+            Text(label).font(.system(size: 8, weight: .semibold, design: .rounded)).foregroundStyle(teamMuted(colorScheme))
+        }
+    }
+}
+
+private struct TeamGridInformationSources: View {
+    let sources: [TeamGridInformationSource]
+    @Environment(\.colorScheme) private var colorScheme
+
+    private func icon(for source: TeamGridInformationSource) -> String {
+        switch source.id {
+        case "jame": return "bubble.left.and.bubble.right.fill"
+        case "terminal": return "terminal.fill"
+        case "telegram": return "paperplane.fill"
+        case "discord": return "gamecontroller.fill"
+        case "slack": return "number"
+        default: return "arrow.down.circle.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Label("Information flows into JameClaw", systemImage: "arrow.down.to.line.compact")
+                .font(.headline)
+                .foregroundStyle(JameBrand.orange)
+            Text("Only sources with saved incoming messages are shown.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(sources) { source in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 6) {
+                            Image(systemName: icon(for: source)).foregroundStyle(JameBrand.orange)
+                            Text("INPUT").font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .foregroundStyle(JameBrand.orange)
+                            Spacer()
+                        }
+                        Text(source.name).font(.headline).lineLimit(1)
+                        Text("\(source.messages) incoming message\(source.messages == 1 ? "" : "s") · \(source.sessions) session\(source.sessions == 1 ? "" : "s")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text(source.agents.joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .padding(13)
+                    .frame(width: 180, alignment: .leading)
+                    .background(teamPanel(colorScheme), in: Rectangle())
+                    .overlay(Rectangle().stroke(JameBrand.orange.opacity(0.35), lineWidth: 1))
+                }
+            }
+            Text("Jame Chat combines the currently shared Desktop and Web Console history.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: 620)
+    }
+}
+
+private struct TeamGridMCPSection: View {
+    let servers: [MCPServer]
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(spacing: 12) {
+            TeamGridFlowLine(length: 22)
+            Label("MCP servers connected to JameClaw", systemImage: "cable.connector")
+                .font(.headline)
+                .foregroundStyle(JameBrand.orange)
+            if servers.isEmpty {
+                Text("No MCP servers are configured yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 14)], spacing: 14) {
+                    ForEach(servers) { server in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: server.enabled ? "cable.connector" : "cable.connector.slash")
+                                Text(server.enabled ? "CONNECTED" : "DISABLED")
+                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                Spacer()
+                            }
+                            .foregroundStyle(server.enabled ? JameBrand.orange : teamMuted(colorScheme))
+                            Text(server.name).font(.headline).lineLimit(1)
+                            Text(server.transport.uppercased())
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(server.endpoint).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        .padding(13)
+                        .frame(width: 190, alignment: .leading)
+                        .background(teamPanel(colorScheme), in: Rectangle())
+                        .overlay(Rectangle().stroke(JameBrand.orange.opacity(server.enabled ? 0.40 : 0.18), lineWidth: 1))
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 760)
+    }
+}
+
+private struct TeamGridFileSection: View {
+    let files: [TeamGridFileAccess]
+
+    var body: some View {
+        VStack(spacing: 12) {
+            TeamGridFlowLine(length: 22)
+            VStack(spacing: 3) {
+                Label("Files accessed by JameClaw", systemImage: "folder.badge.gearshape")
+                    .font(.headline)
+                    .foregroundStyle(JameBrand.orange)
+                Text("Each box grows with the number of recorded read or write operations.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if files.isEmpty {
+                Text("No recorded file activity yet. This map uses saved JameClaw tool calls, not macOS-wide file monitoring.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 440)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 14)], spacing: 14) {
+                    ForEach(Array(files.prefix(30))) { file in
+                        TeamGridFileNode(file: file)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 820)
+    }
+}
+
+private struct TeamGridFileNode: View {
+    let file: TeamGridFileAccess
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var size: CGFloat {
+        CGFloat(min(210, max(128, 118 + file.accesses * 12)))
+    }
+
+    private var displayName: String {
+        URL(fileURLWithPath: file.path).lastPathComponent.isEmpty ? file.path : URL(fileURLWithPath: file.path).lastPathComponent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: "doc.fill").foregroundStyle(JameBrand.orange)
+            Text(displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
+            Text("\(file.accesses) access\(file.accesses == 1 ? "" : "es")")
+                .font(.caption.weight(.medium)).foregroundStyle(JameBrand.orange)
+            if !file.agents.isEmpty {
+                Text(file.agents.joined(separator: ", "))
+                    .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(13)
+        .frame(width: size, height: max(105, size * 0.72), alignment: .leading)
+        .background(teamPanel(colorScheme), in: Rectangle())
+        .overlay(Rectangle().stroke(JameBrand.orange.opacity(0.38), lineWidth: 1))
+        .help(file.path)
+    }
+}
+
+private struct AgentTreeBranch: View {
+    let agent: NativeAgentSummary
+    let agentsByID: [String: NativeAgentSummary]
+    let visited: Set<String>
+    let selectedAgentID: String
+    let select: (String) -> Void
+
+    private var children: [NativeAgentSummary] {
+        guard !visited.contains(agent.id) else { return [] }
+        return (agent.subagents ?? []).compactMap { agentsByID[$0] }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TeamGridNode(
+                agent: agent,
+                kind: agent.id == "main" ? .main : .spawned,
+                isSelected: selectedAgentID == agent.id,
+                select: { select(agent.id) }
+            )
+            if !children.isEmpty {
+                TeamGridFlowLine(length: 28)
+                HStack(alignment: .top, spacing: 18) {
+                    ForEach(children) { child in
+                        VStack(spacing: 0) {
+                            TeamGridFlowLine(length: 20)
+                            AgentTreeBranch(
+                                agent: child,
+                                agentsByID: agentsByID,
+                                visited: visited.union([agent.id]),
+                                selectedAgentID: selectedAgentID,
+                                select: select
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct TeamGridNode: View {
+    enum Kind { case main, spawned, team }
+    let agent: NativeAgentSummary
+    let kind: Kind
+    let isSelected: Bool
+    let select: () -> Void
+    @AppStorage("launcher.design.teamGlow") private var teamGlow = true
+    @Environment(\.colorScheme) private var colorScheme
+    private var label: String {
+        switch kind {
+        case .main: return "JAMECLAW"
+        case .spawned: return "SPAWNED"
+        case .team: return "TEAM"
+        }
+    }
+
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: kind == .main ? "sparkles" : kind == .team ? "person.3.fill" : "arrow.triangle.branch")
+                    Text(label).font(.system(size: 9, weight: .semibold, design: .rounded))
+                    Spacer()
+                    if (agent.messageCount ?? 0) > 0 {
+                        TeamGridLivePulse()
+                    }
+                }
+                .foregroundStyle(isSelected ? JameBrand.ink : JameBrand.orange)
+                Text(agent.name.isEmpty ? agent.id : agent.name)
+                    .font(.headline)
+                    .foregroundStyle(isSelected ? JameBrand.ink : teamPrimary(colorScheme))
+                    .lineLimit(1)
+                Text(agent.human?.persona?.isEmpty == false ? agent.human!.persona! : agent.model.isEmpty ? "Uses the default model" : agent.model)
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.64) : teamMuted(colorScheme))
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    Label("\(agent.sessionCount ?? 0)", systemImage: "bubble.left")
+                    Label("\(agent.toolCalls ?? 0)", systemImage: "wrench.and.screwdriver")
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.64) : teamMuted(colorScheme))
+            }
+            .padding(14)
+            .frame(width: 205, alignment: .leading)
+            .background(isSelected ? JameBrand.orange : teamPanel(colorScheme), in: Rectangle())
+            .overlay(Rectangle().stroke(JameBrand.orange.opacity(isSelected ? 1 : 0.42), lineWidth: isSelected ? 2 : 1))
+            .shadow(
+                color: teamGlow ? JameBrand.orange.opacity(isSelected ? 0.62 : 0.34) : .clear,
+                radius: teamGlow ? (isSelected ? 16 : 10) : 0
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct TeamGridLivePulse: View {
+    @State private var pulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(pulsing ? JameBrand.orange : JameBrand.orange.opacity(0.35))
+            .frame(width: 7, height: 7)
+            .scaleEffect(pulsing ? 1.15 : 0.72)
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulsing)
+            .onAppear { pulsing = true }
+            .accessibilityLabel("Recorded activity")
+    }
+}
+
 private func AgentField(_ label: String, _ value: String) -> some View {
     Group {
         Text(label).foregroundStyle(.secondary)
@@ -2302,11 +5252,23 @@ private struct CreateAgentView: View {
     @State private var id = ""
     @State private var name = ""
     @State private var workspace = ""
-    @State private var persona = ""
+    @State private var role = ""
+    @State private var task = ""
+    @State private var company = ""
+
+    private var teamContext: String {
+        var lines = ["Role: \(role.trimmingCharacters(in: .whitespacesAndNewlines))"]
+        let cleanTask = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCompany = company.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanTask.isEmpty { lines.append("Task: \(cleanTask)") }
+        if !cleanCompany.isEmpty { lines.append("Company: \(cleanCompany)") }
+        return lines.joined(separator: "\n")
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(mode == .team ? "Add team agent" : "Spawn subagent").font(.title2.weight(.bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+            Text(mode == .team ? "Add team agent" : "Spawn subagent").font(.title2.weight(.semibold))
             Text(mode == .team
                 ? "Create an independent full agent that appears in the JameClaw team directory. It is not nested as a subagent."
                 : "Create an agent managed by \(parent?.name.isEmpty == false ? parent!.name : parent?.id ?? "main"). It can be delegated work by its parent.")
@@ -2341,26 +5303,55 @@ private struct CreateAgentView: View {
                         .buttonStyle(.plain)
                         .padding(8)
                         .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(Rectangle())
                     }
                 }
             }
             if mode == .team {
-                HStack(spacing: 8) {
-                Text("Quick profiles:").font(.caption).foregroundStyle(.secondary)
-                ForEach(TeamAgentPreset.allCases) { preset in
-                    Button(preset.title) {
-                        apply(preset)
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Team agent templates").font(.headline)
+                    Text("Choose a starting profile, then refine its workspace and role below.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 9)], spacing: 9) {
+                        ForEach(TeamAgentPreset.allCases) { preset in
+                            Button { apply(preset) } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: preset.symbol)
+                                        .foregroundStyle(preset.tint)
+                                        .frame(width: 18)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(preset.title).font(.subheadline.weight(.semibold))
+                                        Text(preset.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(9)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.secondary.opacity(0.08), in: Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Use the \(preset.title) team-agent profile")
+                        }
                     }
-                    .controlSize(.small)
-                }
                 }
             }
             TextField("Agent ID (for example, researcher)", text: $id)
             TextField("Display name", text: $name)
             TextField("Workspace (optional)", text: $workspace)
-            TextField("Role or persona (optional)", text: $persona, axis: .vertical)
-                .lineLimit(2...4)
+            if mode == .team {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Role *").font(.caption.weight(.semibold)).foregroundStyle(JameBrand.orange)
+                    TextField("Required — for example, Lead researcher", text: $role, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+                TextField("Task (optional)", text: $task, axis: .vertical)
+                    .lineLimit(2...4)
+                TextField("Company (optional)", text: $company)
+            } else {
+                TextField("Role or persona (optional)", text: $role, axis: .vertical)
+                    .lineLimit(2...4)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -2370,7 +5361,7 @@ private struct CreateAgentView: View {
                             id: id,
                             name: name,
                             workspace: workspace,
-                            persona: persona,
+                            persona: mode == .team ? teamContext : role,
                             parentID: mode == .subagent ? (parent?.id ?? "main") : nil,
                             managedByMain: mode == .subagent
                         )
@@ -2378,22 +5369,27 @@ private struct CreateAgentView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.isCreating || id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    store.isCreating
+                        || id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || (mode == .team && role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                )
             }
+            }
+            .padding(24)
         }
-        .padding(24)
-        .frame(width: 480)
+        .frame(width: 520, height: 640)
     }
 
     private func apply(_ preset: TeamAgentPreset) {
         id = preset.id
         name = preset.title
-        persona = preset.persona
+        role = preset.persona
     }
 }
 
 private enum TeamAgentPreset: String, CaseIterable, Identifiable {
-    case codex, kimi, claudeCode = "claude-code", hermes
+    case codex, kimi, claudeCode = "claude-code", hermes, grok, nanobot, openCode = "open-code", aider, gemini, goose, qwenCode = "qwen-code", cursor
 
     var id: String { rawValue }
     var title: String {
@@ -2402,6 +5398,60 @@ private enum TeamAgentPreset: String, CaseIterable, Identifiable {
         case .kimi: return "Kimi"
         case .claudeCode: return "Claude Code"
         case .hermes: return "Hermes"
+        case .grok: return "Grok"
+        case .nanobot: return "Nanobot"
+        case .openCode: return "OpenCode"
+        case .aider: return "Aider"
+        case .gemini: return "Gemini CLI"
+        case .goose: return "Goose"
+        case .qwenCode: return "Qwen Code"
+        case .cursor: return "Cursor"
+        }
+    }
+    var summary: String {
+        switch self {
+        case .codex: return "Implementation"
+        case .kimi: return "Research"
+        case .claudeCode: return "Code review"
+        case .hermes: return "Autonomous work"
+        case .grok: return "Fast product thinking"
+        case .nanobot: return "Lightweight helper"
+        case .openCode: return "Open-source coding"
+        case .aider: return "Repository editing"
+        case .gemini: return "Multimodal research"
+        case .goose: return "Tool-assisted work"
+        case .qwenCode: return "Coding assistance"
+        case .cursor: return "IDE collaboration"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .codex: return "chevron.left.forwardslash.chevron.right"
+        case .kimi: return "text.book.closed"
+        case .claudeCode: return "checkmark.seal"
+        case .hermes: return "bolt.fill"
+        case .grok: return "sparkle.magnifyingglass"
+        case .nanobot: return "cpu"
+        case .openCode: return "terminal"
+        case .aider: return "hammer"
+        case .gemini: return "diamond"
+        case .goose: return "wrench.and.screwdriver"
+        case .qwenCode: return "curlybraces"
+        case .cursor: return "cursorarrow.rays"
+        }
+    }
+    var tint: Color {
+        switch self {
+        case .codex, .openCode: return .green
+        case .kimi, .grok: return .purple
+        case .claudeCode: return .orange
+        case .hermes: return .blue
+        case .nanobot: return .cyan
+        case .aider: return .pink
+        case .gemini: return .blue
+        case .goose: return .orange
+        case .qwenCode: return .purple
+        case .cursor: return .indigo
         }
     }
     var persona: String {
@@ -2410,6 +5460,14 @@ private enum TeamAgentPreset: String, CaseIterable, Identifiable {
         case .kimi: return "Research and long-context analysis teammate."
         case .claudeCode: return "Code review and software engineering teammate."
         case .hermes: return "Independent planning and execution teammate."
+        case .grok: return "Fast, candid product and technical reasoning teammate."
+        case .nanobot: return "Lightweight, focused helper for concise tasks and reliable follow-through."
+        case .openCode: return "Open-source coding teammate for implementation and code exploration."
+        case .aider: return "Repository-aware editing teammate focused on precise code changes."
+        case .gemini: return "Multimodal research and analysis teammate for broad technical questions."
+        case .goose: return "Tool-assisted teammate for structured tasks and repeatable workflows."
+        case .qwenCode: return "Practical coding teammate for implementation, debugging, and code explanation."
+        case .cursor: return "IDE-oriented teammate for collaborative software development and code navigation."
         }
     }
 }
@@ -2442,13 +5500,37 @@ private struct NativeModelsResponse: Codable {
     }
 }
 
-private struct NativeProviderInfo: Codable {
+private struct NativeProviderInfo: Codable, Identifiable {
+    let id: String
     let name: String
+    let description: String
+    let requiresAPIKey: Bool
+    let keyLabel: String?
+    let recommendedModels: [NativeProviderModelPreset]
     let configuredModels: [String]?
 
     enum CodingKeys: String, CodingKey {
+        case id
         case name
+        case description
+        case requiresAPIKey = "requires_api_key"
+        case keyLabel = "key_label"
+        case recommendedModels = "recommended_models"
         case configuredModels = "configured_models"
+    }
+}
+
+private struct NativeProviderModelPreset: Codable, Identifiable {
+    let id: String
+    let name: String
+    let requiresAPIKey: Bool
+    let keyLabel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case requiresAPIKey = "requires_api_key"
+        case keyLabel = "key_label"
     }
 }
 
@@ -2463,6 +5545,7 @@ private final class NativeProviderStore: ObservableObject {
     @Published var selectedModel = ""
     @Published var selectedFallbackModel = ""
     @Published var providerNames: [String: String] = [:]
+    @Published var catalog: [NativeProviderInfo] = []
     @Published var status = ""
     @Published var isLoading = false
 
@@ -2480,10 +5563,12 @@ private final class NativeProviderStore: ObservableObject {
             selectedModel = modelsResponse.defaultModel
             selectedFallbackModel = modelsResponse.modelFallbacks?.first ?? ""
             if let catalogResponse: NativeProviderCatalogResponse = try? await fetch(path: "/api/models/catalog", port: port) {
+                catalog = catalogResponse.providers
                 providerNames = Dictionary(uniqueKeysWithValues: catalogResponse.providers.flatMap { provider in
                     (provider.configuredModels ?? []).map { ($0, provider.name) }
                 })
             } else {
+                catalog = []
                 providerNames = [:]
             }
             status = models.isEmpty
@@ -2547,6 +5632,30 @@ private final class NativeProviderStore: ObservableObject {
         }
     }
 
+    func addCatalogModel(provider: NativeProviderInfo, preset: NativeProviderModelPreset, apiKey: String, port: Int) async -> Bool {
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/models/from-catalog", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "provider_id": provider.id,
+                "preset_id": preset.id,
+                "api_key": apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                "set_default": false,
+            ])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            await load(port: port)
+            selectedFallbackModel = models.first(where: { $0.modelName != selectedModel && providerNames[$0.modelName] == provider.name })?.modelName ?? selectedFallbackModel
+            status = "Provider added. Choose it as the global fallback."
+            return true
+        } catch {
+            status = "Could not add this provider. Check the model and API key."
+            return false
+        }
+    }
+
     func providerName(for model: NativeModelInfo) -> String {
         if let configuredProvider = providerNames[model.modelName] {
             return configuredProvider
@@ -2568,20 +5677,70 @@ private final class NativeProviderStore: ObservableObject {
 
 struct QuickSettingsView: View {
     @ObservedObject var settings: LauncherSettingsStore
+    let openArchivedChats: () -> Void
     @StateObject private var providers = NativeProviderStore()
-    @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.terminal.rawValue
+    @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @AppStorage("launcher.design.density") private var savedDensity = ChatDensity.comfortable.rawValue
     @AppStorage("launcher.design.surface") private var savedSurface = MessageSurface.cards.rawValue
     @AppStorage("launcher.design.fontScale") private var fontScale = 1.0
     @AppStorage("launcher.design.backgroundPath") private var backgroundPath = ""
+    @AppStorage("launcher.design.windowOpacity") private var windowOpacity = 1.0
+    @AppStorage("launcher.design.teamGlow") private var teamGlow = true
+    @AppStorage("launcher.safety.documentApprovalPolicy") private var documentApprovalPolicy = DocumentApprovalPolicy.outsideWorkspace.rawValue
+    @AppStorage("jame.notifications.taskCompletion") private var taskCompletionNotifications = true
     @State private var showingBackgroundPicker = false
+    @State private var showingProviderSetup = false
     @State private var allowOpenMacApps = false
     @State private var allowMusicPlaylists = false
     @State private var musicPlaylistStatus = ""
+    @State private var documentSafetyStatus = ""
 
     var body: some View {
         Form {
+            Section("Conversation history") {
+                Button(action: openArchivedChats) {
+                    Label("Archived chats", systemImage: "archivebox.fill")
+                }
+                Text("Open chats removed from the active Sessions timeline. You can restore any chat from there.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Notifications") {
+                Toggle("Notify me when Jame finishes a task", isOn: $taskCompletionNotifications)
+                Text("JameClaw Desktop sends a macOS notification with a short result preview when an agent turn completes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Safety") {
+                Picker("Document access approvals", selection: $documentApprovalPolicy) {
+                    ForEach(DocumentApprovalPolicy.allCases) { policy in
+                        Text(policy.label).tag(policy.rawValue)
+                    }
+                }
+                if let policy = DocumentApprovalPolicy(rawValue: documentApprovalPolicy) {
+                    Text(policy.detail)
+                        .font(.caption)
+                        .foregroundStyle(policy == .yolo ? Color.red : Color.secondary)
+                }
+                Label(
+                    documentApprovalPolicy == DocumentApprovalPolicy.yolo.rawValue
+                        ? "YOLO removes the workspace restriction for file tools."
+                        : "File tools stay restricted to Jame's active workspace.",
+                    systemImage: documentApprovalPolicy == DocumentApprovalPolicy.yolo.rawValue
+                        ? "exclamationmark.triangle.fill"
+                        : "lock.shield.fill"
+                )
+                    .font(.caption)
+                    .foregroundStyle(documentApprovalPolicy == DocumentApprovalPolicy.yolo.rawValue ? Color.red : JameBrand.orange)
+                HStack {
+                    Button("Save document safety") { saveDocumentSafety() }
+                        .buttonStyle(.borderedProminent)
+                    if !documentSafetyStatus.isEmpty {
+                        Text(documentSafetyStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
             Section("Web Console") {
                 TextField("Port", text: $settings.port)
                 Toggle("Allow devices on my local network", isOn: $settings.lanAccess)
@@ -2620,6 +5779,17 @@ struct QuickSettingsView: View {
                     Text("If the primary provider has a retriable failure, JameClaw will automatically try the fallback provider.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if providers.selectedFallbackModel.isEmpty {
+                        HStack(spacing: 10) {
+                            Button("Add fallback provider") {
+                                openProviderSetup()
+                            }
+                            .buttonStyle(.bordered)
+                            Text("Add another provider or model, then select it here as the fallback.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     HStack {
                         Button("Save provider failover") {
                             Task {
@@ -2636,6 +5806,12 @@ struct QuickSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+                if providers.models.isEmpty {
+                    Button("Add provider") {
+                        openProviderSetup()
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
                 HStack {
                     Button("Refresh providers") {
@@ -2686,13 +5862,28 @@ struct QuickSettingsView: View {
                     Text("Large").tag(1.15)
                     Text("Extra large").tag(1.3)
                 }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Window transparency")
+                        Spacer()
+                        Text("\(Int(windowOpacity * 100))%")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $windowOpacity, in: 0.65...1.0, step: 0.05)
+                    Text("Lower the value to see more of the desktop behind JameClaw.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Glow team grid", isOn: $teamGlow)
+                Text("Adds an orange live glow around team and subagent cards in the Team Grid.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Choose chat background") { showingBackgroundPicker = true }
                     if !backgroundPath.isEmpty {
-                        Button("Remove background", role: .destructive) { backgroundPath = "" }
+                        Button("Use default background") { backgroundPath = "" }
                     }
                 }
-                Text("The selected image is stored locally and used behind the Chat view.")
+                Text("Chat uses the Creation of Adam artwork across the full canvas by default. Choose an image if you want a custom local background.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -2704,6 +5895,8 @@ struct QuickSettingsView: View {
         .formStyle(.grouped)
         .padding(.top, 6)
         .task {
+            let normalizedTheme = launcherThemePreference(from: savedTheme).rawValue
+            if savedTheme != normalizedTheme { savedTheme = normalizedTheme }
             let port = Int(settings.port) ?? 18800
             await providers.load(port: port)
             await loadMusicPlaylistPermission(port: port)
@@ -2715,6 +5908,47 @@ struct QuickSettingsView: View {
         ) { result in
             guard case let .success(urls) = result, let sourceURL = urls.first else { return }
             saveChatBackground(from: sourceURL)
+        }
+        .sheet(isPresented: $showingProviderSetup, onDismiss: {
+            Task { await providers.load(port: Int(settings.port) ?? 18800) }
+        }) {
+            ProviderSetupSheet(port: Int(settings.port) ?? 18800, providers: providers) {
+                showingProviderSetup = false
+            }
+        }
+    }
+
+    private func openProviderSetup() {
+        showingProviderSetup = true
+    }
+
+    private func saveDocumentSafety() {
+        documentSafetyStatus = "Saving…"
+        Task {
+            do {
+                let port = Int(settings.port) ?? 18800
+                var request = authenticatedConsoleRequest(port: port, path: "/api/config", method: "PATCH")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "agents": ["defaults": [
+                        "restrict_to_workspace": documentApprovalPolicy != DocumentApprovalPolicy.yolo.rawValue,
+                    ]],
+                ])
+                let (_, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                let restart = authenticatedConsoleRequest(port: port, path: "/api/gateway/restart", method: "POST")
+                let (_, restartResponse) = try await URLSession.shared.data(for: restart)
+                guard let http = restartResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                documentSafetyStatus = documentApprovalPolicy == DocumentApprovalPolicy.yolo.rawValue
+                    ? "YOLO saved. Document prompts and workspace restriction are off."
+                    : "Saved. Workspace restriction is active."
+            } catch {
+                documentSafetyStatus = "Could not save safety settings."
+            }
         }
     }
 
@@ -2787,9 +6021,194 @@ struct NativeChatMessage: Identifiable {
     var content: String
 }
 
+private enum NativePlanStepStatus: String {
+    case pending
+    case inProgress = "in_progress"
+    case completed
+    case cancelled
+}
+
+private struct NativePlanStep: Identifiable {
+    let id: String
+    var title: String
+    var tools: [String]
+    var status: NativePlanStepStatus
+}
+
+private func nativePlanSteps(from content: String) -> [NativePlanStep]? {
+    let lowered = content.lowercased()
+    guard lowered.contains("**plan**") || lowered.hasPrefix("🧭 plan") else { return nil }
+
+    var steps: [NativePlanStep] = []
+    for rawLine in content.split(whereSeparator: \.isNewline) {
+        var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("-") || line.hasPrefix("•") else { continue }
+        line = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+
+        let status: NativePlanStepStatus
+        if line.lowercased().hasPrefix("[x]") {
+            status = .completed
+            line = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("[>]") {
+            status = .inProgress
+            line = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("[-]") {
+            status = .cancelled
+            line = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("[ ]") {
+            status = .pending
+            line = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        } else {
+            status = .pending
+        }
+
+        var title = line
+        var toolNames: [String] = []
+        if let toolRange = line.range(of: "Tools:", options: .caseInsensitive) {
+            title = String(line[..<toolRange.lowerBound])
+                .trimmingCharacters(in: CharacterSet(charactersIn: " \t—–-:("))
+            let toolText = String(line[toolRange.upperBound...])
+                .trimmingCharacters(in: CharacterSet(charactersIn: " \t.)"))
+            toolNames = toolText
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " `\t")) }
+                .filter { !$0.isEmpty && $0.lowercased() != "none" }
+        }
+        guard !title.isEmpty else { continue }
+        steps.append(NativePlanStep(
+            id: "plan-step-\(steps.count)",
+            title: title,
+            tools: toolNames,
+            status: status
+        ))
+    }
+    return steps.isEmpty ? nil : steps
+}
+
+private func nativePlanContent(from steps: [NativePlanStep]) -> String {
+    let lines = steps.map { step in
+        let marker: String
+        switch step.status {
+        case .pending: marker = "[ ]"
+        case .inProgress: marker = "[>]"
+        case .completed: marker = "[x]"
+        case .cancelled: marker = "[-]"
+        }
+        let tools = step.tools.isEmpty ? "" : " — Tools: " + step.tools.joined(separator: ", ")
+        return "- \(marker) \(step.title)\(tools)"
+    }
+    return "🧭 **Plan**\n\n" + lines.joined(separator: "\n")
+}
+
+private struct NativePlanCard: View {
+    let steps: [NativePlanStep]
+    let accent: Color
+    let fontScale: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "checklist")
+                    .foregroundStyle(accent)
+                Text("EXECUTION PLAN")
+                    .font(.system(size: 11 * fontScale, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accent)
+                Spacer()
+                Text("\(steps.filter { $0.status == .completed }.count)/\(steps.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(steps) { step in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: symbol(for: step.status))
+                        .foregroundStyle(color(for: step.status))
+                        .font(.system(size: 16 * fontScale, weight: .semibold))
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(step.title)
+                            .font(.system(size: 13 * fontScale, weight: step.status == .inProgress ? .semibold : .regular))
+                            .foregroundStyle(step.status == .cancelled ? .secondary : .primary)
+                            .strikethrough(step.status == .completed || step.status == .cancelled)
+                        if !step.tools.isEmpty {
+                            HStack(spacing: 5) {
+                                Image(systemName: "wrench.and.screwdriver.fill")
+                                Text(step.tools.joined(separator: "  ·  "))
+                                    .lineLimit(2)
+                            }
+                            .font(.system(size: 10 * fontScale, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.06), in: Rectangle())
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(14)
+        .background(JameBrand.elevated.opacity(0.96), in: Rectangle())
+        .overlay(Rectangle().stroke(accent.opacity(0.42)))
+    }
+
+    private func symbol(for status: NativePlanStepStatus) -> String {
+        switch status {
+        case .pending: return "square"
+        case .inProgress: return "square.dotted"
+        case .completed: return "checkmark.square.fill"
+        case .cancelled: return "xmark.square.fill"
+        }
+    }
+
+    private func color(for status: NativePlanStepStatus) -> Color {
+        switch status {
+        case .pending: return .secondary
+        case .inProgress, .completed: return accent
+        case .cancelled: return .secondary
+        }
+    }
+}
+
+private struct NativeMemoryChangedCard: View {
+    let summary: String
+    let accent: Color
+    let fontScale: CGFloat
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "brain.head.profile.fill")
+                .font(.system(size: 17 * fontScale, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("MEMORY WAS UPDATED")
+                    .font(.system(size: 11 * fontScale, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accent)
+                Text(summary)
+                    .font(.system(size: 12 * fontScale, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "checkmark.square.fill")
+                .foregroundStyle(accent)
+        }
+        .padding(12)
+        .background(accent.opacity(0.09), in: Rectangle())
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(accent)
+                .frame(width: 3)
+        }
+        .overlay(Rectangle().stroke(accent.opacity(0.42)))
+    }
+}
+
 private struct PendingNativeChatMessage {
     let id: String
     let content: String
+    let modelOverride: String
 }
 
 struct NativeAppError: Identifiable {
@@ -2824,40 +6243,49 @@ final class NativeChatStore: ObservableObject {
     @Published var isThinking = false
     @Published var lastError: NativeAppError?
     @Published var workspaceName = "Choose workspace"
+    @Published var workspacePath = ""
 
     private let port: Int
-    private let sessionID: String
+    private var sessionID: String
     private var socket: URLSessionWebSocketTask?
     private var pendingMessages: [PendingNativeChatMessage] = []
+    private var pendingMemorySummary: String?
     private var reconnectTask: Task<Void, Never>?
     private var launcherProcess: Process?
+    private var lastSentTextRequest: (content: String, modelOverride: String)?
     private var attemptedLauncherRecovery = false
     private var reconnectAttempt = 0
+    private var connectionEpoch = 0
 
     init(port: Int) {
         self.port = port
-        workspaceName = jameWorkspaceURL().lastPathComponent
+        let workspaceURL = jameTaskFolderURL().standardizedFileURL
+        workspaceName = workspaceURL.lastPathComponent
+        workspacePath = workspaceURL.path
         let key = "jameclaw.native-chat.session-id"
-        if let storedID = UserDefaults.standard.string(forKey: key), !storedID.isEmpty {
-            sessionID = storedID
-        } else {
-            let newID = UUID().uuidString
-            UserDefaults.standard.set(newID, forKey: key)
-            sessionID = newID
-        }
+        // The native window does not restore the old message transcript on
+        // launch, so reusing its old gateway session would silently inject
+        // invisible history into the first new message.
+        let newID = UUID().uuidString
+        UserDefaults.standard.set(newID, forKey: key)
+        sessionID = newID
     }
 
     func startGatewayAndConnect() {
+        let epoch = connectionEpoch
         Task {
             do {
+                try await restoreInternalWorkspaceIfNeeded()
                 let request = authenticatedConsoleRequest(port: port, path: "/api/gateway/start", method: "POST")
                 let (_, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                     throw URLError(.badServerResponse)
                 }
                 try await waitForGatewayReadiness()
+                guard epoch == connectionEpoch else { return }
                 connect()
             } catch {
+                guard epoch == connectionEpoch else { return }
                 startBundledLauncherIfNeeded()
                 reportError(title: "JameClaw is not ready", detail: connectionDetail(for: error))
                 scheduleReconnect()
@@ -2867,6 +6295,7 @@ final class NativeChatStore: ObservableObject {
 
     func connect() {
         guard socket == nil else { return }
+        let epoch = connectionEpoch
         reconnectTask?.cancel()
         reconnectTask = nil
         status = "Connecting…"
@@ -2885,6 +6314,7 @@ final class NativeChatStore: ObservableObject {
                 query.append(URLQueryItem(name: "session_id", value: sessionID))
                 parts.queryItems = query
                 guard let wsURL = parts.url else { throw URLError(.badURL) }
+                guard epoch == connectionEpoch else { return }
                 let task = URLSession.shared.webSocketTask(with: wsURL, protocols: ["token.\(token)"])
                 socket = task
                 task.resume()
@@ -2896,13 +6326,18 @@ final class NativeChatStore: ObservableObject {
                 let ping = try JSONSerialization.data(withJSONObject: ["type": "ping", "id": pingID])
                 guard let pingText = String(data: ping, encoding: .utf8) else { throw URLError(.badServerResponse) }
                 try await task.send(.string(pingText))
+                guard epoch == connectionEpoch else {
+                    task.cancel(with: .goingAway, reason: nil)
+                    return
+                }
                 status = "Ready"
                 lastError = nil
                 loadDisplayName()
                 reconnectAttempt = 0
                 flushPendingMessages()
-                receive()
+                receive(from: task, epoch: epoch)
             } catch {
+                guard epoch == connectionEpoch else { return }
                 socket = nil
                 startBundledLauncherIfNeeded()
                 reportError(title: "Could not connect to JameClaw", detail: connectionDetail(for: error))
@@ -2925,6 +6360,7 @@ final class NativeChatStore: ObservableObject {
     }
 
     func retryConnection() {
+        connectionEpoch += 1
         reconnectTask?.cancel()
         reconnectTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
@@ -2935,6 +6371,36 @@ final class NativeChatStore: ObservableObject {
     }
 
     func dismissError() { lastError = nil }
+
+    var canRetryLastMessage: Bool { lastSentTextRequest != nil }
+    var canContinueConversation: Bool { messages.contains { $0.role == "user" || $0.role == "assistant" } }
+
+    func retryLastMessage() {
+        guard let request = lastSentTextRequest else {
+            retryConnection()
+            return
+        }
+        lastError = nil
+        isThinking = true
+        status = socket == nil ? "Reconnecting to retry…" : "Retrying message…"
+        let id = "native-retry-\(UUID().uuidString)"
+        if socket == nil {
+            pendingMessages.append(PendingNativeChatMessage(
+                id: id,
+                content: request.content,
+                modelOverride: request.modelOverride
+            ))
+            connect()
+            return
+        }
+        send(id: id, content: request.content, modelOverride: request.modelOverride)
+    }
+
+    func continueConversation(modelOverride: String = "") {
+        lastError = nil
+        draft = "Continue from where you stopped. Keep the work already completed and finish the remaining task."
+        send(modelOverride: modelOverride)
+    }
 
     private func loadDisplayName() {
         Task {
@@ -2949,39 +6415,83 @@ final class NativeChatStore: ObservableObject {
     }
 
     func startNewChat() {
-        messages.removeAll()
+        let newID = UUID().uuidString
+        switchConversation(to: newID, messages: [], statusText: "Starting a new conversation…")
+    }
+
+    fileprivate func resumeSession(_ request: NativeSessionResumeRequest) {
+        let restored = request.messages.enumerated().map { index, message in
+            NativeChatMessage(
+                id: "restored-\(request.sessionID)-\(index)",
+                role: message.role,
+                content: message.content
+            )
+        }
+        let suffix = request.cloned ? " from another channel" : ""
+        switchConversation(
+            to: request.sessionID,
+            messages: restored,
+            statusText: "Continuing \(request.title)\(suffix)…"
+        )
+    }
+
+    private func switchConversation(
+        to newSessionID: String,
+        messages restoredMessages: [NativeChatMessage],
+        statusText: String
+    ) {
+        connectionEpoch += 1
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        let previousSocket = socket
+        socket = nil
+        previousSocket?.cancel(with: .goingAway, reason: nil)
+        sessionID = newSessionID
+        UserDefaults.standard.set(newSessionID, forKey: "jameclaw.native-chat.session-id")
+        messages = restoredMessages
         pendingMessages.removeAll()
+        pendingMemorySummary = nil
+        lastSentTextRequest = nil
         draft = ""
         isThinking = false
         lastError = nil
+        reconnectAttempt = 0
+        status = statusText
+        startGatewayAndConnect()
+    }
+
+    func addFastPathExchange(user: String, response: String) {
+        messages.append(NativeChatMessage(id: "local-user-\(UUID().uuidString)", role: "user", content: user))
+        messages.append(NativeChatMessage(id: "local-response-\(UUID().uuidString)", role: "assistant", content: response))
+        isThinking = false
         status = socket == nil ? "Connecting…" : "Ready"
     }
 
     func setWorkspace(_ workspaceURL: URL) {
-        let workspacePath = workspaceURL.standardizedFileURL.path
+        let selectedWorkspaceURL = workspaceURL.standardizedFileURL.resolvingSymlinksInPath()
+        let resolvedWorkspaceURL = organizedJameTaskFolder(for: selectedWorkspaceURL)
+        let resolvedWorkspacePath = resolvedWorkspaceURL.path
         Task {
             do {
-                status = "Updating workspace…"
-                var request = URLRequest(url: authenticatedConsoleURL(port: port, path: "/api/config"))
-                request.httpMethod = "PATCH"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.httpBody = try JSONSerialization.data(withJSONObject: [
-                    "agents": ["defaults": ["workspace": workspacePath]],
-                ])
-                let (_, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                    throw URLError(.badServerResponse)
-                }
+                try FileManager.default.createDirectory(at: resolvedWorkspaceURL, withIntermediateDirectories: true)
+                status = "Using \(resolvedWorkspaceURL.lastPathComponent) as the task folder…"
+                try await saveTaskFolderAccess(
+                    resolvedWorkspacePath,
+                    legacyFolderPath: selectedWorkspaceURL.path == resolvedWorkspacePath ? nil : selectedWorkspaceURL.path,
+                    restoreInternalWorkspace: true
+                )
+                UserDefaults.standard.set(resolvedWorkspacePath, forKey: jameTaskFolderDefaultsKey)
 
-                var restart = URLRequest(url: authenticatedConsoleURL(port: port, path: "/api/gateway/restart"))
-                restart.httpMethod = "POST"
+                let restart = authenticatedConsoleRequest(port: port, path: "/api/gateway/restart", method: "POST")
                 let (_, restartResponse) = try await URLSession.shared.data(for: restart)
                 guard let http = restartResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                     throw URLError(.badServerResponse)
                 }
 
-                workspaceName = workspaceURL.lastPathComponent
-                status = "Workspace updated. Reconnecting…"
+                workspaceName = resolvedWorkspaceURL.lastPathComponent
+                workspacePath = resolvedWorkspacePath
+                status = "Task folder set. Reconnecting…"
+                connectionEpoch += 1
                 socket?.cancel(with: .goingAway, reason: nil)
                 socket = nil
                 lastError = nil
@@ -2990,6 +6500,77 @@ final class NativeChatStore: ObservableObject {
                 reportError(title: "Could not change workspace", detail: connectionDetail(for: error))
             }
         }
+    }
+
+    private func restoreInternalWorkspaceIfNeeded() async throws {
+        let configuredWorkspace = jameWorkspaceURL().standardizedFileURL.resolvingSymlinksInPath()
+        let internalWorkspace = jameInternalWorkspaceURL().resolvingSymlinksInPath()
+        let legacyTaskFolder = configuredWorkspace.path == internalWorkspace.path
+            ? jameTaskFolderURL().standardizedFileURL.resolvingSymlinksInPath()
+            : configuredWorkspace
+        let organizedTaskFolder = organizedJameTaskFolder(for: legacyTaskFolder)
+        try FileManager.default.createDirectory(at: organizedTaskFolder, withIntermediateDirectories: true)
+
+        UserDefaults.standard.set(organizedTaskFolder.path, forKey: jameTaskFolderDefaultsKey)
+        workspaceName = organizedTaskFolder.lastPathComponent
+        workspacePath = organizedTaskFolder.path
+        try await saveTaskFolderAccess(
+            organizedTaskFolder.path,
+            legacyFolderPath: legacyTaskFolder.path == organizedTaskFolder.path ? nil : legacyTaskFolder.path,
+            restoreInternalWorkspace: true
+        )
+
+        if configuredWorkspace.path != internalWorkspace.path || legacyTaskFolder.path != organizedTaskFolder.path {
+            let restart = authenticatedConsoleRequest(port: port, path: "/api/gateway/restart", method: "POST")
+            let (_, response) = try await URLSession.shared.data(for: restart)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+        }
+    }
+
+    private func saveTaskFolderAccess(
+        _ folderPath: String,
+        legacyFolderPath: String? = nil,
+        restoreInternalWorkspace: Bool
+    ) async throws {
+        let configURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".jameclaw/config.json")
+        let localConfig = (try? Data(contentsOf: configURL))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let tools = localConfig?["tools"] as? [String: Any]
+        var readPaths = tools?["allow_read_paths"] as? [String] ?? []
+        var writePaths = tools?["allow_write_paths"] as? [String] ?? []
+        if let legacyFolderPath {
+            readPaths.removeAll { $0 == legacyFolderPath }
+            writePaths.removeAll { $0 == legacyFolderPath }
+        }
+        if !readPaths.contains(folderPath) { readPaths.append(folderPath) }
+        if !writePaths.contains(folderPath) { writePaths.append(folderPath) }
+
+        var patch: [String: Any] = [
+            "tools": [
+                "allow_read_paths": readPaths,
+                "allow_write_paths": writePaths,
+            ],
+        ]
+        if restoreInternalWorkspace {
+            patch["agents"] = ["defaults": ["workspace": jameInternalWorkspaceURL().path]]
+        }
+
+        var request = authenticatedConsoleRequest(port: port, path: "/api/config", method: "PATCH")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: patch)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    func reflectWorkspace(_ workspaceURL: URL) {
+        let resolved = workspaceURL.standardizedFileURL.resolvingSymlinksInPath()
+        workspaceName = resolved.lastPathComponent
+        workspacePath = resolved.path
     }
 
     // Jame.app is also useful when opened directly from Finder. In that case
@@ -3018,21 +6599,22 @@ final class NativeChatStore: ObservableObject {
         }
     }
 
-    func send() {
+    func send(modelOverride: String = "") {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
         draft = ""
         let id = "native-\(UUID().uuidString)"
         messages.append(NativeChatMessage(id: id, role: "user", content: content))
         isThinking = true
-        let outboundContent = nativeAppCommandInstruction(for: content)
+        let outboundContent = taskFolderInstruction(for: nativeAppCommandInstruction(for: content))
+        lastSentTextRequest = (outboundContent, modelOverride)
         guard socket != nil else {
-            pendingMessages.append(PendingNativeChatMessage(id: id, content: outboundContent))
+            pendingMessages.append(PendingNativeChatMessage(id: id, content: outboundContent, modelOverride: modelOverride))
             status = "Connecting…"
             connect()
             return
         }
-        send(id: id, content: outboundContent)
+        send(id: id, content: outboundContent, modelOverride: modelOverride)
     }
 
     func sendSkillImported(_ skillName: String) {
@@ -3044,12 +6626,21 @@ final class NativeChatStore: ObservableObject {
         let queued = pendingMessages
         pendingMessages.removeAll()
         for message in queued {
-            send(id: message.id, content: message.content)
+            send(id: message.id, content: message.content, modelOverride: message.modelOverride)
         }
     }
 
-    private func send(id: String, content: String) {
-        let envelope: [String: Any] = ["type": "message.send", "id": id, "payload": ["content": content]]
+    private func send(id: String, content: String, modelOverride: String = "") {
+        var payload: [String: Any] = ["content": content]
+        if !modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["model"] = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let envelope: [String: Any] = [
+            "type": "message.send",
+            "id": id,
+            "session_id": sessionID,
+            "payload": payload,
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: envelope),
               let text = String(data: data, encoding: .utf8) else {
             fail(messageID: id, message: "Could not prepare that message.")
@@ -3067,7 +6658,19 @@ final class NativeChatStore: ObservableObject {
         }
     }
 
-    func sendMedia(data: Data, filename: String, contentType: String, kind: String, content: String = "") {
+    private func taskFolderInstruction(for content: String) -> String {
+        let folderPath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !folderPath.isEmpty, folderPath != jameInternalWorkspaceURL().path else { return content }
+        return """
+        [JameClaw Desktop task folder: \(folderPath)]
+        Treat this folder as the working directory for this request. Use absolute paths inside it when reading, creating, editing, or running project files. For multi-file work that does not already belong to a named project, create one clearly named project subfolder here. Never create JameClaw runtime folders such as memory, sessions, cron, skills, or artifacts here; those belong only in JameClaw's private internal workspace.
+
+        \(content)
+        """
+    }
+
+    func sendMedia(data: Data, filename: String, contentType: String, kind: String, content: String = "", modelOverride: String = "") {
+        lastSentTextRequest = nil
         guard socket != nil else {
             status = "Connecting to Jame. Try the upload again in a moment."
             connect()
@@ -3077,16 +6680,21 @@ final class NativeChatStore: ObservableObject {
         let displayContent = content.isEmpty ? "📎 \(filename)" : "\(content)\n📎 \(filename)"
         messages.append(NativeChatMessage(id: id, role: "user", content: displayContent))
         isThinking = true
+        var payload: [String: Any] = [
+            "content": taskFolderInstruction(for: content),
+            "data": data.base64EncodedString(),
+            "filename": filename,
+            "content_type": contentType,
+            "kind": kind,
+        ]
+        if !modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["model"] = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         let envelope: [String: Any] = [
             "type": "media.send",
             "id": id,
-            "payload": [
-                "content": content,
-                "data": data.base64EncodedString(),
-                "filename": filename,
-                "content_type": contentType,
-                "kind": kind,
-            ],
+            "session_id": sessionID,
+            "payload": payload,
         ]
         guard let encoded = try? JSONSerialization.data(withJSONObject: envelope),
               let text = String(data: encoded, encoding: .utf8) else {
@@ -3151,13 +6759,15 @@ final class NativeChatStore: ObservableObject {
         throw NativeGatewayError.notReady("The gateway is still starting. It will retry automatically.")
     }
 
-    private func receive() {
+    private func receive(from task: URLSessionWebSocketTask, epoch: Int) {
         Task {
             do {
-                guard let message = try await socket?.receive() else { return }
+                let message = try await task.receive()
+                guard epoch == connectionEpoch, socket === task else { return }
                 if case let .string(text) = message { handle(text) }
-                receive()
+                receive(from: task, epoch: epoch)
             } catch {
+                guard epoch == connectionEpoch, socket === task else { return }
                 socket = nil
                 reportError(title: "Connection lost", detail: "Jame will retry automatically. You can also retry now.")
                 scheduleReconnect()
@@ -3177,6 +6787,7 @@ final class NativeChatStore: ObservableObject {
             let content = responseContent(from: payload)
             let id = (payload["message_id"] as? String) ?? (event["id"] as? String) ?? UUID().uuidString
             upsertAssistantMessage(id: id, content: content)
+            lastSentTextRequest = nil
             isThinking = false
         case "message.update":
             let id = (payload["message_id"] as? String) ?? (event["id"] as? String) ?? UUID().uuidString
@@ -3184,6 +6795,18 @@ final class NativeChatStore: ObservableObject {
             // desktop. Treat that update as the first visible assistant reply
             // instead of dropping it.
             upsertAssistantMessage(id: id, content: responseContent(from: payload))
+        case "plan.update":
+            applyPlanUpdate(payload)
+        case "memory.changed":
+            let summary = (payload["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            pendingMemorySummary = summary?.isEmpty == false
+                ? summary
+                : "Jame updated memory for future conversations."
+            appendPendingMemoryNoticeIfPossible()
+        case "task.complete":
+            lastSentTextRequest = nil
+            appendPendingMemoryNoticeIfPossible()
+            notifyTaskCompletion(responseContent(from: payload))
         case "error":
             let message = responseContent(from: payload, fallback: "The provider could not complete this request.")
             messages.append(NativeChatMessage(id: UUID().uuidString, role: "error", content: message))
@@ -3205,6 +6828,82 @@ final class NativeChatStore: ObservableObject {
         } else {
             messages.append(NativeChatMessage(id: id, role: "assistant", content: content))
         }
+        appendPendingMemoryNoticeIfPossible()
+    }
+
+    private func appendPendingMemoryNoticeIfPossible() {
+        guard let summary = pendingMemorySummary else { return }
+        let lastUserIndex = messages.lastIndex(where: { $0.role == "user" }) ?? -1
+        guard messages.indices.contains(where: { index in
+            index > lastUserIndex && messages[index].role == "assistant"
+        }) else { return }
+        messages.append(NativeChatMessage(
+            id: "memory-change-\(UUID().uuidString)",
+            role: "memory",
+            content: summary
+        ))
+        pendingMemorySummary = nil
+    }
+
+    private func applyPlanUpdate(_ payload: [String: Any]) {
+        let planIndex = messages.lastIndex(where: {
+            $0.role == "assistant" && nativePlanSteps(from: $0.content) != nil
+        })
+        var steps = planIndex.flatMap { nativePlanSteps(from: messages[$0].content) } ?? []
+
+        if payload["complete"] as? Bool == true {
+            guard !steps.isEmpty else { return }
+            for index in steps.indices where steps[index].status != .cancelled {
+                steps[index].status = .completed
+            }
+        } else if let todos = payload["todos"] as? [[String: Any]], !todos.isEmpty {
+            var updated: [NativePlanStep] = []
+            for (index, todo) in todos.enumerated() {
+                let current = steps.indices.contains(index) ? steps[index] : nil
+                let status = NativePlanStepStatus(rawValue: todo["status"] as? String ?? "pending") ?? .pending
+                let title = current?.title ?? (todo["content"] as? String ?? "Step \(index + 1)")
+                updated.append(NativePlanStep(
+                    id: current?.id ?? "plan-step-\(index)",
+                    title: title,
+                    tools: current?.tools ?? [],
+                    status: status
+                ))
+            }
+            steps = updated
+        } else {
+            return
+        }
+
+        let content = nativePlanContent(from: steps)
+        if let planIndex {
+            messages[planIndex].content = content
+        } else {
+            messages.append(NativeChatMessage(
+                id: "plan-\(UUID().uuidString)",
+                role: "assistant",
+                content: content
+            ))
+        }
+    }
+
+    private func notifyTaskCompletion(_ result: String) {
+        let key = "jame.notifications.taskCompletion"
+        guard UserDefaults.standard.object(forKey: key) == nil || UserDefaults.standard.bool(forKey: key) else {
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "\(agentName) finished the task"
+        let cleanResult = result
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        content.body = cleanResult.isEmpty ? "Open JameClaw Desktop to see the result." : cleanResult
+        content.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(
+            identifier: "jame-task-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        ))
     }
 }
 
@@ -3223,6 +6922,7 @@ private final class NativeTerminalStore: ObservableObject {
     @Published var output = ""
     @Published var command = ""
     @Published var isRunning = false
+    @Published var workingDirectoryURL = jameWorkspaceURL()
 
     private var process: Process?
     private var inputPipe: Pipe?
@@ -3237,7 +6937,7 @@ private final class NativeTerminalStore: ObservableObject {
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = ["-l"]
-        process.currentDirectoryURL = jameWorkspaceURL()
+        process.currentDirectoryURL = workingDirectoryURL
         process.standardInput = input
         process.standardOutput = output
         process.standardError = output
@@ -3264,7 +6964,7 @@ private final class NativeTerminalStore: ObservableObject {
             inputPipe = input
             outputPipe = output
             isRunning = true
-            append("JameClaw terminal — \(jameWorkspaceURL().path)\n")
+            append("JameClaw terminal — \(workingDirectoryURL.path)\n")
         } catch {
             append("Could not start terminal: \(error.localizedDescription)\n")
         }
@@ -3281,6 +6981,19 @@ private final class NativeTerminalStore: ObservableObject {
     }
 
     func clear() { output = "" }
+
+    func useWorkingDirectory(_ url: URL) {
+        let directory = url.standardizedFileURL.resolvingSymlinksInPath()
+        workingDirectoryURL = directory
+        guard isRunning else {
+            start()
+            return
+        }
+        let escapedPath = directory.path.replacingOccurrences(of: "'", with: "'\\''")
+        guard let data = "cd '\(escapedPath)'\npwd\n".data(using: .utf8) else { return }
+        inputPipe?.fileHandleForWriting.write(data)
+        append("\nWorkspace changed — \(directory.path)\n")
+    }
 
     func stop() {
         process?.terminate()
@@ -3349,7 +7062,7 @@ private struct NativeTerminalPanel: View {
 
             HStack(spacing: 8) {
                 Text("$")
-                    .font(.system(size: 14 * fontScale, weight: .bold, design: .monospaced))
+                    .font(.system(size: 14 * fontScale, weight: .semibold, design: .monospaced))
                     .foregroundStyle(accent)
                 TextField("Run a command", text: $terminal.command)
                     .font(.system(size: 13 * fontScale, design: .monospaced))
@@ -3363,6 +7076,296 @@ private struct NativeTerminalPanel: View {
             .background(theme.panel)
         }
         .onAppear { terminal.start() }
+    }
+}
+
+@MainActor
+private final class NativeDocumentIndexStore: ObservableObject {
+    @Published var entries: [WorkspaceEntry] = []
+    @Published var isLoading = false
+    @Published var status = ""
+
+    let roots: [URL]
+
+    init() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            jameWorkspaceURL(),
+            home.appendingPathComponent("Desktop", isDirectory: true),
+            home.appendingPathComponent("Documents", isDirectory: true),
+            home.appendingPathComponent("Downloads", isDirectory: true),
+        ]
+        var seen = Set<String>()
+        roots = candidates.filter {
+            FileManager.default.fileExists(atPath: $0.path) && seen.insert($0.standardizedFileURL.path).inserted
+        }
+        status = "Document list waits for your safety approval."
+    }
+
+    func refresh(includeAllLocations: Bool = true) {
+        guard !isLoading else { return }
+        isLoading = true
+        status = "Scanning documents…"
+        let roots = includeAllLocations ? roots : [jameWorkspaceURL()]
+        Task {
+            let loaded = await Task.detached(priority: .userInitiated) {
+                Self.scan(roots: roots)
+            }.value
+            entries = loaded
+            status = loaded.count >= 1_500
+                ? "Showing the first 1,500 documents and folders. Search or choose another item."
+                : "\(loaded.count) documents and folders"
+            isLoading = false
+        }
+    }
+
+    nonisolated private static func scan(roots: [URL]) -> [WorkspaceEntry] {
+        var found: [WorkspaceEntry] = []
+        var seen = Set<String>()
+        for root in roots {
+            guard found.count < 1_500,
+                  let enumerator = FileManager.default.enumerator(
+                    at: root,
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants],
+                    errorHandler: { _, _ in true }
+                  ) else { continue }
+            for case let url as URL in enumerator {
+                guard found.count < 1_500 else { break }
+                let path = url.standardizedFileURL.path
+                guard seen.insert(path).inserted else { continue }
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+                found.append(WorkspaceEntry(url: url, isDirectory: values?.isDirectory ?? false))
+            }
+        }
+        return found.sorted {
+            if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+            return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
+        }
+    }
+}
+
+private struct TerminalWorkspaceView: View {
+    let port: Int
+    @Binding var isPresented: Bool
+    @StateObject private var terminal = NativeTerminalStore()
+    @StateObject private var documents = NativeDocumentIndexStore()
+    @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
+    @Environment(\.colorScheme) private var systemColorScheme
+    @State private var search = ""
+    @State private var selectedPath = ""
+    @State private var workspaceStatus = "Choose a folder or document to tell Jame where to work."
+
+    private var filteredEntries: [WorkspaceEntry] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return documents.entries }
+        return documents.entries.filter {
+            $0.url.lastPathComponent.localizedCaseInsensitiveContains(query)
+                || $0.url.path.localizedCaseInsensitiveContains(query)
+        }
+    }
+    private var theme: LauncherTheme {
+        launcherThemePreference(from: savedTheme).resolved(for: systemColorScheme)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "terminal.fill").foregroundStyle(JameBrand.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Terminal + Documents").font(.headline)
+                    Text("Select an item to set the agent workspace and terminal location.")
+                        .font(.caption).foregroundStyle(JameBrand.muted)
+                }
+                Spacer()
+                Button("Done") { isPresented = false }
+                    .buttonStyle(.bordered)
+            }
+            .padding(16)
+            .background(JameBrand.panel)
+
+            HSplitView {
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(JameBrand.orange)
+                        TextField("Search documents and folders", text: $search)
+                            .textFieldStyle(.plain)
+                        Button { loadDocumentIndex() } label: { Image(systemName: "arrow.clockwise") }
+                            .buttonStyle(.plain)
+                            .help("Refresh documents")
+                    }
+                    .padding(10)
+                    .background(JameBrand.elevated)
+                    .overlay(Rectangle().stroke(JameBrand.rule, lineWidth: 1))
+
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            Text("WORKSPACE ROOTS")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(JameBrand.muted)
+                                .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 6)
+                            ForEach(documents.roots, id: \.path) { root in
+                                documentButton(WorkspaceEntry(url: root, isDirectory: true), isRoot: true)
+                            }
+
+                            Text("DOCUMENTS AND FOLDERS")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(JameBrand.muted)
+                                .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 6)
+                            ForEach(filteredEntries) { entry in
+                                documentButton(entry, isRoot: false)
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(workspaceStatus)
+                            .font(.caption)
+                            .foregroundStyle(JameBrand.muted)
+                            .lineLimit(2)
+                        HStack {
+                            Text(documents.status).font(.caption2).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Choose another…", action: chooseAnother)
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(12)
+                    .background(JameBrand.panel)
+                }
+                .frame(minWidth: 230, idealWidth: 320, maxWidth: 430)
+
+                NativeTerminalPanel(
+                    terminal: terminal,
+                    theme: theme,
+                    accent: JameBrand.orange,
+                    fontScale: 1
+                )
+                .frame(minWidth: 360)
+            }
+        }
+        .frame(minWidth: 680, minHeight: 480)
+        .background(JameBrand.ink)
+        .tint(JameBrand.orange)
+        .buttonBorderShape(.roundedRectangle(radius: 0))
+        .onAppear { loadDocumentIndex() }
+    }
+
+    private func documentButton(_ entry: WorkspaceEntry, isRoot: Bool) -> some View {
+        Button {
+            use(entry)
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
+                    .foregroundStyle(entry.isDirectory ? JameBrand.orange : JameBrand.paper)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.url.lastPathComponent)
+                        .font(.subheadline.weight(isRoot ? .semibold : .regular))
+                        .foregroundStyle(selectedPath == entry.url.path ? JameBrand.ink : JameBrand.paper)
+                        .lineLimit(1)
+                    Text(entry.url.deletingLastPathComponent().path)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(selectedPath == entry.url.path ? JameBrand.ink.opacity(0.7) : JameBrand.muted)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Spacer()
+                Image(systemName: "arrow.right")
+                    .font(.caption)
+                    .foregroundStyle(selectedPath == entry.url.path ? JameBrand.ink : JameBrand.muted)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(selectedPath == entry.url.path ? JameBrand.orange : Color.clear)
+            .overlay(alignment: .bottom) { Rectangle().fill(JameBrand.rule).frame(height: 1) }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func chooseAnother() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose where Jame should work"
+        panel.message = "Choose a folder, or choose a document to use its containing folder as the agent workspace."
+        panel.prompt = "Use with Jame"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        use(WorkspaceEntry(url: url, isDirectory: isDirectory.boolValue))
+    }
+
+    private func loadDocumentIndex() {
+        let rawPolicy = UserDefaults.standard.string(forKey: "launcher.safety.documentApprovalPolicy")
+            ?? DocumentApprovalPolicy.outsideWorkspace.rawValue
+        let policy = DocumentApprovalPolicy(rawValue: rawPolicy) ?? .outsideWorkspace
+        if policy == .workspaceOnly {
+            documents.refresh(includeAllLocations: false)
+            return
+        }
+        if policy == .explicitSelection {
+            documents.refresh()
+            return
+        }
+        let documentsURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents", isDirectory: true)
+        if approveDocumentAccess(to: documentsURL, action: "list document and folder names on this Mac") {
+            documents.refresh()
+        } else {
+            documents.status = "Only the workspace is listed because broader document access was not approved."
+            documents.refresh(includeAllLocations: false)
+        }
+    }
+
+    private func use(_ entry: WorkspaceEntry) {
+        let workspace = (entry.isDirectory ? entry.url : entry.url.deletingLastPathComponent())
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard approveDocumentAccess(
+            to: entry.url,
+            action: entry.isDirectory ? "use this folder as the agent workspace" : "work with this document"
+        ) else { return }
+        selectedPath = entry.url.path
+        terminal.useWorkingDirectory(workspace)
+        workspaceStatus = "Setting \(workspace.lastPathComponent) as Jame's workspace…"
+        Task {
+            do {
+                try await persistWorkspace(workspace)
+                workspaceStatus = entry.isDirectory
+                    ? "Jame now works in \(workspace.path)"
+                    : "Jame now works in \(workspace.path). The selected document is ready in Chat."
+                NotificationCenter.default.post(
+                    name: .jameclawWorkspaceChanged,
+                    object: nil,
+                    userInfo: [
+                        "workspacePath": workspace.path,
+                        "selectedPath": entry.url.path,
+                        "isDirectory": entry.isDirectory,
+                    ]
+                )
+            } catch {
+                workspaceStatus = "Could not change workspace: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func persistWorkspace(_ workspace: URL) async throws {
+        var request = authenticatedConsoleRequest(port: port, path: "/api/config", method: "PATCH")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "agents": ["defaults": ["workspace": workspace.path]],
+        ])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let restart = authenticatedConsoleRequest(port: port, path: "/api/gateway/restart", method: "POST")
+        let (_, restartResponse) = try await URLSession.shared.data(for: restart)
+        guard let http = restartResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
     }
 }
 
@@ -3480,51 +7483,59 @@ private func nativeAppCommandInstruction(for content: String) -> String {
 
 struct ChatView: View {
     @StateObject private var chat: NativeChatStore
-    @StateObject private var terminal = NativeTerminalStore()
+    @StateObject private var discussionProviders = NativeProviderStore()
     private let port: Int
-    @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.terminal.rawValue
+    @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @AppStorage("launcher.design.density") private var savedDensity = ChatDensity.comfortable.rawValue
     @AppStorage("launcher.design.surface") private var savedSurface = MessageSurface.cards.rawValue
     @AppStorage("launcher.design.fontScale") private var fontScale = 1.0
     @AppStorage("launcher.design.backgroundPath") private var backgroundPath = ""
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var isRecording = false
     @State private var recorder: AVAudioRecorder?
     @State private var recordingURL: URL?
     @State private var suggestions: [ChatComposerSuggestion] = []
     @State private var appCommands: [ChatComposerSuggestion] = []
     @State private var pendingAttachment: PendingChatAttachment?
-    @State private var isTerminalVisible = false
+    @State private var isFolderDropTargeted = false
+    @State private var discussionModelOverride = ""
 
     init(port: Int) {
         self.port = port
         _chat = StateObject(wrappedValue: NativeChatStore(port: port))
     }
 
-    private var theme: LauncherTheme { LauncherTheme(rawValue: savedTheme) ?? .terminal }
+    private var theme: LauncherTheme {
+        launcherThemePreference(from: savedTheme).resolved(for: systemColorScheme)
+    }
     private var accent: Color { (LauncherAccent(rawValue: savedAccent) ?? .theme).color ?? theme.accent }
     private var density: ChatDensity { ChatDensity(rawValue: savedDensity) ?? .comfortable }
     private var messageSurface: MessageSurface { MessageSurface(rawValue: savedSurface) ?? .cards }
     private var backgroundImage: NSImage? {
-        guard !backgroundPath.isEmpty else { return nil }
-        return NSImage(contentsOf: URL(fileURLWithPath: backgroundPath))
+        if !backgroundPath.isEmpty {
+            return NSImage(contentsOf: URL(fileURLWithPath: backgroundPath))
+        }
+        guard let bundledURL = Bundle.main.url(forResource: "creation-of-adam", withExtension: "jpg") else {
+            return nil
+        }
+        return NSImage(contentsOf: bundledURL)
     }
     private var isConnectingToJame: Bool {
         chat.status != "Ready" && chat.messages.isEmpty && chat.lastError == nil
     }
+    private var composerBackground: Color {
+        theme == .light ? Color.white.opacity(0.98) : theme.panel.opacity(0.98)
+    }
+    private var composerSurface: Color {
+        theme == .light ? JameBrand.ink.opacity(0.055) : Color.white.opacity(0.07)
+    }
+    private var composerBorder: Color {
+        theme == .light ? JameBrand.ink.opacity(0.24) : Color.white.opacity(0.18)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("\(chat.agentName).")
-                    .font(.system(size: 15 * fontScale, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
-                Spacer()
-                Text(chat.status.uppercased()).font(.system(size: 10 * fontScale, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
-            }
-            .foregroundStyle(accent)
-            .padding(.horizontal, 18).padding(.vertical, 13)
-            .background(theme.panel)
             Button {
                 chooseWorkspace()
             } label: {
@@ -3532,16 +7543,21 @@ struct ChatView: View {
                     Image(systemName: "folder.fill")
                         .foregroundStyle(accent)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Workspace")
+                        Text("Task files")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text(chat.workspaceName)
                             .font(.subheadline.weight(.medium))
                             .lineLimit(1)
+                        Text(chat.workspacePath)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 18)
@@ -3560,9 +7576,30 @@ struct ChatView: View {
                         Text(error.detail).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
-                    Button("Retry") { chat.retryConnection() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    if chat.canRetryLastMessage {
+                        Button("Retry message") { chat.retryLastMessage() }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(JameBrand.orange)
+                            .overlay(Rectangle().stroke(JameBrand.orange.opacity(0.85)))
+                    } else {
+                        Button("Retry connection") { chat.retryConnection() }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(composerSurface)
+                            .overlay(Rectangle().stroke(composerBorder))
+                    }
+                    if chat.canContinueConversation {
+                        Button("Continue") { chat.continueConversation(modelOverride: discussionModelOverride) }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(composerSurface)
+                            .overlay(Rectangle().stroke(composerBorder))
+                    }
                     Button { chat.dismissError() } label: {
                         Image(systemName: "xmark")
                     }
@@ -3577,50 +7614,45 @@ struct ChatView: View {
                 HStack(spacing: 0) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: density.messageSpacing) {
-                        if chat.messages.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("jame@local:~$ ready for your prompt")
-                                Text("Your conversation uses the same local Jame gateway as the web console.")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.system(size: 14 * fontScale, design: .monospaced))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 8)
-                        }
                         ForEach(chat.messages) { message in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(message.role == "user" ? "you >" : message.role == "error" ? "error >" : "jame >")
-                                    .font(.system(size: 10 * fontScale, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(message.role == "user" ? accent : message.role == "error" ? .red : Color.green)
-                                Text(message.content).textSelection(.enabled)
+                            Group {
+                                if message.role == "memory" {
+                                    NativeMemoryChangedCard(
+                                        summary: message.content,
+                                        accent: accent,
+                                        fontScale: fontScale
+                                    )
+                                } else {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(message.role == "user" ? "you >" : message.role == "error" ? "error >" : "jame >")
+                                            .font(.system(size: 10 * fontScale, weight: .semibold, design: .monospaced))
+                                            .foregroundStyle(message.role == "user" ? accent : message.role == "error" ? .red : JameBrand.orangeSoft)
+                                        if let planSteps = nativePlanSteps(from: message.content), message.role == "assistant" {
+                                            NativePlanCard(steps: planSteps, accent: accent, fontScale: fontScale)
+                                        } else {
+                                            Text(message.content).textSelection(.enabled)
+                                        }
+                                    }
+                                    .font(.system(size: 14 * fontScale, design: .monospaced))
+                                    .foregroundStyle(theme.text)
+                                    .padding(density.messagePadding)
+                                    .frame(maxWidth: message.role == "user" ? 520 : .infinity, alignment: .leading)
+                                    .background(messageSurface == .cards ? (message.role == "user" ? accent.opacity(theme == .light ? 0.14 : 0.22) : message.role == "error" ? Color.red.opacity(0.18) : Color.white.opacity(theme == .light ? 0.82 : 0.06)) : .clear)
+                                    .clipShape(Rectangle())
+                                }
                             }
-                                .font(.system(size: 14 * fontScale, design: .monospaced))
-                                .foregroundStyle(theme.text)
-                                .padding(density.messagePadding).frame(maxWidth: message.role == "user" ? 520 : .infinity, alignment: .leading)
-                                .background(messageSurface == .cards ? (message.role == "user" ? accent.opacity(theme == .light ? 0.14 : 0.22) : message.role == "error" ? Color.red.opacity(0.18) : Color.white.opacity(theme == .light ? 0.82 : 0.06)) : .clear)
-                                .clipShape(RoundedRectangle(cornerRadius: messageSurface == .cards ? 8 : 0)).frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
+                                .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
                                 .id(message.id)
                         }
-                        if chat.isThinking { Text("jame > thinking…").font(.system(size: 12 * fontScale, design: .monospaced)).foregroundStyle(Color.green) }
+                        if chat.isThinking { Text("jame > thinking…").font(.system(size: 12 * fontScale, design: .monospaced)).foregroundStyle(JameBrand.orange) }
                         }.padding(density.contentPadding)
                     }
                     .frame(maxWidth: .infinity)
-
-                    if isTerminalVisible {
-                        Divider().overlay(Color.white.opacity(0.12))
-                        NativeTerminalPanel(
-                            terminal: terminal,
-                            theme: theme,
-                            accent: accent,
-                            fontScale: fontScale
-                        )
-                        .frame(width: 420)
-                    }
                 }
                 .background(chatBackground)
                 .onChange(of: chat.messages.count) { _, _ in if let last = chat.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
-            Divider().overlay(Color.white.opacity(0.12))
+            Divider().overlay(composerBorder)
             if let attachment = pendingAttachment {
                 HStack(spacing: 8) {
                     Image(systemName: attachment.kind == "image" ? "photo" : "paperclip")
@@ -3643,8 +7675,32 @@ struct ChatView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(theme.panel.opacity(0.92))
+                .background(composerBackground)
             }
+            HStack(spacing: 7) {
+                Image(systemName: isFolderDropTargeted ? "folder.badge.plus" : "folder.fill")
+                    .foregroundStyle(isFolderDropTargeted ? JameBrand.orange : accent)
+                Text(isFolderDropTargeted ? "Release to organize Jame's task files here" : "Drop Desktop, Documents, Downloads, or a project folder here")
+                    .font(.caption.weight(isFolderDropTargeted ? .semibold : .regular))
+                    .foregroundStyle(isFolderDropTargeted ? JameBrand.orange : .secondary)
+                Spacer()
+                Text(chat.workspacePath)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 320, alignment: .trailing)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(composerBackground)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(composerBorder)
+                    .frame(height: 1)
+                    .allowsHitTesting(false)
+            }
+            .fixedSize(horizontal: false, vertical: true)
             ZStack(alignment: .bottomLeading) {
                 HStack(alignment: .bottom) {
                     Button {
@@ -3652,6 +7708,10 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "folder")
                     }
+                    .buttonStyle(.plain)
+                    .frame(width: 34, height: 34)
+                    .background(composerSurface)
+                    .overlay(Rectangle().stroke(composerBorder))
                     .help("Choose agent workspace")
                     .disabled(chat.isThinking)
 
@@ -3660,6 +7720,10 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "paperclip")
                     }
+                    .buttonStyle(.plain)
+                    .frame(width: 34, height: 34)
+                    .background(composerSurface)
+                    .overlay(Rectangle().stroke(composerBorder))
                     .help("Upload a file or workspace skill")
                     .disabled(chat.isThinking)
 
@@ -3669,23 +7733,48 @@ struct ChatView: View {
                         Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
                             .foregroundStyle(isRecording ? Color.red : accent)
                     }
+                    .buttonStyle(.plain)
+                    .frame(width: 34, height: 34)
+                    .background(composerSurface)
+                    .overlay(Rectangle().stroke(composerBorder))
                     .help(isRecording ? "Stop and send recording" : "Record a voice message")
                     .disabled(chat.isThinking && !isRecording)
 
                     TextField("type a message…", text: $chat.draft, axis: .vertical)
-                        .font(.system(size: 14 * fontScale, design: .monospaced)).lineLimit(1...5)
+                        .font(.system(size: 14 * fontScale, design: .monospaced))
+                        .lineLimit(1...5)
                         .textFieldStyle(.plain)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 8)
+                        .background(composerSurface)
+                        .overlay {
+                            Rectangle()
+                                .stroke(composerBorder, lineWidth: theme == .light ? 1.2 : 1)
+                        }
                         .onChange(of: chat.draft) { _, value in updateSuggestions(for: value) }
                     Button("Send") { sendComposer() }
-                        .buttonStyle(.borderedProminent).tint(accent)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 16)
+                        .frame(height: 34)
+                        .background(accent)
+                        .overlay(Rectangle().stroke(accent.opacity(0.85)))
                         .keyboardShortcut(.defaultAction)
-                    Button {
-                        isTerminalVisible.toggle()
-                    } label: {
-                        Image(systemName: isTerminalVisible ? "rectangle.righthalf.inset.filled" : "terminal")
+                    if discussionProviders.selectedFallbackModel.isEmpty == false {
+                        Picker("Discussion provider", selection: $discussionModelOverride) {
+                            Text("Auto failover").tag("")
+                            if let primary = discussionProviders.models.first(where: { $0.modelName == discussionProviders.selectedModel }) {
+                                Text("Use \(discussionProviders.providerName(for: primary))").tag(primary.modelName)
+                            }
+                            if let fallback = discussionProviders.models.first(where: { $0.modelName == discussionProviders.selectedFallbackModel }) {
+                                Text("Use \(discussionProviders.providerName(for: fallback))").tag(fallback.modelName)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 145)
+                        .help("Choose the provider for this discussion. Auto failover uses the global primary and fallback pair.")
                     }
-                    .buttonStyle(.bordered)
-                    .help(isTerminalVisible ? "Close terminal" : "Open terminal")
                 }
                 .padding(14)
 
@@ -3709,18 +7798,41 @@ struct ChatView: View {
                         }
                     }
                     .frame(width: 380, height: min(CGFloat(suggestions.count) * 38 + 10, 220))
-                    .background(theme.panel.opacity(0.98))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.14)))
+                    .background(composerBackground)
+                    .clipShape(Rectangle())
+                    .overlay(Rectangle().stroke(composerBorder))
                     .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
                     .offset(x: 56, y: -70)
                     .zIndex(1)
                 }
             }
-            .background(theme.panel)
+            .background(composerBackground)
+            .contentShape(Rectangle())
+            .overlay {
+                Rectangle()
+                    .stroke(
+                        isFolderDropTargeted ? JameBrand.orange : composerBorder,
+                        style: StrokeStyle(
+                            lineWidth: isFolderDropTargeted ? 2 : 1,
+                            dash: isFolderDropTargeted ? [7, 5] : []
+                        )
+                    )
+                    .padding(isFolderDropTargeted ? 4 : 0)
+                    .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(theme == .light ? 0.16 : 0.28),
+                radius: 10,
+                y: -2
+            )
+            .onDrop(
+                of: [UTType.fileURL.identifier],
+                isTargeted: $isFolderDropTargeted,
+                perform: handleComposerDrop(providers:)
+            )
         }
         .background(chatBackground)
-        .preferredColorScheme(theme.colorScheme)
+        .preferredColorScheme(launcherThemePreference(from: savedTheme).preferredColorScheme)
         .overlay {
             if isConnectingToJame {
                 jameLoadingScreen
@@ -3729,24 +7841,37 @@ struct ChatView: View {
         .task {
             appCommands = desktopAppCommands()
             chat.startGatewayAndConnect()
+            await discussionProviders.load(port: port)
         }
         .onReceive(NotificationCenter.default.publisher(for: .jameclawNewChat)) { _ in
             chat.startNewChat()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawResumeSession)) { notification in
+            guard let request = notification.object as? NativeSessionResumeRequest else { return }
+            chat.resumeSession(request)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawWorkspaceChanged)) { notification in
+            guard let workspacePath = notification.userInfo?["workspacePath"] as? String else { return }
+            chat.reflectWorkspace(URL(fileURLWithPath: workspacePath, isDirectory: true))
+            guard notification.userInfo?["isDirectory"] as? Bool == false,
+                  let selectedPath = notification.userInfo?["selectedPath"] as? String else { return }
+            let instruction = "Work with this document: \(selectedPath)"
+            chat.draft = chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? instruction
+                : instruction + "\n" + chat.draft
         }
     }
 
     private var jameLoadingScreen: some View {
         ZStack {
-            if let artworkURL = Bundle.main.url(forResource: "creation-of-adam", withExtension: "jpg"),
-               let artwork = NSImage(contentsOf: artworkURL) {
-                Image(nsImage: artwork)
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
-                    .overlay(.black.opacity(0.46))
-            } else {
-                chatBackground
-            }
+            JameBrand.ink.ignoresSafeArea()
+            RadialGradient(
+                colors: [JameBrand.orange.opacity(0.18), .clear],
+                center: .center,
+                startRadius: 10,
+                endRadius: 320
+            )
+            .ignoresSafeArea()
             VStack(spacing: 16) {
                 HStack(spacing: 0) {
                     Text("Jame")
@@ -3754,7 +7879,7 @@ struct ChatView: View {
                     Text(".")
                         .foregroundStyle(Color.orange)
                 }
-                .font(.system(size: 34 * fontScale, weight: .bold, design: .rounded))
+                .font(.system(size: 34 * fontScale, weight: .semibold, design: .rounded))
                 ProgressView()
                     .controlSize(.large)
                     .tint(accent)
@@ -3824,11 +7949,14 @@ struct ChatView: View {
         ZStack {
             theme.background
             if let image = backgroundImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .opacity(theme == .light ? 0.20 : 0.16)
-                    .clipped()
+                GeometryReader { geometry in
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                }
+                .opacity(theme == .light ? 0.28 : 0.20)
             }
         }
     }
@@ -3852,11 +7980,85 @@ struct ChatView: View {
         }
     }
 
+    private func handleComposerDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first(where: {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }) else {
+            chat.status = "Drop a folder from Finder here."
+            return false
+        }
+
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+            let droppedURL: URL?
+            if let url = item as? URL {
+                droppedURL = url
+            } else if let url = item as? NSURL {
+                droppedURL = url as URL
+            } else if let data = item as? Data {
+                droppedURL = URL(dataRepresentation: data, relativeTo: nil)
+            } else if let rawValue = item as? String {
+                droppedURL = rawValue.hasPrefix("file:")
+                    ? URL(string: rawValue)
+                    : URL(fileURLWithPath: rawValue)
+            } else {
+                droppedURL = nil
+            }
+
+            Task { @MainActor in
+                guard error == nil, let droppedURL else {
+                    chat.status = "Could not read the dropped item."
+                    return
+                }
+                useDroppedItem(droppedURL)
+            }
+        }
+        return true
+    }
+
+    @MainActor
+    private func useDroppedItem(_ droppedURL: URL) {
+        let didAccess = droppedURL.startAccessingSecurityScopedResource()
+        defer { if didAccess { droppedURL.stopAccessingSecurityScopedResource() } }
+
+        let resolvedURL = droppedURL.standardizedFileURL.resolvingSymlinksInPath()
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory) else {
+            chat.status = "That dropped item is no longer available."
+            return
+        }
+        guard approveDocumentAccess(
+            to: resolvedURL,
+            action: isDirectory.boolValue ? "use this folder for organized task files" : "attach and read this document"
+        ) else {
+            chat.status = "Document access was not approved."
+            return
+        }
+
+        if isDirectory.boolValue {
+            chat.setWorkspace(resolvedURL)
+        } else {
+            uploadFile(resolvedURL)
+            chat.status = "Attached \(resolvedURL.lastPathComponent)."
+        }
+    }
+
     private func sendComposer() {
         let content = chat.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || pendingAttachment != nil else { return }
+        if pendingAttachment == nil, let response = fastGreetingResponse(for: content) {
+            chat.draft = ""
+            suggestions = []
+            chat.addFastPathExchange(user: content, response: response)
+            return
+        }
+        if pendingAttachment == nil, let query = localFileSearchQuery(from: content) {
+            chat.draft = ""
+            suggestions = []
+            Task { await runFastFileSearch(query: query, originalRequest: content) }
+            return
+        }
         guard let attachment = pendingAttachment else {
-            chat.send()
+            chat.send(modelOverride: discussionModelOverride)
             return
         }
 
@@ -3867,8 +8069,61 @@ struct ChatView: View {
             filename: attachment.filename,
             contentType: attachment.contentType,
             kind: attachment.kind,
-            content: content
+            content: content,
+            modelOverride: discussionModelOverride
         )
+    }
+
+    private func runFastFileSearch(query: String, originalRequest: String) async {
+        do {
+            let data = try await URLSession.shared.data(
+                from: authenticatedConsoleURL(
+                    port: port,
+                    path: "/api/files/search",
+                    queryItems: [URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: "12")]
+                )
+            ).0
+            let results = try JSONDecoder().decode(NativeFileSearchResponse.self, from: data).items
+            let response: String
+            if results.isEmpty {
+                response = "I couldn't find files matching \"\(query)\" in JameClaw's allowed local folders."
+            } else {
+                let lines = results.map { "• \($0.name) — \($0.path)" }.joined(separator: "\n")
+                response = "Found \(results.count) local file\(results.count == 1 ? "" : "s") for \"\(query)\":\n\(lines)"
+            }
+            chat.addFastPathExchange(user: originalRequest, response: response)
+        } catch {
+            chat.addFastPathExchange(user: originalRequest, response: "Local file search is not available right now. JameClaw can still search through the normal agent workflow.")
+        }
+    }
+
+    private func fastGreetingResponse(for text: String) -> String? {
+        let normalized = text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        let phrase = normalized.joined(separator: " ")
+        let exactGreetings = ["good morning", "good afternoon", "good evening"]
+        let greetingWords = Set(["hi", "hello", "hey", "yo", "salut"])
+        let casualSuffixes = Set(["bro", "buddy", "dude", "friend", "jame", "there", "man"])
+        let isShortCasualGreeting = (1...3).contains(normalized.count)
+            && normalized.first.map(greetingWords.contains) == true
+            && normalized.dropFirst().allSatisfy(casualSuffixes.contains)
+        guard exactGreetings.contains(phrase) || isShortCasualGreeting else { return nil }
+        return "Hello — I’m ready. You can ask me to search files, work in your workspace, or handle a larger task."
+    }
+
+    private func localFileSearchQuery(from text: String) -> String? {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefixes = [
+            "search my pc for ", "search my computer for ", "search files for ",
+            "find file ", "find files ", "find on my pc ", "find on my computer ",
+        ]
+        let lower = normalized.lowercased()
+        for prefix in prefixes where lower.hasPrefix(prefix) {
+            let query = String(normalized.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty { return query }
+        }
+        return nil
     }
 
     private func uploadItem() {
@@ -3887,6 +8142,13 @@ struct ChatView: View {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory) else {
             chat.status = "Could not find that item."
+            return
+        }
+        guard approveDocumentAccess(
+            to: sourceURL,
+            action: isDirectory.boolValue ? "read and import this folder" : "attach and read this document"
+        ) else {
+            chat.status = "Document access was not approved."
             return
         }
         if isDirectory.boolValue || sourceURL.lastPathComponent.caseInsensitiveCompare("SKILL.md") == .orderedSame {
@@ -3958,15 +8220,16 @@ struct ChatView: View {
 
     private func chooseWorkspace() {
         let panel = NSOpenPanel()
-        panel.title = "Choose JameClaw Workspace"
-        panel.message = "Choose the folder where Jame should read and create workspace files."
-        panel.prompt = "Use Workspace"
+        panel.title = "Choose JameClaw Task Folder"
+        panel.message = "Choose where Jame should organize task files. Desktop, Documents, and Downloads use a dedicated JameClaw subfolder."
+        panel.prompt = "Use Task Folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
 
         guard panel.runModal() == .OK, let workspaceURL = panel.url else { return }
+        guard approveDocumentAccess(to: workspaceURL, action: "use this folder for organized task files") else { return }
         chat.setWorkspace(workspaceURL)
     }
 
@@ -3978,7 +8241,7 @@ struct ChatView: View {
             guard let url = recordingURL else { return }
             do {
                 let data = try Data(contentsOf: url)
-                chat.sendMedia(data: data, filename: "voice-\(Int(Date().timeIntervalSince1970)).m4a", contentType: "audio/mp4", kind: "audio")
+                chat.sendMedia(data: data, filename: "voice-\(Int(Date().timeIntervalSince1970)).m4a", contentType: "audio/mp4", kind: "audio", modelOverride: discussionModelOverride)
             } catch {
                 chat.status = "Could not read the recording."
             }

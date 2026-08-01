@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -273,10 +274,11 @@ func setupAndStartServices(
 	}
 	fmt.Println("✓ Cron service started")
 
-	runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
+	runningServices.HeartbeatService = heartbeat.NewHeartbeatServiceWithInitiative(
 		cfg.WorkspacePath(),
 		cfg.Heartbeat.Interval,
 		cfg.Heartbeat.Enabled,
+		cfg.Heartbeat.Initiative,
 	)
 	runningServices.HeartbeatService.SetBus(msgBus)
 	runningServices.HeartbeatService.SetHandler(createHeartbeatHandler(agentLoop))
@@ -479,10 +481,11 @@ func restartServices(
 	}
 	fmt.Println("  ✓ Cron service restarted")
 
-	runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
+	runningServices.HeartbeatService = heartbeat.NewHeartbeatServiceWithInitiative(
 		cfg.WorkspacePath(),
 		cfg.Heartbeat.Interval,
 		cfg.Heartbeat.Enabled,
+		cfg.Heartbeat.Initiative,
 	)
 	runningServices.HeartbeatService.SetBus(msgBus)
 	runningServices.HeartbeatService.SetHandler(createHeartbeatHandler(al))
@@ -679,9 +682,9 @@ func createHeartbeatHandler(agentLoop *agent.AgentLoop) func(prompt, channel, ch
 		if err != nil {
 			return tools.ErrorResult(fmt.Sprintf("Heartbeat error: %v", err))
 		}
-		if response == "HEARTBEAT_OK" {
+		if strings.TrimSpace(response) == "HEARTBEAT_OK" {
 			return tools.SilentResult("Heartbeat OK")
 		}
-		return tools.SilentResult(response)
+		return tools.UserResult(response)
 	}
 }

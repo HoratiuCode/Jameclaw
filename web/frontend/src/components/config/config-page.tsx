@@ -263,6 +263,7 @@ export function ConfigPage() {
           },
           heartbeat: {
             enabled: form.heartbeatEnabled,
+            initiative: form.heartbeatInitiative,
             interval: heartbeatInterval,
           },
           devices: {

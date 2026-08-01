@@ -22,6 +22,7 @@ type Handler struct {
 	oauthState           map[string]string
 	fileSearchMu         sync.Mutex
 	fileSearchCache      fileSearchCache
+	teamOperationsMu     sync.Mutex
 	activeJameWebSockets atomic.Int64
 }
 

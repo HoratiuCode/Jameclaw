@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import <objc/runtime.h>
 
 extern void jameclawMenuNewChat(void);
 extern void jameclawMenuAutomations(void);
@@ -35,6 +36,43 @@ static void requestHomeSection(NSString *section, BOOL startNewChat) {
 @end
 
 static JameClawDesktopMenuTarget *menuTarget;
+static IMP originalApplicationShouldHandleReopen;
+
+static BOOL jameclawApplicationShouldHandleReopen(id self, SEL selector, NSApplication *application, BOOL hasVisibleWindows) {
+    // A Dock click on an already-active, windowless launcher is delivered as
+    // a reopen request rather than another didBecomeActive notification.
+    // Always raise the native Jame window, then preserve any launcher delegate
+    // behavior that was already installed by the tray framework.
+    jameclawMenuShowDesktop();
+    if (originalApplicationShouldHandleReopen != NULL) {
+        BOOL (*original)(id, SEL, NSApplication *, BOOL) = (void *)originalApplicationShouldHandleReopen;
+        return original(self, selector, application, hasVisibleWindows);
+    }
+    return YES;
+}
+
+static void installDockReopenHandler(void) {
+    id delegate = NSApp.delegate;
+    if (delegate == nil) {
+        return;
+    }
+    Class delegateClass = object_getClass(delegate);
+    SEL selector = @selector(applicationShouldHandleReopen:hasVisibleWindows:);
+    Method method = class_getInstanceMethod(delegateClass, selector);
+    const char *types = "c@:@c";
+    if (method != NULL) {
+        originalApplicationShouldHandleReopen = method_getImplementation(method);
+        // Add an override when the implementation is inherited so another
+        // application's delegate class is never modified globally.
+        if (class_addMethod(delegateClass, selector, (IMP)jameclawApplicationShouldHandleReopen, method_getTypeEncoding(method))) {
+            return;
+        }
+        method = class_getInstanceMethod(delegateClass, selector);
+        method_setImplementation(method, (IMP)jameclawApplicationShouldHandleReopen);
+    } else {
+        class_addMethod(delegateClass, selector, (IMP)jameclawApplicationShouldHandleReopen, types);
+    }
+}
 
 static void addMenu(NSMenu *mainMenu, NSString *title, NSString *itemTitle, SEL action) {
     NSMenu *submenu = [[NSMenu alloc] initWithTitle:title];
@@ -70,6 +108,7 @@ void jameclawInstallDesktopMenu(void) {
                                                  selector:@selector(applicationDidBecomeActive:)
                                                      name:NSApplicationDidBecomeActiveNotification
                                                    object:NSApp];
+        installDockReopenHandler();
         addMenu(mainMenu, @"New Chat", @"Start New Chat", @selector(newChat:));
         addMenu(mainMenu, @"Automations", @"Open Automations", @selector(automations:));
 

@@ -110,6 +110,7 @@ const (
 	metadataKeyTeamID         = "team_id"
 	metadataKeyParentPeerKind = "parent_peer_kind"
 	metadataKeyParentPeerID   = "parent_peer_id"
+	metadataKeyModelOverride  = "model_override"
 )
 
 func NewAgentLoop(
@@ -1443,6 +1444,9 @@ func (al *AgentLoop) ProcessHeartbeat(
 	if agent == nil {
 		return "", fmt.Errorf("no default agent for heartbeat")
 	}
+	if err := NewSelfImprovementStore(agent.Workspace).Maintain(time.Now()); err != nil {
+		logger.WarnCF("agent", "Self-improvement maintenance failed", map[string]any{"error": err.Error()})
+	}
 	return al.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      "heartbeat",
 		Channel:         channel,
@@ -1491,6 +1495,14 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	route, agent, routeErr := al.resolveMessageRoute(msg)
 	if routeErr != nil {
 		return "", routeErr
+	}
+	if modelOverride := inboundMetadata(msg, metadataKeyModelOverride); modelOverride != "" {
+		var cleanup func()
+		agent, cleanup, routeErr = al.agentForMessageModel(agent, modelOverride)
+		if routeErr != nil {
+			return "", routeErr
+		}
+		defer cleanup()
 	}
 
 	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
@@ -1543,6 +1555,42 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	}
 
 	return al.runAgentLoop(ctx, agent, opts)
+}
+
+// agentForMessageModel creates a short-lived copy for a single incoming
+// message. It lets a client choose a configured model for its conversation
+// without mutating the global agent, the default provider, or other chats.
+func (al *AgentLoop) agentForMessageModel(base *AgentInstance, modelName string) (*AgentInstance, func(), error) {
+	modelName = strings.TrimSpace(modelName)
+	if base == nil || modelName == "" {
+		return nil, func() {}, fmt.Errorf("invalid message model override")
+	}
+	modelCfg, err := resolvedModelConfig(al.cfg, modelName, base.Workspace)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("configured discussion model %q was not found: %w", modelName, err)
+	}
+	provider, _, err := providers.CreateProviderFromConfig(modelCfg)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("could not initialize discussion model %q: %w", modelName, err)
+	}
+	candidates := resolveModelCandidates(al.cfg, al.cfg.Agents.Defaults.Provider, modelName, nil)
+	if len(candidates) == 0 {
+		return nil, func() {}, fmt.Errorf("configured discussion model %q could not be resolved", modelName)
+	}
+	override := *base
+	override.Model = modelName
+	override.Provider = provider
+	override.Candidates = candidates
+	// An explicit discussion choice must not be replaced by automatic routing.
+	override.Router = nil
+	override.LightCandidates = nil
+	override.ThinkingLevel = parseThinkingLevel(modelCfg.ThinkingLevel)
+	cleanup := func() {
+		if stateful, ok := provider.(providers.StatefulProvider); ok && provider != base.Provider {
+			stateful.Close()
+		}
+	}
+	return &override, cleanup, nil
 }
 
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
@@ -1684,6 +1732,7 @@ func (al *AgentLoop) runAgentLoop(
 		}
 	}
 
+	memoryBefore := captureMemoryFiles(agent.Workspace)
 	ts := newTurnState(agent, opts, al.newTurnEventScope(agent.ID, opts.SessionKey))
 	result, err := al.runTurn(ctx, ts)
 	if err != nil {
@@ -1704,7 +1753,14 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	if opts.SendResponse && result.finalContent != "" {
+		if ts.planPublished {
+			al.publishTurnPlanUpdate(ctx, ts, "", true)
+		}
 		al.publishOutboundResponse(ctx, opts.Channel, opts.ChatID, result.finalContent)
+		if summary := changedMemorySummary(memoryBefore, captureMemoryFiles(agent.Workspace)); summary != "" {
+			al.publishMemoryChange(ctx, ts, summary)
+		}
+		al.publishTaskCompletion(ctx, ts, result.finalContent)
 	}
 
 	if result.finalContent != "" {
@@ -1719,6 +1775,111 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	return result.finalContent, nil
+}
+
+func captureMemoryFiles(workspace string) map[string]string {
+	files := make(map[string]string)
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return files
+	}
+	memoryRoot := filepath.Join(workspace, "memory")
+	_ = filepath.WalkDir(memoryRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || !strings.EqualFold(filepath.Ext(path), ".md") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		relative, relErr := filepath.Rel(memoryRoot, path)
+		if relErr == nil {
+			files[filepath.ToSlash(relative)] = string(content)
+		}
+		return nil
+	})
+	return files
+}
+
+func changedMemorySummary(before, after map[string]string) string {
+	longTermChanged := false
+	workingMemoryChanged := false
+	for path, content := range after {
+		if previous, exists := before[path]; exists && previous == content {
+			continue
+		}
+		if strings.EqualFold(filepath.Base(path), "MEMORY.md") {
+			longTermChanged = true
+		} else {
+			workingMemoryChanged = true
+		}
+	}
+	for path := range before {
+		if _, exists := after[path]; exists {
+			continue
+		}
+		if strings.EqualFold(filepath.Base(path), "MEMORY.md") {
+			longTermChanged = true
+		} else {
+			workingMemoryChanged = true
+		}
+	}
+
+	switch {
+	case longTermChanged && workingMemoryChanged:
+		return "Jame updated long-term and working memory for future conversations."
+	case longTermChanged:
+		return "Jame updated long-term memory for future conversations."
+	case workingMemoryChanged:
+		return "Jame updated working memory for future conversations."
+	default:
+		return ""
+	}
+}
+
+func (al *AgentLoop) publishTurnPlanUpdate(ctx context.Context, ts *turnState, planJSON string, complete bool) {
+	if al == nil || al.channelManager == nil || ts == nil {
+		return
+	}
+	channel, ok := al.channelManager.GetChannel(strings.TrimSpace(ts.channel))
+	if !ok {
+		return
+	}
+	publisher, ok := channel.(channels.PlanCapable)
+	if !ok {
+		return
+	}
+	_ = publisher.PublishPlanUpdate(ctx, ts.chatID, planJSON, complete)
+}
+
+func (al *AgentLoop) publishTaskCompletion(ctx context.Context, ts *turnState, content string) {
+	if al == nil || al.channelManager == nil || ts == nil {
+		return
+	}
+	channel, ok := al.channelManager.GetChannel(strings.TrimSpace(ts.channel))
+	if !ok {
+		return
+	}
+	publisher, ok := channel.(channels.TaskCompletionCapable)
+	if !ok {
+		return
+	}
+	_ = publisher.PublishTaskCompletion(ctx, ts.chatID, content)
+}
+
+func (al *AgentLoop) publishMemoryChange(ctx context.Context, ts *turnState, summary string) {
+	if al == nil || al.channelManager == nil || ts == nil || strings.TrimSpace(summary) == "" {
+		return
+	}
+	channel, ok := al.channelManager.GetChannel(strings.TrimSpace(ts.channel))
+	if !ok {
+		return
+	}
+	publisher, ok := channel.(channels.MemoryChangeCapable)
+	if !ok {
+		return
+	}
+	_ = publisher.PublishMemoryChange(ctx, ts.chatID, summary)
 }
 
 func (al *AgentLoop) targetReasoningChannelID(channelName string) (chatID string) {
@@ -2758,6 +2919,10 @@ turnLoop:
 			if toolResult == nil {
 				toolResult = tools.ErrorResult("hook returned nil tool result")
 			}
+			ts.recordToolOutcome(toolName, toolResult)
+			if toolName == "todo" && !toolResult.IsError {
+				al.publishTurnPlanUpdate(turnCtx, ts, toolResult.ForLLM, false)
+			}
 			if !toolResult.IsError {
 				ts.recordVerificationInput(toolName, toolArgs)
 			}
@@ -2967,6 +3132,7 @@ turnLoop:
 			return turnResult{}, err
 		}
 		al.rememberResearchTurn(ts, finalContent)
+		al.rememberTurnLearning(ts, finalContent)
 	}
 
 	if ts.opts.EnableSummary {
@@ -3082,7 +3248,8 @@ func (al *AgentLoop) activeWorkspaceContext(agentID, workspace, channel, chatID 
 	})
 	externalCollaborators := detectExternalCollaborators()
 	worktreeChanges := workspaceWorktreeChanges(workspace)
-	if len(work) == 0 && len(externalCollaborators) == 0 && worktreeChanges == "" {
+	teamContext := activeTeamOperationsContext(agentID, workspace)
+	if len(work) == 0 && len(externalCollaborators) == 0 && worktreeChanges == "" && teamContext == "" {
 		return ""
 	}
 
@@ -3107,7 +3274,87 @@ func (al *AgentLoop) activeWorkspaceContext(agentID, workspace, channel, chatID 
 			fmt.Fprintf(&sb, "; claimed files: %s", strings.Join(item.files, ", "))
 		}
 	}
+	if teamContext != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(teamContext)
+	}
 	sb.WriteString("\nChoose an independent area (research, review, tests, or separate files), or wait for the owner before changing a claimed file.")
+	return sb.String()
+}
+
+func activeTeamOperationsContext(agentID, workspace string) string {
+	type task struct {
+		ID            string   `json:"id"`
+		Title         string   `json:"title"`
+		OwnerAgentID  string   `json:"owner_agent_id"`
+		Status        string   `json:"status"`
+		DependsOn     []string `json:"depends_on"`
+		FileScopes    []string `json:"file_scopes"`
+		TimeBudget    int      `json:"time_budget_minutes"`
+		TokenBudget   int64    `json:"token_budget"`
+		BlockedReason string   `json:"blocked_reason"`
+	}
+	type operations struct {
+		Goal *struct {
+			Title       string `json:"title"`
+			Outcome     string `json:"outcome"`
+			LeadAgentID string `json:"lead_agent_id"`
+			Status      string `json:"status"`
+		} `json:"goal"`
+		Tasks []task `json:"tasks"`
+	}
+
+	raw, err := os.ReadFile(filepath.Join(workspace, "state", "team-operations.json"))
+	if err != nil {
+		return ""
+	}
+	var state operations
+	if json.Unmarshal(raw, &state) != nil || state.Goal == nil {
+		return ""
+	}
+	isLead := state.Goal.LeadAgentID == agentID
+	statusByID := make(map[string]string, len(state.Tasks))
+	for _, item := range state.Tasks {
+		statusByID[item.ID] = item.Status
+	}
+	visible := make([]task, 0, len(state.Tasks))
+	for _, item := range state.Tasks {
+		if isLead || item.OwnerAgentID == agentID {
+			visible = append(visible, item)
+		}
+	}
+	if len(visible) == 0 && !isLead {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Team Operations Contract\n\n")
+	fmt.Fprintf(&sb, "Goal: %s\nOutcome: %s\nTeam Lead: %s\nGoal status: %s\n", state.Goal.Title, state.Goal.Outcome, state.Goal.LeadAgentID, state.Goal.Status)
+	if isLead {
+		sb.WriteString("You are the Team Lead. Coordinate ownership and dependencies, prevent duplicate work, and require result plus verification evidence before treating work as done.\n")
+	} else {
+		sb.WriteString("Work only on tasks assigned to you. Do not start a task whose dependencies are not done. Respect its file scopes and budgets.\n")
+	}
+	for _, item := range visible {
+		fmt.Fprintf(&sb, "\n- [%s] %s (id: %s; owner: %s)", item.Status, item.Title, item.ID, firstNonEmpty(item.OwnerAgentID, "unassigned"))
+		if len(item.DependsOn) > 0 {
+			dependencies := make([]string, 0, len(item.DependsOn))
+			for _, dependencyID := range item.DependsOn {
+				dependencies = append(dependencies, dependencyID+"="+firstNonEmpty(statusByID[dependencyID], "missing"))
+			}
+			fmt.Fprintf(&sb, "; dependencies: %s", strings.Join(dependencies, ", "))
+		}
+		if len(item.FileScopes) > 0 {
+			fmt.Fprintf(&sb, "; file scopes: %s", strings.Join(item.FileScopes, ", "))
+		}
+		if item.TimeBudget > 0 || item.TokenBudget > 0 {
+			fmt.Fprintf(&sb, "; budget: %d minutes / %d tokens", item.TimeBudget, item.TokenBudget)
+		}
+		if item.BlockedReason != "" {
+			fmt.Fprintf(&sb, "; blocker: %s", item.BlockedReason)
+		}
+	}
+	sb.WriteString("\nUse the Team Grid as the source of truth for status transitions. Report concrete deliverables and verification so the lead can advance the task.")
 	return sb.String()
 }
 
@@ -3186,7 +3433,7 @@ func (al *AgentLoop) rememberResearchTurn(ts *turnState, finalContent string) {
 	}
 
 	topic := strings.TrimSpace(ts.userMessage)
-	learning := strings.TrimSpace(finalContent)
+	learning := compactResearchLearning(finalContent, 1600)
 	if topic == "" || learning == "" {
 		return
 	}
@@ -3195,13 +3442,49 @@ func (al *AgentLoop) rememberResearchTurn(ts *turnState, finalContent string) {
 		"## Working knowledge — %s\n\nResearch request: %s\n\nWhat I learned: %s\n",
 		time.Now().Format("2006-01-02 15:04"),
 		utils.Truncate(topic, 500),
-		utils.Truncate(learning, 2400),
+		learning,
 	)
 	if err := ts.agent.ContextBuilder.memory.AppendToday(entry); err != nil {
 		logger.WarnCF("agent", "Failed to persist research working knowledge", map[string]any{"error": err.Error()})
 		return
 	}
 	logger.DebugCF("agent", "Research working knowledge persisted", map[string]any{"chars": len(entry)})
+}
+
+func (al *AgentLoop) rememberTurnLearning(ts *turnState, finalContent string) {
+	if ts == nil || ts.agent == nil || strings.TrimSpace(ts.userMessage) == "" {
+		return
+	}
+	toolsUsed, failures := ts.learningSignals()
+	store := NewSelfImprovementStore(ts.agent.Workspace)
+	if err := store.RecordTurn(TurnLearningInput{
+		Session:      ts.sessionKey,
+		UserMessage:  ts.userMessage,
+		FinalContent: finalContent,
+		Tools:        toolsUsed,
+		ToolFailures: failures,
+	}); err != nil {
+		logger.WarnCF("agent", "Failed to persist turn reflection", map[string]any{"error": err.Error()})
+	}
+}
+
+// Streaming clients can aggregate progress updates before the actual answer.
+// Preserve the outcome at the end of the response instead of the first block
+// of "I'm checking..." status text, which otherwise pollutes future recall.
+func compactResearchLearning(content string, maxRunes int) string {
+	content = strings.TrimSpace(content)
+	if content == "" || maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(content)
+	if len(runes) <= maxRunes {
+		return content
+	}
+	tail := strings.TrimSpace(string(runes[len(runes)-maxRunes:]))
+	if newline := strings.IndexRune(tail, '\n'); newline >= 0 && newline+1 < len(tail) {
+		tail = strings.TrimSpace(tail[newline+1:])
+	}
+	return tail
 }
 
 func isResearchRequest(message string) bool {

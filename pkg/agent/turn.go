@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/sipeed/jameclaw/pkg/providers"
 	"github.com/sipeed/jameclaw/pkg/session"
 	"github.com/sipeed/jameclaw/pkg/tools"
+	"github.com/sipeed/jameclaw/pkg/utils"
 )
 
 type TurnPhase string
@@ -61,10 +63,11 @@ type turnState struct {
 	userMessage string
 	media       []string
 
-	phase        TurnPhase
-	iteration    int
-	startedAt    time.Time
-	finalContent string
+	phase         TurnPhase
+	iteration     int
+	startedAt     time.Time
+	finalContent  string
+	planPublished bool
 
 	followUps []bus.InboundMessage
 
@@ -105,6 +108,8 @@ type turnState struct {
 
 	touchedFiles []string
 	usedCommands []string
+	toolsUsed    []string
+	toolFailures []string
 
 	// Back-reference to the owning AgentLoop (set for SubTurns only, used for hard abort cascade)
 	al *AgentLoop
@@ -260,6 +265,31 @@ func (ts *turnState) verificationInputs() ([]string, []string) {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
 	return append([]string(nil), ts.touchedFiles...), append([]string(nil), ts.usedCommands...)
+}
+
+func (ts *turnState) recordToolOutcome(toolName string, result *tools.ToolResult) {
+	if strings.TrimSpace(toolName) == "" || result == nil {
+		return
+	}
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.toolsUsed = appendUniqueString(ts.toolsUsed, toolName)
+	if !result.IsError && result.Err == nil {
+		return
+	}
+	failure := strings.TrimSpace(result.ForLLM)
+	if failure == "" && result.Err != nil {
+		failure = result.Err.Error()
+	}
+	if failure != "" {
+		ts.toolFailures = appendUniqueString(ts.toolFailures, toolName+": "+utils.Truncate(failure, 500))
+	}
+}
+
+func (ts *turnState) learningSignals() ([]string, []string) {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return append([]string(nil), ts.toolsUsed...), append([]string(nil), ts.toolFailures...)
 }
 
 func appendUniqueString(values []string, value string) []string {

@@ -112,6 +112,12 @@ cp $ICON_SOURCE "${APP_RESOURCES}/icon.icns"
 bash ./scripts/build-macos-settings-app.sh "${APP_RESOURCES}/JameClaw Settings.app"
 bash ./scripts/build-macos-home-app.sh "${APP_RESOURCES}/Jame.app"
 
+# The Go executables carry linker-generated ad-hoc signatures. Embedding the
+# Swift child apps after copying those executables changes the resource seal,
+# which can make Launch Services report a misleading kLSNoExecutableErr.
+# Re-sign the completed nested bundle so the runnable .app opens reliably.
+codesign --force --deep --sign - "$APP_PATH"
+
 echo ""
 echo "=========================================="
 echo "Successfully created: ${APP_PATH}"

@@ -996,8 +996,9 @@ func (c *IRCConfig) SetSASLPassword(password string) {
 }
 
 type HeartbeatConfig struct {
-	Enabled  bool `json:"enabled"  env:"JAMECLAW_HEARTBEAT_ENABLED"`
-	Interval int  `json:"interval" env:"JAMECLAW_HEARTBEAT_INTERVAL"` // minutes, min 5
+	Enabled    bool `json:"enabled"    env:"JAMECLAW_HEARTBEAT_ENABLED"`
+	Initiative bool `json:"initiative" env:"JAMECLAW_HEARTBEAT_INITIATIVE"`
+	Interval   int  `json:"interval"   env:"JAMECLAW_HEARTBEAT_INTERVAL"` // minutes, min 5
 }
 
 type DevicesConfig struct {

@@ -8,6 +8,7 @@ package heartbeat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,7 +28,22 @@ const (
 	minIntervalMinutes     = 5
 	defaultIntervalMinutes = 30
 	userTasksMarker        = "Add your heartbeat tasks below this line:"
+	initiativeDirectory    = "initiative"
+	initiativeStateFile    = "state.json"
+	initiativeHistoryFile  = "history.jsonl"
+	maxInitiativeHistory   = 100
 )
+
+// InitiativeRecord is the durable result of an autonomous heartbeat check.
+// It is intentionally local to the configured workspace and powers the
+// desktop Team Grid's initiative status.
+type InitiativeRecord struct {
+	CheckedAt time.Time `json:"checked_at"`
+	Status    string    `json:"status"`
+	Summary   string    `json:"summary"`
+	Channel   string    `json:"channel,omitempty"`
+	ChatID    string    `json:"chat_id,omitempty"`
+}
 
 // HeartbeatHandler is the function type for handling heartbeat.
 // It returns a ToolResult that can indicate async operations.
@@ -36,18 +52,32 @@ type HeartbeatHandler func(prompt, channel, chatID string) *tools.ToolResult
 
 // HeartbeatService manages periodic heartbeat checks
 type HeartbeatService struct {
-	workspace string
-	bus       *bus.MessageBus
-	state     *state.Manager
-	handler   HeartbeatHandler
-	interval  time.Duration
-	enabled   bool
-	mu        sync.RWMutex
-	stopChan  chan struct{}
+	workspace  string
+	bus        *bus.MessageBus
+	state      *state.Manager
+	handler    HeartbeatHandler
+	interval   time.Duration
+	enabled    bool
+	initiative bool
+	running    bool
+	mu         sync.RWMutex
+	stopChan   chan struct{}
 }
 
 // NewHeartbeatService creates a new heartbeat service
 func NewHeartbeatService(workspace string, intervalMinutes int, enabled bool) *HeartbeatService {
+	return NewHeartbeatServiceWithInitiative(workspace, intervalMinutes, enabled, true)
+}
+
+// NewHeartbeatServiceWithInitiative creates a heartbeat service with explicit
+// control over autonomous problem discovery. When initiative is false, the
+// service retains the legacy task-list-only behavior.
+func NewHeartbeatServiceWithInitiative(
+	workspace string,
+	intervalMinutes int,
+	enabled bool,
+	initiative bool,
+) *HeartbeatService {
 	// Apply minimum interval
 	if intervalMinutes < minIntervalMinutes && intervalMinutes != 0 {
 		intervalMinutes = minIntervalMinutes
@@ -58,10 +88,11 @@ func NewHeartbeatService(workspace string, intervalMinutes int, enabled bool) *H
 	}
 
 	return &HeartbeatService{
-		workspace: workspace,
-		interval:  time.Duration(intervalMinutes) * time.Minute,
-		enabled:   enabled,
-		state:     state.NewManager(workspace),
+		workspace:  workspace,
+		interval:   time.Duration(intervalMinutes) * time.Minute,
+		enabled:    enabled,
+		initiative: initiative,
+		state:      state.NewManager(workspace),
 	}
 }
 
@@ -147,14 +178,20 @@ func (hs *HeartbeatService) runLoop(stopChan chan struct{}) {
 
 // executeHeartbeat performs a single heartbeat check
 func (hs *HeartbeatService) executeHeartbeat() {
-	hs.mu.RLock()
+	hs.mu.Lock()
 	enabled := hs.enabled
 	handler := hs.handler
-	if !hs.enabled || hs.stopChan == nil {
-		hs.mu.RUnlock()
+	if !hs.enabled || hs.stopChan == nil || hs.running {
+		hs.mu.Unlock()
 		return
 	}
-	hs.mu.RUnlock()
+	hs.running = true
+	hs.mu.Unlock()
+	defer func() {
+		hs.mu.Lock()
+		hs.running = false
+		hs.mu.Unlock()
+	}()
 
 	if !enabled {
 		return
@@ -186,6 +223,7 @@ func (hs *HeartbeatService) executeHeartbeat() {
 		hs.logInfof("Heartbeat handler returned nil result")
 		return
 	}
+	hs.recordInitiative(result, channel, chatID)
 
 	// Handle different result types
 	if result.IsError {
@@ -226,28 +264,88 @@ func (hs *HeartbeatService) buildPrompt() string {
 	if err != nil {
 		if os.IsNotExist(err) {
 			hs.createDefaultHeartbeatTemplate()
+			data = nil
+		} else {
+			hs.logErrorf("Error reading HEARTBEAT.md: %v", err)
 			return ""
 		}
-		hs.logErrorf("Error reading HEARTBEAT.md: %v", err)
-		return ""
 	}
 
 	content := string(data)
-	if !heartbeatHasUserTasks(content) {
+	hasUserTasks := heartbeatHasUserTasks(content)
+	if !hasUserTasks && !hs.initiative {
 		return ""
 	}
 
 	now := time.Now().Format("2006-01-02 15:04:05")
-	return fmt.Sprintf(`# Heartbeat Check
+	if !hs.initiative {
+		return fmt.Sprintf(`# Heartbeat Check
 
 Current time: %s
 
-You are a proactive AI assistant. This is a scheduled heartbeat check.
-Review the following tasks and execute any necessary actions using available skills.
-If there is nothing that requires attention, respond ONLY with: HEARTBEAT_OK
+Review the user-authored recurring tasks below and execute necessary actions.
+If nothing requires attention, respond ONLY with: HEARTBEAT_OK
 
 %s
 `, now, content)
+	}
+	previous := hs.previousInitiativeContext()
+	if previous == "" {
+		previous = "No previous initiative check has been recorded."
+	}
+	userTasks := content
+	if !hasUserTasks {
+		userTasks = "No user-authored recurring tasks are configured. Use the initiative policy below."
+	}
+
+	return fmt.Sprintf(`# Proactive Agent Check
+
+Current time: %s
+
+You are running without a new user prompt. Take initiative: inspect the workspace,
+memory, recent work, automation state, and available health signals to find one
+concrete problem or high-leverage improvement. Do not invent work merely to appear
+busy. Use tools to gather evidence before acting.
+
+## Initiative policy
+
+1. First handle any explicit recurring tasks below.
+2. Then independently look for unfinished, failing, stale, inconsistent, or blocked
+   work that matters to the user's stated goals.
+3. Choose at most ONE additional high-value issue per check. Prefer completing a
+   small durable fix over producing a broad list of suggestions.
+4. You may act without asking only when the action is local, reversible, scoped to
+   the configured workspace, and supported by direct evidence. Examples: fix a
+   clear code or documentation defect, run focused verification, repair a broken
+   local workflow, organize an existing backlog, or create a missing test.
+5. Do NOT autonomously send messages, publish/deploy, spend money, change accounts
+   or credentials, alter security/privacy/network settings, install software,
+   delete user data, rewrite broad areas, or make an external commitment. For any
+   such action, investigate safely and return NEEDS_APPROVAL with the exact proposed
+   action and evidence.
+6. Respect existing work and dirty files. Never overwrite unrelated changes. Do
+   not repeatedly solve the same issue; review the previous initiative result.
+7. Review memory/self-improvement.json for repeated failures, stale candidates,
+   and workflows worth proposing. Never approve a candidate, create a skill, or
+   change approval/security behavior without the user's decision in Memory.
+8. Timebox the check. If there is no evidence-backed useful action, respond ONLY:
+   HEARTBEAT_OK
+9. When you act or find a blocker, finish with this compact format:
+   INITIATIVE_REPORT
+   Problem: ...
+   Evidence: ...
+   Action: ...
+   Verification: ...
+   Next: ...
+
+## Previous initiative result
+
+%s
+
+## User-authored recurring tasks
+
+%s
+`, now, previous, userTasks)
 }
 
 // createDefaultHeartbeatTemplate creates the default HEARTBEAT.md file
@@ -256,7 +354,9 @@ func (hs *HeartbeatService) createDefaultHeartbeatTemplate() {
 
 	defaultContent := `# Heartbeat Check List
 
-This file contains tasks for the heartbeat service to check periodically.
+This file contains optional recurring tasks for the heartbeat service. When
+initiative mode is enabled, Jame also inspects the workspace for one useful,
+evidence-backed problem even when this list is empty.
 
 ## Examples
 
@@ -272,6 +372,8 @@ This file contains tasks for the heartbeat service to check periodically.
 - The spawn tool is async - subagent results will be sent to the user automatically.
 - After spawning a subagent, CONTINUE to process remaining tasks.
 - Only respond with HEARTBEAT_OK when ALL tasks are done AND nothing needs attention.
+- Initiative work stays local and reversible. External, destructive, financial,
+  credential, security, account, publishing, and deployment actions require approval.
 
 ---
 
@@ -283,6 +385,142 @@ Add your heartbeat tasks below this line:
 	} else {
 		hs.logInfof("Created default HEARTBEAT.md template")
 	}
+}
+
+func (hs *HeartbeatService) previousInitiativeContext() string {
+	record, err := LoadInitiativeState(hs.workspace)
+	if err != nil || record.CheckedAt.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Checked: %s\nStatus: %s\nSummary:\n%s",
+		record.CheckedAt.Format(time.RFC3339),
+		record.Status,
+		truncateInitiativeSummary(record.Summary, 3000),
+	)
+}
+
+func (hs *HeartbeatService) recordInitiative(result *tools.ToolResult, channel, chatID string) {
+	if result == nil {
+		return
+	}
+	summary := strings.TrimSpace(result.ForUser)
+	if summary == "" {
+		summary = strings.TrimSpace(result.ForLLM)
+	}
+	status := "completed"
+	switch {
+	case result.IsError:
+		status = "error"
+	case result.Async:
+		status = "working"
+	case result.Silent && strings.EqualFold(summary, "Heartbeat OK"):
+		status = "idle"
+	case strings.Contains(strings.ToUpper(summary), "NEEDS_APPROVAL"):
+		status = "needs_approval"
+	}
+	record := InitiativeRecord{
+		CheckedAt: time.Now(),
+		Status:    status,
+		Summary:   truncateInitiativeSummary(summary, 12000),
+		Channel:   channel,
+		ChatID:    chatID,
+	}
+	if err := SaveInitiativeRecord(hs.workspace, record); err != nil {
+		hs.logErrorf("Failed to save initiative result: %v", err)
+	}
+}
+
+func truncateInitiativeSummary(value string, max int) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max]) + "..."
+}
+
+// SaveInitiativeRecord updates the latest state and keeps a bounded history of
+// actionable checks. Idle checks update freshness without spamming history.
+func SaveInitiativeRecord(workspace string, record InitiativeRecord) error {
+	dir := filepath.Join(workspace, initiativeDirectory)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := fileutil.WriteFileAtomic(filepath.Join(dir, initiativeStateFile), data, 0o600); err != nil {
+		return err
+	}
+	if record.Status == "idle" {
+		return nil
+	}
+	history, err := LoadInitiativeHistory(workspace, maxInitiativeHistory-1)
+	if err != nil {
+		return err
+	}
+	for left, right := 0, len(history)-1; left < right; left, right = left+1, right-1 {
+		history[left], history[right] = history[right], history[left]
+	}
+	history = append(history, record)
+	if len(history) > maxInitiativeHistory {
+		history = history[len(history)-maxInitiativeHistory:]
+	}
+	var builder strings.Builder
+	for _, item := range history {
+		line, marshalErr := json.Marshal(item)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		builder.Write(line)
+		builder.WriteByte('\n')
+	}
+	return fileutil.WriteFileAtomic(
+		filepath.Join(dir, initiativeHistoryFile),
+		[]byte(builder.String()),
+		0o600,
+	)
+}
+
+// LoadInitiativeState returns the latest autonomous check result.
+func LoadInitiativeState(workspace string) (InitiativeRecord, error) {
+	data, err := os.ReadFile(filepath.Join(workspace, initiativeDirectory, initiativeStateFile))
+	if err != nil {
+		return InitiativeRecord{}, err
+	}
+	var record InitiativeRecord
+	err = json.Unmarshal(data, &record)
+	return record, err
+}
+
+// LoadInitiativeHistory returns newest-first initiative results.
+func LoadInitiativeHistory(workspace string, limit int) ([]InitiativeRecord, error) {
+	data, err := os.ReadFile(filepath.Join(workspace, initiativeDirectory, initiativeHistoryFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []InitiativeRecord{}, nil
+		}
+		return nil, err
+	}
+	items := make([]InitiativeRecord, 0)
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var record InitiativeRecord
+		if json.Unmarshal([]byte(line), &record) == nil {
+			items = append(items, record)
+		}
+	}
+	if limit > 0 && len(items) > limit {
+		items = items[len(items)-limit:]
+	}
+	for left, right := 0, len(items)-1; left < right; left, right = left+1, right-1 {
+		items[left], items[right] = items[right], items[left]
+	}
+	return items, nil
 }
 
 func heartbeatHasUserTasks(content string) bool {

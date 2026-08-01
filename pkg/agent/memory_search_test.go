@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sipeed/jameclaw/pkg/providers"
 )
@@ -74,6 +75,71 @@ func TestBuildMessagesInjectsOnlyRelevantMemory(t *testing.T) {
 	}
 }
 
+func TestBuildMessagesUsesConversationForFollowUpMemoryRetrieval(t *testing.T) {
+	workspace := setupWorkspace(t, map[string]string{
+		"memory/MEMORY.md": "# Preferences\nUser prefers Rust for backend programming.",
+	})
+	cb := NewContextBuilder(workspace)
+	messages := cb.BuildMessages(
+		[]providers.Message{{Role: "user", Content: "What programming language do I prefer for backend work?"}},
+		"",
+		"Can you remind me?",
+		nil, "cli", "direct", "", "",
+	)
+	if len(messages) == 0 || !strings.Contains(messages[0].Content, "prefers Rust") {
+		t.Fatalf("follow-up did not retrieve relevant memory: %q", messages[0].Content)
+	}
+}
+
+func TestMemoryRecencyBoostFavorsRecentDailyNotes(t *testing.T) {
+	now := time.Now()
+	recent := memoryRecencyBoost("memory/202607/20260729.md", now.Add(-24*time.Hour), now)
+	old := memoryRecencyBoost("memory/202601/20260101.md", now.AddDate(0, -6, 0), now)
+	longTerm := memoryRecencyBoost("memory/MEMORY.md", now, now)
+	if recent <= old {
+		t.Fatalf("recent boost = %f, old boost = %f", recent, old)
+	}
+	if longTerm != 0 {
+		t.Fatalf("long-term memory must not decay, boost = %f", longTerm)
+	}
+}
+
+func TestMemorySearchDoesNotTreatRecencyAsRelevance(t *testing.T) {
+	workspace := setupWorkspace(t, map[string]string{
+		"memory/MEMORY.md":          "# Preferences\nUser prefers Rust for backend programming.",
+		"memory/202607/20260730.md": "# Daily log\nI am checking a Desktop folder, waiting for files, and preparing a competitor research report.",
+	})
+	recentPath := filepath.Join(workspace, "memory", "202607", "20260730.md")
+	if err := os.Chtimes(recentPath, time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	results := NewMemoryStore(workspace).Search("What backend programming language do I prefer?", 5, 2000)
+	if len(results) == 0 || !strings.Contains(results[0].Snippet, "Rust") {
+		t.Fatalf("durable relevant memory was not ranked first: %#v", results)
+	}
+	for _, result := range results {
+		if strings.Contains(result.Snippet, "Desktop folder") {
+			t.Fatalf("unrelated recent log leaked into recall: %#v", results)
+		}
+	}
+}
+
+func TestAppendTodaySkipsDuplicateMemoryEntry(t *testing.T) {
+	store := NewMemoryStore(t.TempDir())
+	entry := "## Working knowledge\n\n- The user prefers concise answers."
+	if err := store.AppendToday(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendToday(entry); err != nil {
+		t.Fatal(err)
+	}
+	note := store.ReadToday()
+	if count := strings.Count(note, "The user prefers concise answers."); count != 1 {
+		t.Fatalf("duplicate memory entry count = %d, want 1: %q", count, note)
+	}
+}
+
 func TestBuildMemoryFlushPrompt(t *testing.T) {
 	prompt := buildMemoryFlushPrompt([]providers.Message{
 		{Role: "user", Content: "Please remember that I prefer concise answers."},
@@ -138,5 +204,17 @@ func TestRememberResearchTurnSkipsOrdinaryChat(t *testing.T) {
 
 	if note := cb.memory.ReadToday(); note != "" {
 		t.Fatalf("ordinary chat should not become working knowledge: %q", note)
+	}
+}
+
+func TestCompactResearchLearningKeepsFinalOutcome(t *testing.T) {
+	progress := strings.Repeat("I am checking another source and waiting for the result.\n", 80)
+	outcome := "Final finding: the orange navigation system should remain consistent across every desktop screen."
+	result := compactResearchLearning(progress+outcome, 220)
+	if !strings.Contains(result, outcome) {
+		t.Fatalf("final research outcome was lost: %q", result)
+	}
+	if strings.Count(result, "I am checking") > 3 {
+		t.Fatalf("too much process chatter remained in memory: %q", result)
 	}
 }

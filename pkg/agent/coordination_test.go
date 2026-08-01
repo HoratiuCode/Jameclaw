@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,6 +24,38 @@ func TestWorkspaceClaimsPreventConcurrentWritesToTheSameFile(t *testing.T) {
 	loop.releaseWorkspaceClaims(first)
 	if conflict := loop.claimWorkspaceWrite(second, "edit_file", args); conflict != "" {
 		t.Fatalf("writer should proceed after the claim is released: %s", conflict)
+	}
+}
+
+func TestActiveTeamOperationsContextShowsAssignmentsAndDependencies(t *testing.T) {
+	workspace := t.TempDir()
+	stateDir := filepath.Join(workspace, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{
+  "goal": {"title":"Ship release","outcome":"Signed app passes QA","lead_agent_id":"main","status":"active"},
+  "tasks": [
+    {"id":"task-1","title":"Build app","owner_agent_id":"builder","status":"done","depends_on":[],"file_scopes":["build"]},
+    {"id":"task-2","title":"Verify app","owner_agent_id":"reviewer","status":"planned","depends_on":["task-1"],"file_scopes":["macos"],"time_budget_minutes":30,"token_budget":4000}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(stateDir, "team-operations.json"), []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewerContext := activeTeamOperationsContext("reviewer", workspace)
+	for _, expected := range []string{"Ship release", "Verify app", "task-1=done", "macos", "30 minutes / 4000 tokens"} {
+		if !strings.Contains(reviewerContext, expected) {
+			t.Fatalf("reviewer context missing %q:\n%s", expected, reviewerContext)
+		}
+	}
+	if strings.Contains(reviewerContext, "Build app") {
+		t.Fatalf("reviewer should not receive another agent's task contract:\n%s", reviewerContext)
+	}
+	leadContext := activeTeamOperationsContext("main", workspace)
+	if !strings.Contains(leadContext, "You are the Team Lead") || !strings.Contains(leadContext, "Build app") {
+		t.Fatalf("lead context missing team overview:\n%s", leadContext)
 	}
 }
 

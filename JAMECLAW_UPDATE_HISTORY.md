@@ -13,6 +13,50 @@ This is the human-readable update ledger for this fork of JameClaw. It records w
 
 > Version names in this file use a date plus the short commit SHA because the repository does not yet publish Git tags or semantic release numbers. A version becomes immutable once it is committed.
 
+## Unreleased — Desktop MCP connection setup
+
+- Adds an **Add MCP** button to the native desktop **Connectors** page.
+- The dialog collects a server name, optional server/API key, and remote MCP link.
+- New remote connections are enabled by default, saved as HTTP MCP servers, and the gateway is refreshed so the server can be used immediately.
+- The optional key is saved as an `Authorization: Bearer …` header and is never returned by the MCP server-list API or displayed after saving.
+
+## Unreleased — Memory retrieval and hygiene
+
+- Memory retrieval now uses the current message together with recent user turns and the session summary, so follow-up requests retain their subject.
+- Recent daily notes receive a small relevance boost while durable `MEMORY.md` facts do not decay.
+- Exact duplicate daily-memory entries are ignored, preventing retries and compaction from diluting retrieval results.
+
+## Unreleased — Team agent templates
+
+- The desktop Team Agent flow now offers visible templates for Codex, Kimi, Claude Code, Hermes, Grok, Nanobot, OpenCode, and Aider.
+- Grok, Nanobot, OpenCode, and Aider are also included in local CLI/app detection when installed on the Mac.
+
+## Unreleased — Team-grid activity map
+
+- The desktop **Team grid** now includes MCP servers connected to JameClaw, with their enabled state and transport shown as visual nodes.
+- It also shows files JameClaw accessed through recorded file tools. A file node grows as its recorded read/write access count increases and lists the agents involved.
+- Incoming information-source nodes are generated from saved sessions, rather than shown as default placeholders. Each source shows real incoming-message and session counts plus the agents it reached.
+- File activity is derived only from saved JameClaw session tool calls; it does not monitor all file access on macOS.
+
+## Unreleased — Faster desktop navigation
+
+- Adds a **Quick actions** command palette, available from the sidebar or with `⌘K`.
+- It provides searchable shortcuts for a new chat, agents, MCP connectors, memory, automations, sessions, and settings.
+
+## Unreleased — Conversation provider controls
+
+- Moves the Chat terminal control into the chat header.
+- When a global fallback is configured, the composer offers **Auto failover**, primary-only, and fallback-only discussion choices.
+- An explicit choice is applied only to that chat message; it does not change the ecosystem-wide provider configuration or other conversations.
+
+## Unreleased — Desktop Chat fast paths
+
+- Simple greetings such as “hello” receive an immediate local response without starting a provider or loading the full agent context.
+- Requests such as “search my PC for …” and “search files for …” call the allowed local-file index directly and return matching paths without a model round-trip.
+- Desktop launch and **New Chat** now create a real new gateway session, preventing invisible history from an older task from influencing a blank conversation.
+- Casual greetings such as “hey bro” are included in the local greeting fast path.
+- Other requests continue through the complete JameClaw agent workflow with memory, tools, providers, and configured failover.
+
 ## Current version — 2026-07-28 (`69a4d6b0`)
 
 **Desktop teams, artifacts, memory, and conversation management.** This is the latest GitHub-pushed state inspected for this document. The commit changes 178 files (1,483 additions and 235 deletions); many of those are regenerated frontend/backend distribution assets and rebuilt macOS binaries. The source-level product changes are:

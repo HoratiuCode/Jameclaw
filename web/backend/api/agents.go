@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,11 +10,15 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	agentpkg "github.com/sipeed/jameclaw/pkg/agent"
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/fileutil"
+	"github.com/sipeed/jameclaw/pkg/heartbeat"
+	"github.com/sipeed/jameclaw/pkg/providers"
 )
 
 type agentSummary struct {
@@ -56,12 +61,300 @@ type agentDailyNote struct {
 	Content string `json:"content"`
 }
 
+// agentActivityFile is a privacy-conscious summary of a file operation saved
+// in an agent session. It intentionally contains only the path and aggregate
+// count, never the file's contents or a tool's other arguments.
+type agentActivityFile struct {
+	Path     string   `json:"path"`
+	Accesses int      `json:"accesses"`
+	Agents   []string `json:"agents"`
+}
+
+type agentActivityResponse struct {
+	Files   []agentActivityFile   `json:"files"`
+	Sources []agentActivitySource `json:"sources"`
+}
+
+type agentInitiativeResponse struct {
+	Enabled         bool                         `json:"enabled"`
+	Initiative      bool                         `json:"initiative"`
+	IntervalMinutes int                          `json:"interval_minutes"`
+	Latest          *heartbeat.InitiativeRecord  `json:"latest,omitempty"`
+	History         []heartbeat.InitiativeRecord `json:"history"`
+}
+
+// agentActivitySource summarizes a real input channel that has delivered user
+// messages to an agent. Sources are intentionally derived from session data,
+// rather than a fixed catalogue of possible UI entry points.
+type agentActivitySource struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Sessions int      `json:"sessions"`
+	Messages int      `json:"messages"`
+	Agents   []string `json:"agents"`
+}
+
 func (h *Handler) registerAgentRoutes(mux *http.ServeMux) {
+	h.registerTeamOperationsRoutes(mux)
 	mux.HandleFunc("GET /api/agents", h.handleListAgents)
+	mux.HandleFunc("GET /api/agents/activity-map", h.handleAgentActivityMap)
+	mux.HandleFunc("GET /api/agents/initiative", h.handleAgentInitiative)
 	mux.HandleFunc("GET /api/agents/{id}/memory", h.handleGetAgentMemory)
 	mux.HandleFunc("PUT /api/agents/{id}/memory", h.handlePutAgentMemory)
+	mux.HandleFunc("GET /api/agents/{id}/self-improvement", h.handleGetSelfImprovement)
+	mux.HandleFunc("PUT /api/agents/{id}/self-improvement/candidates/{candidateID}", h.handlePutSelfImprovementCandidate)
+	mux.HandleFunc("POST /api/agents/{id}/self-improvement/maintenance", h.handleSelfImprovementMaintenance)
 	mux.HandleFunc("POST /api/agents", h.handleCreateAgent)
 	mux.HandleFunc("PATCH /api/agents/{id}", h.handlePatchAgent)
+}
+
+func (h *Handler) selfImprovementStore(w http.ResponseWriter, agentID string) (*agentpkg.SelfImprovementStore, bool) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return nil, false
+	}
+	workspace, _, ok := resolveAgentMemoryWorkspace(cfg, strings.TrimSpace(agentID))
+	if !ok {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return nil, false
+	}
+	return agentpkg.NewSelfImprovementStore(workspace), true
+}
+
+func (h *Handler) handleGetSelfImprovement(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.selfImprovementStore(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		http.Error(w, "failed to load self-improvement data", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(snapshot)
+}
+
+func (h *Handler) handlePutSelfImprovementCandidate(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.selfImprovementStore(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	var request struct {
+		Action string `json:"action"`
+		Title  string `json:"title"`
+		Lesson string `json:"lesson"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.Action) == "" {
+		http.Error(w, "invalid candidate action", http.StatusBadRequest)
+		return
+	}
+	updated, err := store.ApplyCandidateAction(
+		strings.TrimSpace(r.PathValue("candidateID")),
+		strings.TrimSpace(request.Action),
+		request.Title,
+		request.Lesson,
+	)
+	if err != nil {
+		switch {
+		case os.IsNotExist(err):
+			http.Error(w, "candidate not found", http.StatusNotFound)
+		case errors.Is(err, agentpkg.ErrProtectedImprovement):
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(updated)
+}
+
+func (h *Handler) handleSelfImprovementMaintenance(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.selfImprovementStore(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := store.Maintain(time.Now()); err != nil {
+		http.Error(w, "failed to maintain self-improvement data", http.StatusInternalServerError)
+		return
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		http.Error(w, "failed to load self-improvement data", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(snapshot)
+}
+
+// handleAgentInitiative exposes the local, durable trail of autonomous checks
+// so Desktop can show what the agent found, changed, verified, or deferred for
+// approval. No workspace file contents are returned beyond the agent's own
+// compact initiative summaries.
+func (h *Handler) handleAgentInitiative(w http.ResponseWriter, _ *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load initiative configuration", http.StatusInternalServerError)
+		return
+	}
+	workspace := cfg.WorkspacePath()
+	latest, latestErr := heartbeat.LoadInitiativeState(workspace)
+	history, historyErr := heartbeat.LoadInitiativeHistory(workspace, 20)
+	if historyErr != nil {
+		http.Error(w, "failed to load initiative history", http.StatusInternalServerError)
+		return
+	}
+	response := agentInitiativeResponse{
+		Enabled:         cfg.Heartbeat.Enabled,
+		Initiative:      cfg.Heartbeat.Initiative,
+		IntervalMinutes: cfg.Heartbeat.Interval,
+		History:         history,
+	}
+	if latestErr == nil {
+		response.Latest = &latest
+	} else if !os.IsNotExist(latestErr) {
+		http.Error(w, "failed to load initiative state", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleAgentActivityMap returns the file activity used by the desktop team
+// grid. The map is derived from recorded tool calls, so it reflects JameClaw
+// activity only and is not a general macOS file-access monitor.
+func (h *Handler) handleAgentActivityMap(w http.ResponseWriter, r *http.Request) {
+	type fileActivity struct {
+		accesses int
+		agents   map[string]struct{}
+	}
+	activity := map[string]*fileActivity{}
+	type sourceActivity struct {
+		sessions map[string]struct{}
+		messages int
+		agents   map[string]struct{}
+	}
+	sourceActivityByID := map[string]*sourceActivity{}
+
+	for _, sess := range h.listAllSessions() {
+		agentID, channel, _, _ := sessionIdentityForKey(sess.Key)
+		if agentID == "" {
+			agentID = "main"
+		}
+		sourceID := normalizedActivitySource(channel)
+		userMessages := 0
+		for _, message := range sess.Messages {
+			if message.Role == "user" {
+				userMessages++
+			}
+			for _, call := range message.ToolCalls {
+				name, path := recordedFileToolPath(call)
+				if !isRecordedFileTool(name) || path == "" {
+					continue
+				}
+				entry := activity[path]
+				if entry == nil {
+					entry = &fileActivity{agents: map[string]struct{}{}}
+					activity[path] = entry
+				}
+				entry.accesses++
+				entry.agents[agentID] = struct{}{}
+			}
+		}
+		if userMessages > 0 {
+			entry := sourceActivityByID[sourceID]
+			if entry == nil {
+				entry = &sourceActivity{sessions: map[string]struct{}{}, agents: map[string]struct{}{}}
+				sourceActivityByID[sourceID] = entry
+			}
+			entry.sessions[sess.Key] = struct{}{}
+			entry.messages += userMessages
+			entry.agents[agentID] = struct{}{}
+		}
+	}
+
+	files := make([]agentActivityFile, 0, len(activity))
+	for path, entry := range activity {
+		agents := make([]string, 0, len(entry.agents))
+		for agentID := range entry.agents {
+			agents = append(agents, agentID)
+		}
+		sort.Strings(agents)
+		files = append(files, agentActivityFile{Path: path, Accesses: entry.accesses, Agents: agents})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].Accesses != files[j].Accesses {
+			return files[i].Accesses > files[j].Accesses
+		}
+		return files[i].Path < files[j].Path
+	})
+
+	sources := make([]agentActivitySource, 0, len(sourceActivityByID))
+	for id, entry := range sourceActivityByID {
+		agents := make([]string, 0, len(entry.agents))
+		for agentID := range entry.agents {
+			agents = append(agents, agentID)
+		}
+		sort.Strings(agents)
+		sources = append(sources, agentActivitySource{
+			ID: id, Name: activitySourceName(id), Sessions: len(entry.sessions), Messages: entry.messages, Agents: agents,
+		})
+	}
+	sort.Slice(sources, func(i, j int) bool {
+		if sources[i].Messages != sources[j].Messages {
+			return sources[i].Messages > sources[j].Messages
+		}
+		return sources[i].Name < sources[j].Name
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agentActivityResponse{Files: files, Sources: sources})
+}
+
+func normalizedActivitySource(channel string) string {
+	channel = strings.TrimSpace(strings.ToLower(channel))
+	if channel == "" || channel == "main" {
+		return "terminal"
+	}
+	return channel
+}
+
+func activitySourceName(sourceID string) string {
+	switch sourceID {
+	case "jame":
+		return "Jame Chat (Desktop / Web)"
+	case "terminal":
+		return "Terminal"
+	default:
+		return strings.ToUpper(sourceID[:1]) + sourceID[1:]
+	}
+}
+
+func isRecordedFileTool(name string) bool {
+	switch name {
+	case "read_file", "write_file", "edit_file", "append_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func recordedFileToolPath(call providers.ToolCall) (string, string) {
+	name := strings.TrimSpace(call.Name)
+	arguments := call.Arguments
+	if call.Function != nil {
+		if name == "" {
+			name = strings.TrimSpace(call.Function.Name)
+		}
+		if arguments == nil && strings.TrimSpace(call.Function.Arguments) != "" {
+			_ = json.Unmarshal([]byte(call.Function.Arguments), &arguments)
+		}
+	}
+	path, _ := arguments["path"].(string)
+	return name, strings.TrimSpace(path)
 }
 
 func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
@@ -368,13 +661,13 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	type createAgentRequest struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Model     string `json:"model"`
-		Workspace string `json:"workspace"`
-		ParentID  string `json:"parent_id"`
-		ManagedByMain *bool `json:"managed_by_main"`
-		Human     *human `json:"human"`
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		Model         string `json:"model"`
+		Workspace     string `json:"workspace"`
+		ParentID      string `json:"parent_id"`
+		ManagedByMain *bool  `json:"managed_by_main"`
+		Human         *human `json:"human"`
 	}
 	var req createAgentRequest
 	if err := json.Unmarshal(body, &req); err != nil {

@@ -205,18 +205,78 @@ func TestHeartbeatFilePath(t *testing.T) {
 	}
 }
 
-func TestBuildPrompt_DefaultTemplateStaysIdle(t *testing.T) {
+func TestBuildPrompt_TaskOnlyModeStaysIdleWithoutTasks(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	hs := NewHeartbeatService(tmpDir, 30, true)
+	hs := NewHeartbeatServiceWithInitiative(tmpDir, 30, true, false)
 	hs.createDefaultHeartbeatTemplate()
 
 	if prompt := hs.buildPrompt(); prompt != "" {
 		t.Fatalf("buildPrompt() = %q, want empty prompt for untouched default template", prompt)
+	}
+}
+
+func TestBuildPrompt_InitiativeModeDiscoversProblemsWithoutUserTasks(t *testing.T) {
+	tmpDir := t.TempDir()
+	hs := NewHeartbeatServiceWithInitiative(tmpDir, 30, true, true)
+	hs.createDefaultHeartbeatTemplate()
+
+	prompt := hs.buildPrompt()
+	if prompt == "" {
+		t.Fatal("buildPrompt() = empty, want proactive initiative prompt")
+	}
+	for _, expected := range []string{
+		"Take initiative",
+		"Choose at most ONE",
+		"NEEDS_APPROVAL",
+		"HEARTBEAT_OK",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("prompt missing %q: %s", expected, prompt)
+		}
+	}
+}
+
+func TestSaveInitiativeRecord_PersistsLatestAndBoundedHistory(t *testing.T) {
+	tmpDir := t.TempDir()
+	first := InitiativeRecord{CheckedAt: time.Now().Add(-time.Minute), Status: "completed", Summary: "Fixed a failing check."}
+	second := InitiativeRecord{CheckedAt: time.Now(), Status: "needs_approval", Summary: "Deployment needs approval."}
+	if err := SaveInitiativeRecord(tmpDir, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveInitiativeRecord(tmpDir, second); err != nil {
+		t.Fatal(err)
+	}
+
+	latest, err := LoadInitiativeState(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Status != "needs_approval" || latest.Summary != second.Summary {
+		t.Fatalf("latest = %#v", latest)
+	}
+	history, err := LoadInitiativeHistory(tmpDir, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 || history[0].Summary != second.Summary || history[1].Summary != first.Summary {
+		t.Fatalf("history = %#v", history)
+	}
+
+	idle := InitiativeRecord{CheckedAt: time.Now().Add(time.Minute), Status: "idle", Summary: "Heartbeat OK"}
+	if err := SaveInitiativeRecord(tmpDir, idle); err != nil {
+		t.Fatal(err)
+	}
+	history, err = LoadInitiativeHistory(tmpDir, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("idle check should not expand history, got %d entries", len(history))
 	}
 }
 

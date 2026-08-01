@@ -196,3 +196,48 @@ func TestHandleUpdateToolState(t *testing.T) {
 		t.Fatalf("cron should be enabled: %#v", updated.Tools.Cron)
 	}
 }
+
+func TestHandleSaveMCPServerWithAPIKey(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/tools/mcp/servers",
+		bytes.NewBufferString(`{"name":"linear","enabled":true,"transport":"http","url":"https://mcp.example.com","api_key":"secret-key"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig(updated) error = %v", err)
+	}
+	server, ok := updated.Tools.MCP.Servers["linear"]
+	if !ok {
+		t.Fatal("saved MCP server was not found")
+	}
+	if server.URL != "https://mcp.example.com" || server.Type != "http" || !server.Enabled {
+		t.Fatalf("saved server = %#v", server)
+	}
+	if server.Headers["Authorization"] != "Bearer secret-key" {
+		t.Fatalf("Authorization header = %q, want Bearer secret-key", server.Headers["Authorization"])
+	}
+
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/tools/mcp/servers", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", list.Code, http.StatusOK)
+	}
+	if bytes.Contains(list.Body.Bytes(), []byte("secret-key")) {
+		t.Fatalf("MCP server list must not expose an API key: %s", list.Body.String())
+	}
+}

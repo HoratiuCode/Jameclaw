@@ -260,6 +260,41 @@ func (c *JameChannel) PublishActivity(ctx context.Context, chatID, label string)
 	return c.broadcastToSession(chatID, outMsg)
 }
 
+// PublishPlanUpdate sends the todo tool's structured state to Desktop/Web
+// clients without turning progress updates into extra assistant messages.
+func (c *JameChannel) PublishPlanUpdate(ctx context.Context, chatID, planJSON string, complete bool) error {
+	payload := map[string]any{"complete": complete}
+	if strings.TrimSpace(planJSON) != "" {
+		var plan map[string]any
+		if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
+			return fmt.Errorf("decode plan update: %w", err)
+		}
+		for key, value := range plan {
+			payload[key] = value
+		}
+	}
+	return c.broadcastToSession(chatID, newMessage(TypePlanUpdate, payload))
+}
+
+// PublishTaskCompletion lets Desktop show a native notification after the
+// final assistant response has already been delivered to the transcript.
+func (c *JameChannel) PublishTaskCompletion(ctx context.Context, chatID, content string) error {
+	outMsg := newMessage(TypeTaskComplete, map[string]any{
+		"content": utils.Truncate(strings.TrimSpace(content), 320),
+	})
+	return c.broadcastToSession(chatID, outMsg)
+}
+
+// PublishMemoryChange tells Desktop that memory really changed on disk during
+// this turn. Keeping this out of the assistant text prevents false notices
+// when a model merely says that it remembered something.
+func (c *JameChannel) PublishMemoryChange(ctx context.Context, chatID, summary string) error {
+	outMsg := newMessage(TypeMemoryChanged, map[string]any{
+		"summary": utils.Truncate(strings.TrimSpace(summary), 320),
+	})
+	return c.broadcastToSession(chatID, outMsg)
+}
+
 // SendPlaceholder implements channels.PlaceholderCapable.
 // It sends a placeholder message via the Jame Protocol that will later be
 // edited to the actual response via EditMessage (channels.MessageEditor).
@@ -595,6 +630,12 @@ func (c *JameChannel) handleMessageSend(pc *jameConn, msg JameMessage) {
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
+	// A native or Web client can request a configured model for this message.
+	// The agent loop validates the name and applies it to this turn only, so it
+	// never changes the global default model or another conversation.
+	if model, ok := msg.Payload["model"].(string); ok && strings.TrimSpace(model) != "" {
+		metadata["model_override"] = strings.TrimSpace(model)
+	}
 
 	logger.DebugCF("jame", "Received message", map[string]any{
 		"session_id": sessionID,
@@ -717,6 +758,9 @@ func (c *JameChannel) handleMediaSend(pc *jameConn, msg JameMessage) {
 		"session_id":   sessionID,
 		"conn_id":      pc.id,
 		"content_type": contentType,
+	}
+	if model, ok := payload["model"].(string); ok && strings.TrimSpace(model) != "" {
+		metadata["model_override"] = strings.TrimSpace(model)
 	}
 	sender := bus.SenderInfo{
 		Platform:    "jame",

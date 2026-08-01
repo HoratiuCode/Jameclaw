@@ -1,6 +1,8 @@
 # Heartbeat Check List
 
-This file contains tasks for the heartbeat service to check periodically.
+This file contains optional recurring tasks for the heartbeat service. With
+Agent Initiative enabled, Jame also finds one useful, evidence-backed workspace
+problem even when this list is empty.
 
 ## Examples
 
@@ -16,6 +18,8 @@ This file contains tasks for the heartbeat service to check periodically.
 - The spawn tool is async - subagent results will be sent to the user automatically.
 - After spawning a subagent, CONTINUE to process remaining tasks.
 - Only respond with HEARTBEAT_OK when ALL tasks are done AND nothing needs attention.
+- Initiative work stays local and reversible. External, destructive, financial,
+  credential, security, account, publishing, and deployment actions require approval.
 
 ---
 

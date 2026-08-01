@@ -12,14 +12,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/memory"
 	"github.com/sipeed/jameclaw/pkg/providers"
 )
 
 // registerSessionRoutes binds session list and detail endpoints to the ServeMux.
 func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
+	mux.HandleFunc("PUT /api/sessions/{id}/title", h.handleRenameSession)
 	mux.HandleFunc("PUT /api/sessions/{id}/pin", h.handlePinSession)
+	mux.HandleFunc("PUT /api/sessions/{id}/archive", h.handleArchiveSession)
+	mux.HandleFunc("POST /api/sessions/{id}/resume", h.handleResumeSession)
 	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
 }
@@ -46,6 +51,7 @@ type sessionListItem struct {
 	Created      string `json:"created"`
 	Updated      string `json:"updated"`
 	Pinned       bool   `json:"pinned"`
+	Archived     bool   `json:"archived"`
 }
 
 type sessionRecord struct {
@@ -361,7 +367,15 @@ func (h *Handler) sessionsDir() (string, error) {
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	items := h.listAllSessionItems()
 	pinned := h.pinnedSessionIDs()
-	for i := range items { items[i].Pinned = pinned[items[i].ID] }
+	archived := h.archivedSessionIDs()
+	titles := h.sessionTitles()
+	for i := range items {
+		items[i].Pinned = pinned[items[i].ID]
+		items[i].Archived = archived[items[i].ID]
+		if title := strings.TrimSpace(titles[items[i].ID]); title != "" {
+			items[i].Title = truncateRunes(title, maxSessionTitleRunes)
+		}
+	}
 
 	// Pagination parameters
 	offsetStr := r.URL.Query().Get("offset")
@@ -395,37 +409,190 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) pinnedSessionsPath() (string, error) {
 	dir, err := h.sessionsDir()
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return filepath.Join(dir, ".pinned-chats.json"), nil
+}
+
+func (h *Handler) archivedSessionsPath() (string, error) {
+	dir, err := h.sessionsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, ".archived-chats.json"), nil
+}
+
+func (h *Handler) sessionTitlesPath() (string, error) {
+	dir, err := h.sessionsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, ".session-titles.json"), nil
+}
+
+func (h *Handler) sessionTitles() map[string]string {
+	path, err := h.sessionTitlesPath()
+	if err != nil {
+		return map[string]string{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]string{}
+	}
+	var titles map[string]string
+	if json.Unmarshal(data, &titles) != nil || titles == nil {
+		return map[string]string{}
+	}
+	return titles
+}
+
+func (h *Handler) handleRenameSession(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
+	title = truncateRunes(title, maxSessionTitleRunes)
+	titles := h.sessionTitles()
+	titles[id] = title
+	path, err := h.sessionTitlesPath()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions", http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(path, mustJSON(titles), 0600); err != nil {
+		http.Error(w, "failed to save session title", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"title": title})
 }
 
 func (h *Handler) pinnedSessionIDs() map[string]bool {
 	path, err := h.pinnedSessionsPath()
-	if err != nil { return map[string]bool{} }
+	if err != nil {
+		return map[string]bool{}
+	}
 	data, err := os.ReadFile(path)
-	if err != nil { return map[string]bool{} }
+	if err != nil {
+		return map[string]bool{}
+	}
 	var ids []string
-	if json.Unmarshal(data, &ids) != nil { return map[string]bool{} }
+	if json.Unmarshal(data, &ids) != nil {
+		return map[string]bool{}
+	}
 	result := make(map[string]bool, len(ids))
-	for _, id := range ids { result[id] = true }
+	for _, id := range ids {
+		result[id] = true
+	}
+	return result
+}
+
+func (h *Handler) archivedSessionIDs() map[string]bool {
+	path, err := h.archivedSessionsPath()
+	if err != nil {
+		return map[string]bool{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]bool{}
+	}
+	var ids []string
+	if json.Unmarshal(data, &ids) != nil {
+		return map[string]bool{}
+	}
+	result := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		result[id] = true
+	}
 	return result
 }
 
 func (h *Handler) handlePinSession(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" { http.Error(w, "missing session id", http.StatusBadRequest); return }
-	var body struct { Pinned bool `json:"pinned"` }
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil { http.Error(w, "invalid JSON", http.StatusBadRequest); return }
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Pinned bool `json:"pinned"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
 	pinned := h.pinnedSessionIDs()
-	if body.Pinned { pinned[id] = true } else { delete(pinned, id) }
+	if body.Pinned {
+		pinned[id] = true
+	} else {
+		delete(pinned, id)
+	}
 	ids := make([]string, 0, len(pinned))
-	for pinnedID := range pinned { ids = append(ids, pinnedID) }
+	for pinnedID := range pinned {
+		ids = append(ids, pinnedID)
+	}
 	sort.Strings(ids)
 	path, err := h.pinnedSessionsPath()
-	if err != nil { http.Error(w, "failed to resolve sessions", http.StatusInternalServerError); return }
-	if err := os.WriteFile(path, mustJSON(ids), 0600); err != nil { http.Error(w, "failed to save pinned chats", http.StatusInternalServerError); return }
+	if err != nil {
+		http.Error(w, "failed to resolve sessions", http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(path, mustJSON(ids), 0600); err != nil {
+		http.Error(w, "failed to save pinned chats", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"pinned": body.Pinned})
+}
+
+func (h *Handler) handleArchiveSession(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Archived bool `json:"archived"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	archived := h.archivedSessionIDs()
+	if body.Archived {
+		archived[id] = true
+	} else {
+		delete(archived, id)
+	}
+	ids := make([]string, 0, len(archived))
+	for archivedID := range archived {
+		ids = append(ids, archivedID)
+	}
+	sort.Strings(ids)
+	path, err := h.archivedSessionsPath()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions", http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(path, mustJSON(ids), 0600); err != nil {
+		http.Error(w, "failed to save archived chats", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"archived": body.Archived})
 }
 
 func mustJSON(value any) []byte { data, _ := json.Marshal(value); return data }
@@ -587,25 +754,14 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionKey := sessionKeyForID(sessionID)
-	sess, err := h.readJSONLSessionByKey(dir, sessionKey)
-	if err == nil && isEmptySession(sess) {
-		err = os.ErrNotExist
-	}
+	sess, err := h.loadSessionByKey(dir, sessionKey)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			sess, err = h.readLegacySessionByKey(dir, sessionKey)
-			if err == nil && isEmptySession(sess) {
-				err = os.ErrNotExist
-			}
+			http.Error(w, "session not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "failed to parse session", http.StatusInternalServerError)
 		}
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				http.Error(w, "session not found", http.StatusNotFound)
-			} else {
-				http.Error(w, "failed to parse session", http.StatusInternalServerError)
-			}
-			return
-		}
+		return
 	}
 
 	// Convert to a simpler format for the frontend
@@ -632,6 +788,93 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		"summary":  sess.Summary,
 		"created":  sess.Created.Format(time.RFC3339),
 		"updated":  sess.Updated.Format(time.RFC3339),
+	})
+}
+
+func (h *Handler) loadSessionByKey(dir, sessionKey string) (sessionFile, error) {
+	sess, err := h.readJSONLSessionByKey(dir, sessionKey)
+	if err == nil && isEmptySession(sess) {
+		err = os.ErrNotExist
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		sess, err = h.readLegacySessionByKey(dir, sessionKey)
+		if err == nil && isEmptySession(sess) {
+			err = os.ErrNotExist
+		}
+	}
+	return sess, err
+}
+
+// handleResumeSession returns a Jame-compatible session ID and its visible
+// transcript. Jame sessions keep their original ID. Sessions created through
+// Telegram, Discord, or another channel are copied into a new Jame session so
+// the native WebSocket can safely continue them without taking over the
+// original channel's routing identity.
+//
+//	POST /api/sessions/{id}/resume
+func (h *Handler) handleResumeSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("id"))
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	dir, err := h.sessionsDir()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
+		return
+	}
+
+	sourceKey := sessionKeyForID(sessionID)
+	sess, err := h.loadSessionByKey(dir, sourceKey)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.Error(w, "session not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "failed to parse session", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	resumeID, isJameSession := extractJameSessionID(sourceKey)
+	if !isJameSession {
+		resumeID = uuid.NewString()
+		targetKey := jameSessionPrefix + resumeID
+		store, storeErr := memory.NewJSONLStore(dir)
+		if storeErr != nil {
+			http.Error(w, "failed to prepare resumable session", http.StatusInternalServerError)
+			return
+		}
+		for _, msg := range sess.Messages {
+			if addErr := store.AddFullMessage(r.Context(), targetKey, msg); addErr != nil {
+				http.Error(w, "failed to copy session history", http.StatusInternalServerError)
+				return
+			}
+		}
+		if strings.TrimSpace(sess.Summary) != "" {
+			if summaryErr := store.SetSummary(r.Context(), targetKey, sess.Summary); summaryErr != nil {
+				http.Error(w, "failed to copy session summary", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	type chatMessage struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	messages := make([]chatMessage, 0, len(sess.Messages))
+	for _, msg := range sess.Messages {
+		if (msg.Role == "user" || msg.Role == "assistant") && strings.TrimSpace(msg.Content) != "" {
+			messages = append(messages, chatMessage{Role: msg.Role, Content: msg.Content})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"session_id": resumeID,
+		"messages":   messages,
+		"cloned":     !isJameSession,
 	})
 }
 

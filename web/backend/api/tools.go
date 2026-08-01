@@ -53,6 +53,7 @@ type mcpServerRequest struct {
 	Command   string   `json:"command"`
 	Args      []string `json:"args"`
 	URL       string   `json:"url"`
+	APIKey    string   `json:"api_key"`
 }
 
 var toolCatalog = []toolCatalogEntry{
@@ -244,6 +245,7 @@ func (h *Handler) handleSaveMCPServer(w http.ResponseWriter, r *http.Request) {
 	req.Transport = strings.ToLower(strings.TrimSpace(req.Transport))
 	req.Command = strings.TrimSpace(req.Command)
 	req.URL = strings.TrimSpace(req.URL)
+	req.APIKey = strings.TrimSpace(req.APIKey)
 	if req.Name == "" {
 		http.Error(w, "server name is required", http.StatusBadRequest)
 		return
@@ -270,10 +272,21 @@ func (h *Handler) handleSaveMCPServer(w http.ResponseWriter, r *http.Request) {
 		cfg.Tools.MCP.Servers = make(map[string]config.MCPServerConfig)
 	}
 	cfg.Tools.MCP.Enabled = true
-	cfg.Tools.MCP.Servers[req.Name] = config.MCPServerConfig{
+	server := config.MCPServerConfig{
 		Enabled: req.Enabled, Type: req.Transport, Command: req.Command,
 		Args: req.Args, URL: req.URL,
 	}
+	// The desktop connection form accepts a server/API key for remote MCP
+	// endpoints. Keep it out of API responses and use the standard HTTP
+	// Authorization header when the gateway connects to the server.
+	if req.APIKey != "" && req.Transport != "stdio" {
+		authorization := req.APIKey
+		if !strings.HasPrefix(strings.ToLower(authorization), "bearer ") {
+			authorization = "Bearer " + authorization
+		}
+		server.Headers = map[string]string{"Authorization": authorization}
+	}
+	cfg.Tools.MCP.Servers[req.Name] = server
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
 		return
