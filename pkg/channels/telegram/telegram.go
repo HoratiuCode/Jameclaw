@@ -58,6 +58,14 @@ type TelegramChannel struct {
 	registerFunc     func(context.Context, []commands.Definition) error
 	commandRegCancel context.CancelFunc
 	lastMessageAt    atomic.Int64
+	batchMu          sync.Mutex
+	batches          map[string]*telegramTextBatch
+}
+
+type telegramTextBatch struct {
+	ctx      context.Context
+	messages []*telego.Message
+	timer    *time.Timer
 }
 
 func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChannel, error) {
@@ -114,6 +122,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChann
 		bot:         bot,
 		config:      cfg,
 		chatIDs:     make(map[string]int64),
+		batches:     make(map[string]*telegramTextBatch),
 	}, nil
 }
 
@@ -188,6 +197,12 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 	if c.commandRegCancel != nil {
 		c.commandRegCancel()
 	}
+	c.batchMu.Lock()
+	for _, batch := range c.batches {
+		batch.timer.Stop()
+	}
+	c.batches = nil
+	c.batchMu.Unlock()
 
 	return nil
 }
@@ -705,6 +720,78 @@ func shouldFallbackPhotoToDocument(err error) bool {
 }
 
 func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Message) error {
+	if c.shouldBatchMessage(message) {
+		c.enqueueTextBatch(ctx, message)
+		return nil
+	}
+	return c.handleMessageNow(ctx, message)
+}
+
+// shouldBatchMessage limits batching to plain, non-reply text. Attachments and
+// replies carry context that must be passed to the agent without a delay.
+func (c *TelegramChannel) shouldBatchMessage(message *telego.Message) bool {
+	if c.config == nil || !c.config.Channels.Telegram.Batching.Enabled || message == nil {
+		return false
+	}
+	return message.Text != "" && message.Caption == "" && message.ReplyToMessage == nil && message.Quote == nil &&
+		len(message.Photo) == 0 && message.Voice == nil && message.Audio == nil && message.Document == nil
+}
+
+func (c *TelegramChannel) enqueueTextBatch(ctx context.Context, message *telego.Message) {
+	copyMessage := *message
+	key := fmt.Sprintf("%d:%d:%d", message.Chat.ID, message.From.ID, message.MessageThreadID)
+	delay := time.Duration(c.config.Channels.Telegram.Batching.DelayMillis) * time.Millisecond
+	if delay <= 0 {
+		delay = 180 * time.Millisecond
+	}
+
+	c.batchMu.Lock()
+	defer c.batchMu.Unlock()
+	if c.batches == nil {
+		c.batches = make(map[string]*telegramTextBatch)
+	}
+	if batch := c.batches[key]; batch != nil {
+		batch.messages = append(batch.messages, &copyMessage)
+		batch.timer.Reset(delay)
+		return
+	}
+	batch := &telegramTextBatch{ctx: ctx, messages: []*telego.Message{&copyMessage}}
+	batch.timer = time.AfterFunc(delay, func() { c.flushTextBatch(key, batch) })
+	c.batches[key] = batch
+}
+
+func (c *TelegramChannel) flushTextBatch(key string, batch *telegramTextBatch) {
+	c.batchMu.Lock()
+	if c.batches[key] != batch {
+		c.batchMu.Unlock()
+		return
+	}
+	delete(c.batches, key)
+	messages := batch.messages
+	c.batchMu.Unlock()
+	if len(messages) == 0 {
+		return
+	}
+
+	combined := *messages[len(messages)-1]
+	parts := make([]string, 0, len(messages))
+	for _, message := range messages {
+		parts = append(parts, message.Text)
+	}
+	combined.Text = strings.Join(parts, "\n")
+	processCtx := c.ctx
+	if processCtx == nil {
+		processCtx = batch.ctx
+	}
+	if processCtx == nil {
+		processCtx = context.Background()
+	}
+	if err := c.handleMessageNow(processCtx, &combined); err != nil {
+		logger.WarnCF("telegram", "Failed to process batched text messages", map[string]any{"error": err.Error()})
+	}
+}
+
+func (c *TelegramChannel) handleMessageNow(ctx context.Context, message *telego.Message) error {
 	if message == nil {
 		return fmt.Errorf("message is nil")
 	}
@@ -864,6 +951,13 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		"first_name": user.FirstName,
 		"is_group":   fmt.Sprintf("%t", message.Chat.Type != "private"),
 	}
+	if message.ReplyToMessage != nil {
+		metadata["reply_to_message_id"] = fmt.Sprintf("%d", message.ReplyToMessage.MessageID)
+	}
+	if quote := telegramReplyContext(message); quote != "" {
+		metadata["reply_context"] = quote
+		content = "[Reply context: " + quote + "]\n" + content
+	}
 
 	// Set parent_peer metadata for per-topic agent binding.
 	if message.Chat.IsForum && threadID != 0 {
@@ -882,6 +976,24 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		sender,
 	)
 	return nil
+}
+
+// telegramReplyContext prefers Telegram's exact selected quote over the full
+// replied-to message. This lets Jame answer the part the user actually picked.
+func telegramReplyContext(message *telego.Message) string {
+	if message == nil {
+		return ""
+	}
+	text := ""
+	if message.Quote != nil {
+		text = message.Quote.Text
+	} else if message.ReplyToMessage != nil {
+		text = message.ReplyToMessage.Text
+		if text == "" {
+			text = message.ReplyToMessage.Caption
+		}
+	}
+	return strings.TrimSpace(utils.Truncate(text, 1000))
 }
 
 func (c *TelegramChannel) downloadPhoto(ctx context.Context, fileID string) string {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mymmrac/telego"
 	ta "github.com/mymmrac/telego/telegoapi"
@@ -136,6 +137,43 @@ func newTestChannelWithConstructor(
 		bot:         bot,
 		chatIDs:     make(map[string]int64),
 		config:      config.DefaultConfig(),
+	}
+}
+
+func TestTelegramReplyContextPrefersSelectedQuote(t *testing.T) {
+	message := &telego.Message{
+		Quote:          &telego.TextQuote{Text: "the selected sentence"},
+		ReplyToMessage: &telego.Message{Text: "the whole original message"},
+	}
+	assert.Equal(t, "the selected sentence", telegramReplyContext(message))
+}
+
+func TestTelegramReplyContextFallsBackToReplyText(t *testing.T) {
+	message := &telego.Message{ReplyToMessage: &telego.Message{Text: "the original message"}}
+	assert.Equal(t, "the original message", telegramReplyContext(message))
+}
+
+func TestTelegramTextBatchCombinesBurst(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels.Telegram.Batching = config.MessageBatchingConfig{Enabled: true, DelayMillis: 15}
+	messageBus := bus.NewMessageBus()
+	ch := &TelegramChannel{
+		BaseChannel: channels.NewBaseChannel("telegram", nil, messageBus, nil),
+		chatIDs:     make(map[string]int64),
+		ctx:         context.Background(),
+		config:      cfg,
+		batches:     make(map[string]*telegramTextBatch),
+	}
+	first := &telego.Message{Text: "first", MessageID: 1, Chat: telego.Chat{ID: 42, Type: "private"}, From: &telego.User{ID: 7}}
+	second := &telego.Message{Text: "second", MessageID: 2, Chat: telego.Chat{ID: 42, Type: "private"}, From: &telego.User{ID: 7}}
+	require.NoError(t, ch.handleMessage(context.Background(), first))
+	require.NoError(t, ch.handleMessage(context.Background(), second))
+	select {
+	case inbound := <-messageBus.InboundChan():
+		assert.Equal(t, "first\nsecond", inbound.Content)
+		assert.Equal(t, "2", inbound.MessageID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for batched inbound message")
 	}
 }
 

@@ -474,6 +474,14 @@ type StreamingConfig struct {
 	MinGrowthChars  int  `json:"min_growth_chars,omitempty" env:"JAMECLAW_CHANNELS_TELEGRAM_STREAMING_MIN_GROWTH_CHARS"`
 }
 
+// MessageBatchingConfig coalesces a short burst of plain Telegram messages
+// into one agent turn. This mirrors how people often send a thought in several
+// bubbles, while keeping the delay short enough to still feel immediate.
+type MessageBatchingConfig struct {
+	Enabled     bool `json:"enabled,omitempty"     env:"JAMECLAW_CHANNELS_TELEGRAM_BATCHING_ENABLED"`
+	DelayMillis int  `json:"delay_millis,omitempty" env:"JAMECLAW_CHANNELS_TELEGRAM_BATCHING_DELAY_MILLIS"`
+}
+
 type WhatsAppConfig struct {
 	Enabled            bool                `json:"enabled"              env:"JAMECLAW_CHANNELS_WHATSAPP_ENABLED"`
 	BridgeURL          string              `json:"bridge_url"           env:"JAMECLAW_CHANNELS_WHATSAPP_BRIDGE_URL"`
@@ -486,15 +494,16 @@ type WhatsAppConfig struct {
 type TelegramConfig struct {
 	Enabled            bool `json:"enabled"                 env:"JAMECLAW_CHANNELS_TELEGRAM_ENABLED"`
 	token              string
-	BaseURL            string              `json:"base_url"                env:"JAMECLAW_CHANNELS_TELEGRAM_BASE_URL"`
-	Proxy              string              `json:"proxy"                   env:"JAMECLAW_CHANNELS_TELEGRAM_PROXY"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"JAMECLAW_CHANNELS_TELEGRAM_ALLOW_FROM"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	Typing             TypingConfig        `json:"typing,omitempty"`
-	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
-	Streaming          StreamingConfig     `json:"streaming,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"JAMECLAW_CHANNELS_TELEGRAM_REASONING_CHANNEL_ID"`
-	UseMarkdownV2      bool                `json:"use_markdown_v2"         env:"JAMECLAW_CHANNELS_TELEGRAM_USE_MARKDOWN_V2"`
+	BaseURL            string                `json:"base_url"                env:"JAMECLAW_CHANNELS_TELEGRAM_BASE_URL"`
+	Proxy              string                `json:"proxy"                   env:"JAMECLAW_CHANNELS_TELEGRAM_PROXY"`
+	AllowFrom          FlexibleStringSlice   `json:"allow_from"              env:"JAMECLAW_CHANNELS_TELEGRAM_ALLOW_FROM"`
+	GroupTrigger       GroupTriggerConfig    `json:"group_trigger,omitempty"`
+	Typing             TypingConfig          `json:"typing,omitempty"`
+	Placeholder        PlaceholderConfig     `json:"placeholder,omitempty"`
+	Streaming          StreamingConfig       `json:"streaming,omitempty"`
+	Batching           MessageBatchingConfig `json:"batching,omitempty"`
+	ReasoningChannelID string                `json:"reasoning_channel_id"    env:"JAMECLAW_CHANNELS_TELEGRAM_REASONING_CHANNEL_ID"`
+	UseMarkdownV2      bool                  `json:"use_markdown_v2"         env:"JAMECLAW_CHANNELS_TELEGRAM_USE_MARKDOWN_V2"`
 	secDirty           bool
 }
 

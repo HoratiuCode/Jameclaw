@@ -68,9 +68,10 @@ func DefaultConfig() *Config {
 				Typing:    TypingConfig{Enabled: true},
 				Placeholder: PlaceholderConfig{
 					Enabled: true,
-					Text:    "Thinking... 💭",
+					Text:    "Jame is working…",
 				},
 				Streaming:     StreamingConfig{Enabled: true, ThrottleSeconds: 3, MinGrowthChars: 200},
+				Batching:      MessageBatchingConfig{Enabled: true, DelayMillis: 180},
 				UseMarkdownV2: false,
 			},
 			Feishu: FeishuConfig{
