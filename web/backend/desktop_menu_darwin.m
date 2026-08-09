@@ -88,6 +88,11 @@ static void addMenu(NSMenu *mainMenu, NSString *title, NSString *itemTitle, SEL 
 
 void jameclawInstallDesktopMenu(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        // The Go launcher owns the local API and menu-bar controls, but the
+        // SwiftUI host bundle owns the user-facing desktop window. Keep this
+        // helper out of the Dock so launching JameClaw produces one app icon.
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+
         NSMenu *mainMenu = NSApp.mainMenu;
         if (mainMenu == nil) {
             mainMenu = [[NSMenu alloc] initWithTitle:@"Main Menu"];

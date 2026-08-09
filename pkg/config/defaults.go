@@ -43,9 +43,10 @@ func DefaultConfig() *Config {
 					MaxArgsLength: 300,
 				},
 				TaskPlanFeedback: TaskPlanFeedbackConfig{
-					Enabled:       true,
-					MinTaskLength: 80,
-					MaxSteps:      4,
+					Enabled:               true,
+					OnlyOnExplicitRequest: true,
+					MinTaskLength:         80,
+					MaxSteps:              4,
 				},
 			},
 		},

@@ -46,3 +46,16 @@ func TestFindPresetReturnsValidModelConfig(t *testing.T) {
 		t.Fatalf("preset config did not validate: %v", err)
 	}
 }
+
+func TestNousPresetUsesAvailablePortalModel(t *testing.T) {
+	_, preset, ok := FindPreset("nous", "nous-model")
+	if !ok {
+		t.Fatal("nous preset not found")
+	}
+	if preset.Model != "nous/anthropic/claude-sonnet-4.6" {
+		t.Fatalf("nous model = %q, want nous/anthropic/claude-sonnet-4.6", preset.Model)
+	}
+	if preset.Name != "Claude Sonnet 4.6" {
+		t.Fatalf("nous model label = %q, want Claude Sonnet 4.6", preset.Name)
+	}
+}

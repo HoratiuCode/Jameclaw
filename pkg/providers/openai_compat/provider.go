@@ -391,19 +391,28 @@ func parseStreamResponse(
 }
 
 func normalizeModel(model, apiBase string) string {
+	lowerAPIBase := strings.ToLower(apiBase)
+	if strings.Contains(lowerAPIBase, "inference-api.nousresearch.com") &&
+		(strings.EqualFold(model, "nous/default") || strings.EqualFold(model, "default")) {
+		// Older Desktop catalogues used nous/default as a placeholder. Nous does
+		// not expose a model named "default"; keep those saved connections usable
+		// without asking the user to paste their API key again.
+		return "anthropic/claude-sonnet-4.6"
+	}
+
 	before, after, ok := strings.Cut(model, "/")
 	if !ok {
 		return model
 	}
 
-	if strings.Contains(strings.ToLower(apiBase), "openrouter.ai") {
+	if strings.Contains(lowerAPIBase, "openrouter.ai") {
 		return model
 	}
 
 	prefix := strings.ToLower(before)
 	switch prefix {
 	case "litellm", "moonshot", "nvidia", "groq", "ollama", "deepseek", "google",
-		"openrouter", "zhipu", "mistral", "vivgrid", "minimax", "novita":
+		"openrouter", "zhipu", "mistral", "vivgrid", "minimax", "novita", "nous":
 		return after
 	default:
 		return model

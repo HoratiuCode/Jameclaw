@@ -64,6 +64,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	h.registerAspirineRoutes(mux)
 	h.registerFileRoutes(mux)
 	h.registerArtifactRoutes(mux)
+	h.registerVoiceRoutes(mux)
+	h.registerResearchProviderRoutes(mux)
 
 	// OAuth login and credential management
 	h.registerOAuthRoutes(mux)

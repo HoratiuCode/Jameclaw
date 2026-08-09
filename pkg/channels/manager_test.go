@@ -24,6 +24,16 @@ type mockChannel struct {
 	lastPlaceholderID string
 }
 
+type mockMessageDeleter struct {
+	mockChannel
+	deletedMessageID string
+}
+
+func (m *mockMessageDeleter) DeleteMessage(_ context.Context, _ string, messageID string) error {
+	m.deletedMessageID = messageID
+	return nil
+}
+
 func (m *mockChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	m.sentMessages = append(m.sentMessages, msg)
 	return m.sendFn(ctx, msg)
@@ -508,6 +518,36 @@ func TestPreSend_PlaceholderEditFails_FallsThrough(t *testing.T) {
 
 	if edited {
 		t.Fatal("expected preSend to return false when edit fails")
+	}
+}
+
+func TestPreSend_TaskPlanDisappearsBeforeFinalResponse(t *testing.T) {
+	m := newTestManager()
+	ch := &mockMessageDeleter{
+		mockChannel: mockChannel{
+			sendFn: func(context.Context, bus.OutboundMessage) error { return nil },
+		},
+	}
+	m.RecordPlaceholder("telegram", "123", "plan-message-456")
+
+	plan := bus.OutboundMessage{
+		Channel: "telegram",
+		ChatID:  "123",
+		Content: "🧭 **Plan**\n\n- [ ] Inspect the project",
+	}
+	if delivered := m.preSend(context.Background(), "telegram", plan, ch); !delivered {
+		t.Fatal("expected task plan to update the temporary placeholder")
+	}
+
+	final := bus.OutboundMessage{Channel: "telegram", ChatID: "123", Content: "Done — the project is updated."}
+	if delivered := m.preSend(context.Background(), "telegram", final, ch); delivered {
+		t.Fatal("expected final response to be sent as a new message")
+	}
+	if ch.deletedMessageID != "plan-message-456" {
+		t.Fatalf("deleted message ID = %q, want task plan ID", ch.deletedMessageID)
+	}
+	if _, stillPresent := m.placeholders.Load("telegram:123"); stillPresent {
+		t.Fatal("expected transient task plan to be removed from manager state")
 	}
 }
 

@@ -1,10 +1,11 @@
-import { IconLoader2 } from "@tabler/icons-react"
+import { IconDownload, IconLoader2 } from "@tabler/icons-react"
 import { useEffect, useMemo, useState } from "react"
 
 import {
   type ModelPreset,
   type ProviderCatalogEntry,
   addModelFromCatalog,
+  discoverProviderModels,
 } from "@/api/models"
 import { maskedSecretPlaceholder } from "@/components/secret-placeholder"
 import { Field, KeyInput, SwitchCardField } from "@/components/shared-form"
@@ -51,6 +52,11 @@ export function AddProviderModelSheet({
   const [presetID, setPresetID] = useState("")
   const [modelName, setModelName] = useState("")
   const [apiKey, setAPIKey] = useState("")
+  const [remoteModelID, setRemoteModelID] = useState("")
+  const [discoveredModels, setDiscoveredModels] = useState<
+    { id: string; name: string; owned_by?: string }[]
+  >([])
+  const [discovering, setDiscovering] = useState(false)
   const [setAsDefault, setSetAsDefault] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -58,6 +64,9 @@ export function AddProviderModelSheet({
   const provider = sortedProviders.find((item) => item.id === providerID)
   const preset = provider?.recommended_models.find(
     (item) => item.id === presetID,
+  )
+  const selectedRemoteModel = discoveredModels.find(
+    (item) => item.id === remoteModelID,
   )
 
   useEffect(() => {
@@ -68,6 +77,8 @@ export function AddProviderModelSheet({
     setPresetID(firstPreset?.id ?? "")
     setModelName(firstPreset?.model_name ?? "")
     setAPIKey("")
+    setRemoteModelID("")
+    setDiscoveredModels([])
     setSetAsDefault(false)
     setError("")
   }, [open, sortedProviders])
@@ -79,9 +90,12 @@ export function AddProviderModelSheet({
       provider.recommended_models[0]
     setPresetID(nextPreset?.id ?? "")
     setModelName(nextPreset?.model_name ?? "")
+    setRemoteModelID("")
+    setDiscoveredModels([])
   }, [provider, presetID])
 
   const handlePresetChange = (value: string) => {
+    setRemoteModelID("")
     setPresetID(value)
     const nextPreset = provider?.recommended_models.find(
       (item) => item.id === value,
@@ -89,15 +103,42 @@ export function AddProviderModelSheet({
     setModelName(nextPreset?.model_name ?? "")
   }
 
+  const handleRemoteModelChange = (value: string) => {
+    setRemoteModelID(value)
+    const nextModel = discoveredModels.find((item) => item.id === value)
+    setModelName(nextModel?.id ?? "")
+  }
+
+  const fetchAvailableModels = async () => {
+    if (!provider) return
+    if (provider.requires_api_key && !apiKey.trim()) {
+      setError(`${provider.key_label || "API key"} is required before fetching models.`)
+      return
+    }
+    setDiscovering(true)
+    setError("")
+    try {
+      const models = await discoverProviderModels(provider.id, apiKey.trim())
+      setDiscoveredModels(models)
+      if (models.length === 0) {
+        setError("This API returned no selectable models.")
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not fetch models from this API.")
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
   const validate = (selectedPreset: ModelPreset | undefined): string => {
     if (!provider) return "Select a provider."
-    if (!selectedPreset) return "Select a model preset."
+    if (!selectedPreset && !selectedRemoteModel) return "Select a model."
     if (!modelName.trim()) return "Model name is required."
     if (existingModelNames.some((name) => name.trim() === modelName.trim())) {
       return "That model name already exists. Choose another name or edit the existing model."
     }
-    if (selectedPreset.requires_api_key && !apiKey.trim()) {
-      return `${selectedPreset.key_label || provider.key_label || "API key"} is required.`
+    if (provider.requires_api_key && !apiKey.trim()) {
+      return `${selectedPreset?.key_label || provider.key_label || "API key"} is required.`
     }
     return ""
   }
@@ -114,6 +155,7 @@ export function AddProviderModelSheet({
       await addModelFromCatalog({
         provider_id: providerID,
         preset_id: presetID,
+        remote_model_id: remoteModelID || undefined,
         model_name: modelName.trim(),
         api_key: apiKey.trim() || undefined,
         set_default: setAsDefault,
@@ -160,20 +202,33 @@ export function AddProviderModelSheet({
               </select>
             </Field>
 
-            <Field
-              label="Preset model"
-              hint={preset?.description || preset?.model}
-            >
+            <Field label="Model" hint={selectedRemoteModel?.owned_by || preset?.description || preset?.model}>
               <select
                 className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
-                value={presetID}
-                onChange={(event) => handlePresetChange(event.target.value)}
+                value={remoteModelID ? `remote:${remoteModelID}` : presetID}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (value.startsWith("remote:")) {
+                    handleRemoteModelChange(value.slice("remote:".length))
+                  } else {
+                    handlePresetChange(value)
+                  }
+                }}
               >
                 {provider?.recommended_models.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
                 ))}
+                {discoveredModels.length > 0 && (
+                  <optgroup label="Available from this API">
+                    {discoveredModels.map((item) => (
+                      <option key={item.id} value={`remote:${item.id}`}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </Field>
 
@@ -195,6 +250,17 @@ export function AddProviderModelSheet({
                 />
               </Field>
             )}
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={fetchAvailableModels}
+              disabled={discovering || !provider || (provider.requires_api_key && !apiKey.trim())}
+            >
+              {discovering ? <IconLoader2 className="size-4 animate-spin" /> : <IconDownload className="size-4" />}
+              Fetch available models from API
+            </Button>
 
             <SwitchCardField
               label="Set as default"

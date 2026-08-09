@@ -13,3 +13,7 @@ mkdir -p "$RESOURCES_DIR"
 cp "$PLIST" "$TARGET_APP/Contents/Info.plist"
 cp "./scripts/icon.icns" "$RESOURCES_DIR/icon.icns"
 swiftc -parse-as-library "$SOURCE" -o "$MACOS_DIR/JameClaw Settings" -framework SwiftUI -framework AppKit
+
+# Bind the plist and resources into a valid bundle signature. A linker-only
+# signature is not sufficient when this nested app is opened independently.
+codesign --force --deep --sign - "$TARGET_APP"

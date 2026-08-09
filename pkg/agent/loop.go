@@ -626,6 +626,15 @@ func userFacingProcessingError(channel string, err error) string {
 		strings.Contains(message, "quota"),
 		strings.Contains(message, "429"):
 		return prefix + " The model provider is rate-limited or out of quota. Please wait a moment or ask the owner to check the provider account."
+	case strings.Contains(message, "requires available credits"),
+		strings.Contains(message, "insufficient credits"),
+		strings.Contains(message, "credit balance"),
+		strings.Contains(message, "balance is too low"),
+		strings.Contains(message, "payment required"):
+		return prefix + " The provider account does not have enough credits for this model. Add credits in the provider account or choose another provider in Settings → AI Provider."
+	case strings.Contains(message, "model") &&
+		(strings.Contains(message, "not found") || strings.Contains(message, "does not exist")):
+		return prefix + " The selected model is not available from this provider. Choose another model in Settings → AI Provider, then try again."
 	case strings.Contains(message, "timeout"),
 		strings.Contains(message, "deadline exceeded"),
 		strings.Contains(message, "connection refused"),

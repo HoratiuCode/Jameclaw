@@ -14,6 +14,21 @@ func TestHasTaskPlanningSignal(t *testing.T) {
 	}
 }
 
+func TestRequestsVisiblePlan(t *testing.T) {
+	for _, request := range []string{
+		"Plan the migration before changing anything.",
+		"Give me the steps first.",
+		"How will you approach this refactor?",
+	} {
+		if !requestsVisiblePlan(request) {
+			t.Fatalf("expected explicit planning request to be recognized: %q", request)
+		}
+	}
+	if requestsVisiblePlan("Fix the login redirect and run the test suite.") {
+		t.Fatal("ordinary execution request must stay on the fast lane")
+	}
+}
+
 func TestNormalizeTaskPlanLimitsAndFormatsBullets(t *testing.T) {
 	plan := normalizeTaskPlan("1. Inspect the project\n2. Implement the change\n3. Run tests", 2)
 	if plan != "- [ ] Inspect the project\n- [ ] Implement the change" {

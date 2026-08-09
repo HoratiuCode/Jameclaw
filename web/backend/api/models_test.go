@@ -194,6 +194,46 @@ func TestHandleAddModelFromCatalogCreatesDefaultModel(t *testing.T) {
 	}
 }
 
+func TestHandleAddModelFromCatalogCreatesDiscoveredProviderModel(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg := config.DefaultConfig()
+	cfg.ModelList = nil
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/models/from-catalog", strings.NewReader(`{
+		"provider_id":"openrouter",
+		"preset_id":"openrouter-auto",
+		"remote_model_id":"anthropic/claude-sonnet-4.6",
+		"model_name":"claude-sonnet",
+		"api_key":"sk-test"
+	}`))
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	model := saved.ModelList[0]
+	if model.Model != "openrouter/anthropic/claude-sonnet-4.6" {
+		t.Fatalf("Model = %q, want discovered OpenRouter model", model.Model)
+	}
+	if model.APIBase != "https://openrouter.ai/api/v1" {
+		t.Fatalf("APIBase = %q, want catalog API base", model.APIBase)
+	}
+}
+
 func TestHandleSetDefaultModelSupportsImageAndVoiceRoles(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

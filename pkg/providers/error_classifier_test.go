@@ -114,8 +114,10 @@ func TestClassifyError_OverloadedPatterns(t *testing.T) {
 func TestClassifyError_BillingPatterns(t *testing.T) {
 	patterns := []string{
 		"payment required",
+		"Model requires available credits",
 		"insufficient credits",
 		"credit balance too low",
+		"Your account balance is too low to use this model",
 		"plans & billing page",
 		"insufficient balance",
 	}

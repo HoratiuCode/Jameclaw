@@ -53,8 +53,10 @@ var (
 	billingPatterns = []errorPattern{
 		rxp(`\b402\b`),
 		substr("payment required"),
+		substr("requires available credits"),
 		substr("insufficient credits"),
 		substr("credit balance"),
+		substr("balance is too low"),
 		substr("plans & billing"),
 		substr("insufficient balance"),
 	}

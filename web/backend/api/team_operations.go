@@ -17,7 +17,7 @@ import (
 	"github.com/sipeed/jameclaw/pkg/fileutil"
 )
 
-const teamOperationsVersion = 1
+const teamOperationsVersion = 2
 
 var (
 	errTeamOperationsValidation = errors.New("invalid team operation")
@@ -37,6 +37,7 @@ type teamGoal struct {
 type teamTask struct {
 	ID                 string   `json:"id"`
 	GoalID             string   `json:"goal_id"`
+	Kind               string   `json:"kind"`
 	Title              string   `json:"title"`
 	Description        string   `json:"description,omitempty"`
 	OwnerAgentID       string   `json:"owner_agent_id,omitempty"`
@@ -153,6 +154,7 @@ func (h *Handler) handlePutTeamGoal(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleCreateTeamTask(w http.ResponseWriter, r *http.Request) {
 	var request struct {
+		Kind               string   `json:"kind"`
 		Title              string   `json:"title"`
 		Description        string   `json:"description"`
 		OwnerAgentID       string   `json:"owner_agent_id"`
@@ -191,7 +193,19 @@ func (h *Handler) handleCreateTeamTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "task owner agent not found", http.StatusUnprocessableEntity)
 		return
 	}
-	if err := validateTeamDependencies(snapshot.Tasks, "", request.DependsOn); err != nil {
+	kind := strings.TrimSpace(strings.ToLower(request.Kind))
+	if kind == "" {
+		kind = "task"
+	}
+	if kind != "task" && kind != "loop" {
+		http.Error(w, "node kind must be task or loop", http.StatusUnprocessableEntity)
+		return
+	}
+	dependencies := cleanTeamStrings(request.DependsOn)
+	if latestLoopID := latestTeamLoopID(snapshot.Tasks, snapshot.Goal.ID); latestLoopID != "" {
+		dependencies = cleanTeamStrings(append(dependencies, latestLoopID))
+	}
+	if err := validateTeamDependencies(snapshot.Tasks, "", dependencies); err != nil {
 		writeTeamOperationsError(w, err)
 		return
 	}
@@ -201,13 +215,14 @@ func (h *Handler) handleCreateTeamTask(w http.ResponseWriter, r *http.Request) {
 		status = "planned"
 	}
 	task := teamTask{
-		ID:                 newTeamOperationsID("task"),
+		ID:                 newTeamOperationsID(kind),
 		GoalID:             snapshot.Goal.ID,
+		Kind:               kind,
 		Title:              strings.TrimSpace(request.Title),
 		Description:        strings.TrimSpace(request.Description),
 		OwnerAgentID:       ownerID,
 		Status:             status,
-		DependsOn:          cleanTeamStrings(request.DependsOn),
+		DependsOn:          dependencies,
 		AcceptanceCriteria: cleanTeamStrings(request.AcceptanceCriteria),
 		FileScopes:         cleanTeamStrings(request.FileScopes),
 		TimeBudgetMinutes:  max(0, request.TimeBudgetMinutes),
@@ -227,6 +242,7 @@ func (h *Handler) handleCreateTeamTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handlePatchTeamTask(w http.ResponseWriter, r *http.Request) {
 	var request struct {
+		Kind               *string   `json:"kind"`
 		Title              *string   `json:"title"`
 		Description        *string   `json:"description"`
 		OwnerAgentID       *string   `json:"owner_agent_id"`
@@ -268,6 +284,14 @@ func (h *Handler) handlePatchTeamTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		task.Title = strings.TrimSpace(*request.Title)
+	}
+	if request.Kind != nil {
+		kind := strings.TrimSpace(strings.ToLower(*request.Kind))
+		if kind != "task" && kind != "loop" {
+			http.Error(w, "node kind must be task or loop", http.StatusUnprocessableEntity)
+			return
+		}
+		task.Kind = kind
 	}
 	if request.Description != nil {
 		task.Description = strings.TrimSpace(*request.Description)
@@ -466,13 +490,27 @@ func loadTeamOperations(path string) (teamOperationsSnapshot, error) {
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return teamOperationsSnapshot{}, err
 	}
-	if snapshot.Version == 0 {
+	if snapshot.Version < teamOperationsVersion {
 		snapshot.Version = teamOperationsVersion
 	}
 	if snapshot.Tasks == nil {
 		snapshot.Tasks = []teamTask{}
 	}
+	for index := range snapshot.Tasks {
+		if snapshot.Tasks[index].Kind == "" {
+			snapshot.Tasks[index].Kind = "task"
+		}
+	}
 	return snapshot, nil
+}
+
+func latestTeamLoopID(tasks []teamTask, goalID string) string {
+	for index := len(tasks) - 1; index >= 0; index-- {
+		if tasks[index].GoalID == goalID && tasks[index].Kind == "loop" {
+			return tasks[index].ID
+		}
+	}
+	return ""
 }
 
 func saveTeamOperations(path string, snapshot teamOperationsSnapshot) error {

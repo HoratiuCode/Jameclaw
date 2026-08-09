@@ -14,3 +14,8 @@ cp "$PLIST" "$TARGET_APP/Contents/Info.plist"
 cp "./scripts/icon.icns" "$RESOURCES_DIR/icon.icns"
 cp "./macos/JameClawHome/creation-of-adam.jpg" "$RESOURCES_DIR/creation-of-adam.jpg"
 swiftc -parse-as-library "$SOURCE" -o "$MACOS_DIR/Jame" -framework SwiftUI -framework AppKit -framework UserNotifications
+
+# swiftc leaves only a linker signature on the executable. Sign the complete
+# app bundle after its plist and resources exist so Launch Services can reopen
+# Jame reliably after a rebuild.
+codesign --force --deep --sign - "$TARGET_APP"

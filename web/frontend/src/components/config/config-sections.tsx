@@ -52,11 +52,17 @@ import {
   buildChannelEnabledMap,
 } from "@/hooks/use-sidebar-channels"
 import {
+  type CornerStyle,
   DEFAULT_ACCENT_COLOR,
+  DESIGN_PRESETS,
+  type Density,
+  type DesignPresetId,
   type Font,
   type FontSize,
   type Theme,
+  applyDesignPreset,
   designAtom,
+  getMatchingDesignPreset,
   updateDesignStore,
 } from "@/store/design"
 
@@ -1058,6 +1064,7 @@ export function SystemSection({
 export function DesignSection() {
   const { t } = useTranslation()
   const [design] = useAtom(designAtom)
+  const activePreset = getMatchingDesignPreset(design)
 
   const THEME_OPTIONS = [
     { value: "light", label: "Light Theme" },
@@ -1084,14 +1091,89 @@ export function DesignSection() {
     { value: "xl", label: "Extra Large (20px)" },
   ]
 
+  const DENSITY_OPTIONS = [
+    { value: "compact", label: "Compact" },
+    { value: "comfortable", label: "Comfortable" },
+    { value: "spacious", label: "Spacious" },
+  ]
+
+  const CORNER_OPTIONS = [
+    { value: "square", label: "Square" },
+    { value: "soft", label: "Soft" },
+    { value: "rounded", label: "Rounded" },
+  ]
+
   return (
     <ConfigSectionCard
       title={t("pages.config.sections.design")}
-      description="Customize the typography, theme, accent color, and text scaling of the web console."
+      description="Choose a complete interface theme or fine-tune every visual setting independently."
     >
       <Field
-        label={t("pages.config.design_theme")}
-        hint={t("pages.config.design_theme_hint")}
+        label="Full design theme"
+        hint="Applies the color palette, accent, typography, text size, spacing, and corner style together."
+        layout="setting-row"
+      >
+        <div className="space-y-2">
+          <Select
+            value={activePreset?.id ?? "custom"}
+            onValueChange={(value) => {
+              if (value !== "custom") {
+                applyDesignPreset(value as DesignPresetId)
+              }
+            }}
+          >
+            <SelectTrigger className="w-full" aria-label="Full design theme">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {!activePreset && (
+                <SelectItem value="custom" disabled>
+                  Custom (fine-tuned)
+                </SelectItem>
+              )}
+              {DESIGN_PRESETS.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  {preset.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="border-border/70 bg-muted/30 rounded-lg border p-3">
+            <div className="flex items-center gap-2">
+              <span
+                className="ring-border size-3 rounded-full ring-1"
+                style={{ backgroundColor: design.accentColor }}
+              />
+              <span className="text-sm font-medium">
+                {activePreset?.label ?? "Custom design"}
+              </span>
+            </div>
+            <p className="text-muted-foreground mt-1 text-xs leading-normal">
+              {activePreset?.description ??
+                "Your individual settings no longer match a saved theme."}
+            </p>
+            <div className="text-muted-foreground mt-2 flex flex-wrap gap-1.5 text-[11px] capitalize">
+              <span className="bg-background rounded-md border px-1.5 py-0.5">
+                {design.theme}
+              </span>
+              <span className="bg-background rounded-md border px-1.5 py-0.5">
+                {design.font}
+              </span>
+              <span className="bg-background rounded-md border px-1.5 py-0.5">
+                {design.density}
+              </span>
+              <span className="bg-background rounded-md border px-1.5 py-0.5">
+                {design.corners} corners
+              </span>
+            </div>
+          </div>
+        </div>
+      </Field>
+
+      <Field
+        label="Color palette"
+        hint="Change only the light, dark, or specialty color palette."
         layout="setting-row"
       >
         <Select
@@ -1182,6 +1264,54 @@ export function DesignSection() {
             {FONT_SIZE_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label="Interface spacing"
+        hint="Controls the spacing density across the complete web console."
+        layout="setting-row"
+      >
+        <Select
+          value={design.density}
+          onValueChange={(value) =>
+            updateDesignStore({ density: value as Density })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DENSITY_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label="Corner style"
+        hint="Changes the shape of cards, controls, menus, and panels."
+        layout="setting-row"
+      >
+        <Select
+          value={design.corners}
+          onValueChange={(value) =>
+            updateDesignStore({ corners: value as CornerStyle })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CORNER_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
               </SelectItem>
             ))}
           </SelectContent>

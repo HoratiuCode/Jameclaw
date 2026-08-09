@@ -87,6 +87,45 @@ func TestTeamOperationsBlocksConcurrentFileScopes(t *testing.T) {
 	}
 }
 
+func TestTeamOperationsLoopBlocksTheNextNodeUntilVerified(t *testing.T) {
+	mux, _ := setupTeamOperationsTest(t)
+	putTeamGoal(t, mux)
+
+	loop := createTeamTask(t, mux, map[string]any{
+		"kind":                "loop",
+		"title":               "Iterate until the build is stable",
+		"owner_agent_id":      "builder",
+		"acceptance_criteria": []string{"All focused checks pass"},
+	})
+	if loop.Kind != "loop" {
+		t.Fatalf("loop kind=%q, want loop", loop.Kind)
+	}
+
+	next := createTeamTask(t, mux, map[string]any{
+		"title":          "Publish verified result",
+		"owner_agent_id": "reviewer",
+	})
+	if len(next.DependsOn) != 1 || next.DependsOn[0] != loop.ID {
+		t.Fatalf("next dependencies=%v, want latest loop %s", next.DependsOn, loop.ID)
+	}
+
+	if response := teamRequest(t, mux, http.MethodPost, "/api/agents/team-operations/tasks/"+next.ID+"/action", map[string]any{"action": "start"}); response.Code != http.StatusConflict {
+		t.Fatalf("next node started before loop status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := teamRequest(t, mux, http.MethodPost, "/api/agents/team-operations/tasks/"+loop.ID+"/action", map[string]any{"action": "start"}); response.Code != http.StatusOK {
+		t.Fatalf("loop start status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := teamRequest(t, mux, http.MethodPost, "/api/agents/team-operations/tasks/"+loop.ID+"/action", map[string]any{"action": "submit_review", "result": "Repeated the build and fixed every failure."}); response.Code != http.StatusOK {
+		t.Fatalf("loop review status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := teamRequest(t, mux, http.MethodPost, "/api/agents/team-operations/tasks/"+loop.ID+"/action", map[string]any{"action": "complete", "verification": "Focused checks pass."}); response.Code != http.StatusOK {
+		t.Fatalf("loop complete status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := teamRequest(t, mux, http.MethodPost, "/api/agents/team-operations/tasks/"+next.ID+"/action", map[string]any{"action": "start"}); response.Code != http.StatusOK {
+		t.Fatalf("next node remained blocked after loop status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func setupTeamOperationsTest(t *testing.T) (*http.ServeMux, string) {
 	t.Helper()
 	configPath, cleanup := setupOAuthTestEnv(t)

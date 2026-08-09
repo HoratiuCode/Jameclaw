@@ -1,1 +1,0 @@
-import{j as e}from"./index-BlEZpHsl.js";function a(){return e.jsx("div",{className:"h-dvh w-full overflow-hidden bg-white",children:e.jsx("iframe",{title:"Polytrade landing page",src:"/polytrade-landing.html",className:"block h-full w-full border-0"})})}export{a as component};

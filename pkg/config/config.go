@@ -356,9 +356,10 @@ type ToolFeedbackConfig struct {
 // starts substantial work. It is deliberately separate from tool_feedback:
 // this describes the approach, while tool_feedback reports individual actions.
 type TaskPlanFeedbackConfig struct {
-	Enabled       bool `json:"enabled"        env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_ENABLED"`
-	MinTaskLength int  `json:"min_task_length" env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_MIN_TASK_LENGTH"`
-	MaxSteps      int  `json:"max_steps"       env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_MAX_STEPS"`
+	Enabled               bool `json:"enabled"                  env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_ENABLED"`
+	OnlyOnExplicitRequest bool `json:"only_on_explicit_request" env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_ONLY_ON_EXPLICIT_REQUEST"`
+	MinTaskLength         int  `json:"min_task_length"          env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_MIN_TASK_LENGTH"`
+	MaxSteps              int  `json:"max_steps"                env:"JAMECLAW_AGENTS_DEFAULTS_TASK_PLAN_FEEDBACK_MAX_STEPS"`
 }
 
 type AgentDefaults struct {

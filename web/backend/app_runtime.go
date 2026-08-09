@@ -113,24 +113,9 @@ end tell`,
 }
 
 func openNativeSettings() error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("native settings are only supported on macOS")
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	executableDir := filepath.Dir(executable)
-	candidates := []string{
-		filepath.Join(executableDir, "JameClaw Settings.app"),
-		filepath.Clean(filepath.Join(executableDir, "..", "Resources", "JameClaw Settings.app")),
-	}
-	for _, candidate := range candidates {
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			return exec.Command("open", candidate).Start()
-		}
-	}
-	return fmt.Errorf("JameClaw Settings.app was not found beside the launcher")
+	// Settings now lives inside the one visible JameClaw Desktop application.
+	// Reopen that app instead of launching a second native settings bundle.
+	return openNativeHome()
 }
 
 func openNativeHome() error {
@@ -143,6 +128,7 @@ func openNativeHome() error {
 	}
 	executableDir := filepath.Dir(executable)
 	for _, candidate := range []string{
+		filepath.Clean(filepath.Join(executableDir, "..", "..")),
 		filepath.Join(executableDir, "Jame.app"),
 		filepath.Clean(filepath.Join(executableDir, "..", "Resources", "Jame.app")),
 	} {
@@ -150,7 +136,7 @@ func openNativeHome() error {
 			return exec.Command("open", candidate).Start()
 		}
 	}
-	return fmt.Errorf("Jame.app was not found beside the launcher")
+	return fmt.Errorf("JameClaw Desktop.app was not found around the launcher")
 }
 
 // closeNativeHome keeps the menu-bar launcher and the native Jame window in
@@ -160,7 +146,7 @@ func closeNativeHome() {
 	if runtime.GOOS != "darwin" {
 		return
 	}
-	_ = exec.Command("osascript", "-e", `tell application id "com.jameclaw.home" to quit`).Run()
+	_ = exec.Command("osascript", "-e", `tell application id "com.jameclaw.launcher" to quit`).Run()
 }
 
 func shellQuote(value string) string {

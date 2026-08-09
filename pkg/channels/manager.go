@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,8 +53,9 @@ type reactionEntry struct {
 
 // placeholderEntry wraps a placeholder ID with a creation timestamp for TTL eviction.
 type placeholderEntry struct {
-	id        string
-	createdAt time.Time
+	id                string
+	createdAt         time.Time
+	transientTaskPlan bool
 }
 
 // channelRateConfig maps channel name to per-second rate limit.
@@ -222,9 +224,40 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 		return true
 	}
 
-	// 4. Try editing placeholder
+	// 4. A task plan is a temporary progress note. Reuse the existing
+	// placeholder while the work runs, but retain its ID so the final response
+	// can remove the plan instead of leaving a stale "what I'll do" message in
+	// Telegram (or another channel that supports message deletion).
+	if isTransientTaskPlan(msg.Content) {
+		if v, loaded := m.placeholders.Load(key); loaded {
+			if entry, ok := v.(placeholderEntry); ok && entry.id != "" {
+				if editor, ok := ch.(MessageEditor); ok {
+					if err := editor.EditMessage(ctx, msg.ChatID, entry.id, msg.Content); err == nil {
+						entry.transientTaskPlan = true
+						m.placeholders.Store(key, entry)
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// 5. Try editing a normal placeholder. A transient task plan is different:
+	// delete it and let the final response be a fresh message.
 	if v, loaded := m.placeholders.LoadAndDelete(key); loaded {
 		if entry, ok := v.(placeholderEntry); ok && entry.id != "" {
+			if entry.transientTaskPlan {
+				if deleter, ok := ch.(MessageDeleter); ok {
+					if err := deleter.DeleteMessage(ctx, msg.ChatID, entry.id); err != nil {
+						logger.DebugCF("channels", "Transient task plan deletion failed", map[string]any{
+							"channel": name,
+							"chat_id": msg.ChatID,
+							"error":   err.Error(),
+						})
+					}
+				}
+				return false
+			}
 			if editor, ok := ch.(MessageEditor); ok {
 				err := editor.EditMessage(ctx, msg.ChatID, entry.id, msg.Content)
 				if err == nil {
@@ -242,6 +275,13 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 	}
 
 	return false
+}
+
+// isTransientTaskPlan recognizes the short plan that AgentLoop publishes
+// before starting a multi-step task. It must remain narrow so ordinary user
+// messages that happen to mention a plan are never removed.
+func isTransientTaskPlan(content string) bool {
+	return strings.HasPrefix(strings.TrimSpace(content), "🧭 **Plan**\n")
 }
 
 func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.MediaStore) (*Manager, error) {

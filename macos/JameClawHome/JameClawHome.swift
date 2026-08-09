@@ -11,6 +11,7 @@ extension Notification.Name {
     static let jameclawResumeSession = Notification.Name("jameclaw.resume-session")
     static let jameclawHomeNavigation = Notification.Name("com.jameclaw.home.navigate")
     static let jameclawCommandPalette = Notification.Name("jameclaw.command-palette")
+    static let jameclawTeamGrid = Notification.Name("jameclaw.team-grid")
     static let jameclawWorkspaceChanged = Notification.Name("jameclaw.workspace-changed")
 }
 
@@ -72,18 +73,35 @@ private func authenticatedSessionURL(port: Int, id: String) -> URL {
     return components.url ?? authenticatedConsoleURL(port: port, path: "/api/sessions")
 }
 
-// JameClaw's desktop identity is intentionally narrow: ink, paper, and one
-// unmistakable orange. Keeping these tokens in one place prevents supporting
-// screens from drifting into unrelated purple/blue/green accent systems.
+// Keep every native page on the same design tokens. The selected full-design
+// preset writes its accent to UserDefaults; resolving it here means supporting
+// pages that use the shared brand token update together with Chat and Settings.
 private enum JameBrand {
-    static let orange = Color(red: 1.00, green: 0.37, blue: 0.04)
-    static let orangeSoft = Color(red: 1.00, green: 0.45, blue: 0.12)
+    static var orange: Color { selectedAccent(soft: false) }
+    static var orangeSoft: Color { selectedAccent(soft: true) }
     static let ink = Color(red: 0.035, green: 0.035, blue: 0.038)
     static let panel = Color(red: 0.072, green: 0.072, blue: 0.078)
     static let elevated = Color(red: 0.105, green: 0.105, blue: 0.115)
     static let paper = Color(red: 0.97, green: 0.965, blue: 0.95)
     static let muted = Color.white.opacity(0.58)
     static let rule = Color.white.opacity(0.10)
+
+    private static func selectedAccent(soft: Bool) -> Color {
+        switch UserDefaults.standard.string(forKey: "launcher.design.accent") ?? "theme" {
+        case "coral":
+            return soft ? Color(red: 1.00, green: 0.49, blue: 0.45) : Color(red: 0.95, green: 0.38, blue: 0.34)
+        case "blue":
+            return soft ? Color(red: 0.40, green: 0.68, blue: 1.00) : Color(red: 0.28, green: 0.58, blue: 0.98)
+        case "mint":
+            return soft ? Color(red: 0.38, green: 0.88, blue: 0.71) : Color(red: 0.23, green: 0.78, blue: 0.62)
+        case "violet":
+            return soft ? Color(red: 0.74, green: 0.57, blue: 1.00) : Color(red: 0.64, green: 0.46, blue: 0.96)
+        case "gold":
+            return soft ? Color(red: 1.00, green: 0.77, blue: 0.34) : Color(red: 0.94, green: 0.68, blue: 0.22)
+        default:
+            return soft ? Color(red: 1.00, green: 0.45, blue: 0.12) : Color(red: 1.00, green: 0.37, blue: 0.04)
+        }
+    }
 }
 
 private struct SquareSegmentedPicker<Value: Hashable>: View {
@@ -119,6 +137,62 @@ private struct SquareSegmentedPicker<Value: Hashable>: View {
     }
 }
 
+/// A deliberately branded trigger for the places where a compact choice is
+/// useful. The menu itself remains the accessible native macOS menu, while
+/// the control that lives in the JameClaw chrome no longer reads as a default
+/// SwiftUI picker.
+private struct JameDropdownPicker<Value: Hashable>: View {
+    let label: String
+    let options: [(label: String, value: Value)]
+    @Binding var selection: Value
+    var minWidth: CGFloat = 150
+
+    private var selectedLabel: String {
+        options.first(where: { $0.value == selection })?.label ?? label
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(options.indices, id: \.self) { index in
+                let option = options[index]
+                Button {
+                    selection = option.value
+                } label: {
+                    Label(
+                        option.label,
+                        systemImage: selection == option.value ? "checkmark" : "circle"
+                    )
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(JameBrand.orange)
+                    .frame(width: 3, height: 16)
+                Text(selectedLabel)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(JameBrand.orange)
+            }
+            .foregroundStyle(JameBrand.paper)
+            .padding(.leading, 8)
+            .padding(.trailing, 9)
+            .frame(minWidth: minWidth, minHeight: 30)
+            .background(JameBrand.elevated, in: Rectangle())
+            .overlay(Rectangle().stroke(JameBrand.rule, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel(label)
+        .accessibilityValue(selectedLabel)
+    }
+}
+
 private struct SquareTextFieldStyle: TextFieldStyle {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -151,6 +225,41 @@ private struct WindowOpacityConfigurator: NSViewRepresentable {
     }
 }
 
+@MainActor
+private final class JameMainWindowRegistry {
+    static let shared = JameMainWindowRegistry()
+    var window: NSWindow?
+    var fallbackWindowController: NSWindowController?
+    var preferredFrame: NSRect?
+    weak var observedWindow: NSWindow?
+    var liveResizeObserver: NSObjectProtocol?
+}
+
+private let jameMainWindowTitle = "JameClaw Desktop"
+
+@MainActor
+private func selectDesktopSection(
+    _ section: DesktopSection?,
+    selection: Binding<DesktopSection?>
+) {
+    let preservedFrame = JameMainWindowRegistry.shared.window?.frame
+    JameMainWindowRegistry.shared.preferredFrame = preservedFrame
+    selection.wrappedValue = section
+
+    guard let preservedFrame else { return }
+    // Some detail views (especially Chat's composer and canvas) report a
+    // larger fitting size than list-based pages. Navigation must never resize
+    // a window the user already sized, so restore its frame after SwiftUI's
+    // immediate and deferred layout passes.
+    for delay in [0.0, 0.08, 0.25, 0.6, 1.2, 2.2] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard let window = JameMainWindowRegistry.shared.window else { return }
+            window.minSize = NSSize(width: 660, height: 440)
+            window.setFrame(preservedFrame, display: true, animate: false)
+        }
+    }
+}
+
 private struct WindowBehaviorConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
@@ -168,14 +277,125 @@ private struct WindowBehaviorConfigurator: NSViewRepresentable {
             window.styleMask.formUnion([.titled, .closable, .miniaturizable, .resizable])
             window.isMovable = true
             window.isMovableByWindowBackground = true
+            window.title = jameMainWindowTitle
+            // SwiftUI may remove a closed WindowGroup window from
+            // `NSApp.windows`. Retain the actual main window so Finder, Dock,
+            // menu-bar, and notification reopen requests can show it again.
+            window.isReleasedWhenClosed = false
+            if let fallbackWindow = JameMainWindowRegistry.shared.fallbackWindowController?.window,
+               fallbackWindow !== window {
+                fallbackWindow.orderOut(nil)
+                fallbackWindow.close()
+                JameMainWindowRegistry.shared.fallbackWindowController = nil
+            }
+            JameMainWindowRegistry.shared.window = window
             window.minSize = NSSize(width: 660, height: 440)
             window.setFrameAutosaveName("JameClawMainWindow")
+
+            let registry = JameMainWindowRegistry.shared
+            if registry.preferredFrame == nil {
+                let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame
+                    ?? NSRect(x: 0, y: 0, width: 1120, height: 720)
+                let savedFrame = UserDefaults.standard.string(forKey: "launcher.mainWindowFrame")
+                    .map(NSRectFromString)
+                let savedFrameIsUsable = savedFrame.map {
+                    $0.width >= 660 && $0.height >= 440 && $0.intersects(visibleFrame)
+                } ?? false
+                var launchFrame = savedFrameIsUsable
+                    ? savedFrame!
+                    : NSRect(
+                        x: visibleFrame.midX - 560,
+                        y: visibleFrame.midY - 360,
+                        width: min(1120, visibleFrame.width),
+                        height: min(720, visibleFrame.height)
+                    )
+                launchFrame.size.width = min(launchFrame.width, visibleFrame.width)
+                launchFrame.size.height = min(launchFrame.height, visibleFrame.height)
+                launchFrame.origin.x = min(max(launchFrame.minX, visibleFrame.minX), visibleFrame.maxX - launchFrame.width)
+                launchFrame.origin.y = min(max(launchFrame.minY, visibleFrame.minY), visibleFrame.maxY - launchFrame.height)
+                registry.preferredFrame = launchFrame
+                window.setFrame(launchFrame, display: true, animate: false)
+                for delay in [0.25, 0.8, 1.5, 2.5] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        guard registry.window === window,
+                              registry.preferredFrame == launchFrame else { return }
+                        window.setFrame(launchFrame, display: true, animate: false)
+                    }
+                }
+            }
+
+            if registry.observedWindow !== window {
+                if let observer = registry.liveResizeObserver {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+                registry.observedWindow = window
+                registry.liveResizeObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didEndLiveResizeNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak window] _ in
+                    guard let window else { return }
+                    Task { @MainActor in
+                        JameMainWindowRegistry.shared.preferredFrame = window.frame
+                        UserDefaults.standard.set(
+                            NSStringFromRect(window.frame),
+                            forKey: "launcher.mainWindowFrame"
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
+@MainActor
+private func bootstrapJameMainWindow() {
+    if let existingWindow = NSApp.windows.first(where: {
+        $0.title == jameMainWindowTitle && ($0.isVisible || $0.isMiniaturized)
+    }) {
+        JameMainWindowRegistry.shared.window = existingWindow
+        return
+    }
+
+    if let fallbackWindow = JameMainWindowRegistry.shared.fallbackWindowController?.window {
+        JameMainWindowRegistry.shared.window = fallbackWindow
+        fallbackWindow.makeKeyAndOrderFront(nil)
+        return
+    }
+
+    let controller = NSHostingController(rootView: JameStandaloneRootView())
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1120, height: 720),
+        styleMask: [.titled, .closable, .miniaturizable, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.title = jameMainWindowTitle
+    window.contentViewController = controller
+    window.isReleasedWhenClosed = false
+    window.minSize = NSSize(width: 660, height: 440)
+    window.setFrameAutosaveName("JameClawMainWindow")
+    window.center()
+
+    let windowController = NSWindowController(window: window)
+    JameMainWindowRegistry.shared.window = window
+    JameMainWindowRegistry.shared.fallbackWindowController = windowController
+    windowController.showWindow(nil)
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
+    NSLog("[JameWindow] created fallback; visible=%@", window.isVisible.description)
+}
+
 final class HomeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private var visibilityTimer: Timer?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // JameClaw Desktop is the visible application. Its Go server and
+        // gateway run as helper executables inside this same app bundle.
+        let activationChanged = NSApp.setActivationPolicy(.regular)
+        NSLog("[JameWindow] did finish launching; regular activation=%@", activationChanged.description)
+        NativeLaunchCoordinator.shared.startIfNeeded()
+
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         let key = "jame.notifications.taskCompletion"
@@ -183,13 +403,58 @@ final class HomeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotification
         if notificationsEnabled {
             center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
+
+        // Do not wait for SwiftUI restoration before making Jame usable. The
+        // hosting fallback is replaced automatically as soon as WindowGroup
+        // installs its normal window.
+        DispatchQueue.main.async {
+            self.ensureMainWindowExists()
+            self.revealMainWindow()
+        }
+
+        // SwiftUI mounts the WindowGroup just after the app delegate launch
+        // callback. Reveal twice so a cold launch and a restored process both
+        // end with the real main window in front.
+        for delay in [0.2, 0.8, 2.0, 4.0, 6.0, 8.0, 10.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                self.ensureMainWindowExists()
+                self.revealMainWindow()
+            }
+        }
+
+        visibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let mainWindows = NSApp.windows.filter { $0.title == jameMainWindowTitle }
+                let hasUsableWindow = mainWindows.contains { $0.isVisible || $0.isMiniaturized }
+                guard !hasUsableWindow else { return }
+                self.ensureMainWindowExists()
+                self.revealMainWindow()
+            }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        visibilityTimer?.invalidate()
+        visibilityTimer = nil
+        NativeLaunchCoordinator.shared.stop()
+    }
+
+    func applicationShouldSaveApplicationState(_ sender: NSApplication) -> Bool {
+        // This is a single-window app. Persisting a closed WindowGroup causes
+        // the next launch to start as a windowless background process.
+        false
+    }
+
+    func applicationShouldRestoreApplicationState(_ sender: NSApplication) -> Bool {
+        false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // The launcher owns the gateway lifecycle. Closing the last native
-        // window must not stop the background service as well; the Dock icon
-        // can reopen the window through applicationShouldHandleReopen.
-        false
+        // The launcher and gateway are separate processes. Terminating only
+        // this native UI after its last window closes prevents macOS from
+        // leaving a windowless Jame process that cannot be reopened cleanly.
+        true
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -220,7 +485,11 @@ final class HomeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotification
 
     private func revealMainWindow() {
         DispatchQueue.main.async {
-            guard let window = NSApp.windows.first else { return }
+            guard let window = NSApp.windows.first(where: {
+                $0.title == jameMainWindowTitle && ($0.isVisible || $0.isMiniaturized)
+            })
+                ?? JameMainWindowRegistry.shared.window else { return }
+            JameMainWindowRegistry.shared.window = window
             let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame.insetBy(dx: 12, dy: 12)
             if let visibleFrame {
                 var frame = window.frame
@@ -232,9 +501,19 @@ final class HomeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotification
             } else {
                 window.center()
             }
+            window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    @MainActor
+    private func ensureMainWindowExists() {
+        NSLog("[JameWindow] ensure; windows=%ld", NSApp.windows.count)
+        // SwiftUI can occasionally restore a WindowGroup as an active,
+        // windowless process. Create the same root view in a normal AppKit
+        // window so launching Jame always produces visible UI.
+        bootstrapJameMainWindow()
     }
 }
 
@@ -323,6 +602,10 @@ private enum LauncherAccent: String, CaseIterable, Identifiable {
     }
 }
 
+private func launcherAccentPreference(from rawValue: String, theme: LauncherTheme) -> Color {
+    (LauncherAccent(rawValue: rawValue) ?? .theme).color ?? theme.accent
+}
+
 private enum DocumentApprovalPolicy: String, CaseIterable, Identifiable {
     case alwaysAsk
     case outsideWorkspace
@@ -406,6 +689,76 @@ private enum MessageSurface: String, CaseIterable, Identifiable {
     var label: String { self == .cards ? "Cards" : "Minimal" }
 }
 
+private struct NativeDesignConfiguration {
+    let theme: LauncherTheme
+    let accent: LauncherAccent
+    let density: ChatDensity
+    let surface: MessageSurface
+    let fontScale: Double
+    let windowOpacity: Double
+    let teamGlow: Bool
+}
+
+private enum NativeDesignPreset: String, CaseIterable, Identifiable {
+    case jameDark
+    case jameLight
+    case nordicFrost
+    case sepiaReading
+    case cyberpunkNeon
+    case forestFocus
+    case sunsetStudio
+    case custom
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .jameDark: return "Jame Dark"
+        case .jameLight: return "Jame Light"
+        case .nordicFrost: return "Nordic Frost"
+        case .sepiaReading: return "Sepia Reading"
+        case .cyberpunkNeon: return "Cyberpunk Neon"
+        case .forestFocus: return "Forest Focus"
+        case .sunsetStudio: return "Sunset Studio"
+        case .custom: return "Custom design"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .jameDark: return "Dark · Orange · Compact · Cards"
+        case .jameLight: return "Light · Coral · Comfortable · Cards"
+        case .nordicFrost: return "Dark · Blue · Comfortable · Minimal"
+        case .sepiaReading: return "Light · Gold · Spacious · Large text"
+        case .cyberpunkNeon: return "Dark · Violet · Compact · Minimal"
+        case .forestFocus: return "Dark · Mint · Comfortable · Cards"
+        case .sunsetStudio: return "Dark · Coral · Spacious · Large text"
+        case .custom: return "Fine-tuned with the individual controls below"
+        }
+    }
+
+    var configuration: NativeDesignConfiguration? {
+        switch self {
+        case .jameDark:
+            return NativeDesignConfiguration(theme: .dark, accent: .theme, density: .compact, surface: .cards, fontScale: 1.0, windowOpacity: 1.0, teamGlow: true)
+        case .jameLight:
+            return NativeDesignConfiguration(theme: .light, accent: .coral, density: .comfortable, surface: .cards, fontScale: 1.0, windowOpacity: 1.0, teamGlow: true)
+        case .nordicFrost:
+            return NativeDesignConfiguration(theme: .dark, accent: .blue, density: .comfortable, surface: .minimal, fontScale: 1.0, windowOpacity: 0.95, teamGlow: false)
+        case .sepiaReading:
+            return NativeDesignConfiguration(theme: .light, accent: .gold, density: .spacious, surface: .cards, fontScale: 1.15, windowOpacity: 1.0, teamGlow: false)
+        case .cyberpunkNeon:
+            return NativeDesignConfiguration(theme: .dark, accent: .violet, density: .compact, surface: .minimal, fontScale: 0.88, windowOpacity: 0.9, teamGlow: true)
+        case .forestFocus:
+            return NativeDesignConfiguration(theme: .dark, accent: .mint, density: .comfortable, surface: .cards, fontScale: 1.0, windowOpacity: 0.95, teamGlow: false)
+        case .sunsetStudio:
+            return NativeDesignConfiguration(theme: .dark, accent: .coral, density: .spacious, surface: .cards, fontScale: 1.15, windowOpacity: 0.95, teamGlow: true)
+        case .custom:
+            return nil
+        }
+    }
+}
+
 @MainActor
 final class LauncherSettingsStore: ObservableObject {
     @Published var port = "18800"
@@ -445,10 +798,46 @@ final class LauncherSettingsStore: ObservableObject {
     }
 }
 
+private struct JameStandaloneRootView: View {
+    @State private var selectedSection: DesktopSection? = .chat
+
+    var body: some View {
+        JameRootView(selectedSection: $selectedSection)
+    }
+}
+
+private func migrateLegacyNativeDefaultsIfNeeded() {
+    guard let bundleID = Bundle.main.bundleIdentifier,
+          bundleID == "com.jameclaw.launcher" else { return }
+    let marker = "jameclaw.defaults.migrated-from-home"
+    let defaults = UserDefaults.standard
+    guard !defaults.bool(forKey: marker) else { return }
+
+    let legacy = defaults.persistentDomain(forName: "com.jameclaw.home") ?? [:]
+    var current = defaults.persistentDomain(forName: bundleID) ?? [:]
+    for (key, value) in legacy where current[key] == nil {
+        current[key] = value
+    }
+    current[marker] = true
+    defaults.setPersistentDomain(current, forName: bundleID)
+}
+
 @main
 struct JameClawHomeApp: App {
     @NSApplicationDelegateAdaptor(HomeAppDelegate.self) private var appDelegate
     @State private var selectedSection: DesktopSection? = .chat
+
+    init() {
+        migrateLegacyNativeDefaultsIfNeeded()
+        // This initializer runs even when SwiftUI restores no WindowGroup
+        // scene. Bootstrap the visible AppKit host independently of scene
+        // restoration; WindowBehaviorConfigurator swaps in the normal window
+        // if SwiftUI creates one afterward.
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+            bootstrapJameMainWindow()
+        }
+    }
 
     var body: some Scene {
         WindowGroup { JameRootView(selectedSection: $selectedSection) }
@@ -469,7 +858,7 @@ struct JameClawHomeApp: App {
                     .keyboardShortcut("k", modifiers: [.command])
 
                     Button("New Chat") {
-                        selectedSection = .chat
+                        selectDesktopSection(.chat, selection: $selectedSection)
                         NotificationCenter.default.post(name: .jameclawNewChat, object: nil)
                     }
                     .keyboardShortcut("n", modifiers: [.command])
@@ -477,15 +866,24 @@ struct JameClawHomeApp: App {
 
                 CommandMenu("Automations") {
                     Button("Show Automations") {
-                        selectedSection = .automations
+                        selectDesktopSection(.automations, selection: $selectedSection)
                     }
                     .keyboardShortcut("a", modifiers: [.command, .option])
                 }
 
                 CommandMenu("View") {
+                    Button("Team Grid…") {
+                        selectDesktopSection(.agent, selection: $selectedSection)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            NotificationCenter.default.post(name: .jameclawTeamGrid, object: nil)
+                        }
+                    }
+                    .keyboardShortcut("g", modifiers: [.command, .option])
+
+                    Divider()
                     ForEach(DesktopSection.allCases) { section in
                         Button(section.title) {
-                            selectedSection = section
+                            selectDesktopSection(section, selection: $selectedSection)
                         }
                         .keyboardShortcut(section.menuShortcut, modifiers: [.command, .option])
                     }
@@ -495,15 +893,24 @@ struct JameClawHomeApp: App {
 }
 
 struct JameRootView: View {
-    @StateObject private var settings = LauncherSettingsStore()
+    @StateObject private var settings: LauncherSettingsStore
+    @StateObject private var chat: NativeChatStore
     @State private var showingCommandPalette = false
     @State private var showingTerminalWorkspace = false
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
+    @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @AppStorage("launcher.design.windowOpacity") private var windowOpacity = 1.0
     @Environment(\.colorScheme) private var systemColorScheme
     // The native launcher is a chat app first. Keep it selected on launch,
     // while retaining a persistent, desktop-native list of supporting views.
     @Binding var selectedSection: DesktopSection?
+
+    init(selectedSection: Binding<DesktopSection?>) {
+        let settings = LauncherSettingsStore()
+        _settings = StateObject(wrappedValue: settings)
+        _chat = StateObject(wrappedValue: NativeChatStore(port: Int(settings.port) ?? 18800))
+        _selectedSection = selectedSection
+    }
 
     private var chromeTheme: LauncherTheme {
         launcherThemePreference(from: savedTheme).resolved(for: systemColorScheme)
@@ -512,16 +919,28 @@ struct JameRootView: View {
     private var chromePanel: Color { chromeTheme == .light ? .white : JameBrand.elevated }
     private var chromeRule: Color { chromeTheme == .light ? Color.black.opacity(0.14) : JameBrand.rule }
     private var chromeForeground: Color { chromeTheme == .light ? JameBrand.ink : JameBrand.paper }
+    private var chromeAccent: Color { launcherAccentPreference(from: savedAccent, theme: chromeTheme) }
+    private var stableSectionSelection: Binding<DesktopSection?> {
+        Binding(
+            get: { selectedSection },
+            set: { selectDesktopSection($0, selection: $selectedSection) }
+        )
+    }
 
     var body: some View {
         NavigationSplitView {
-            DesktopSidebar(selectedSection: $selectedSection) {
+            DesktopSidebar(
+                selectedSection: stableSectionSelection,
+                isAgentWorking: chat.isResponseInProgress,
+                agentStatus: chat.status,
+                conversationCount: chat.messages.count
+            ) {
                 showingCommandPalette = true
             }
         } detail: {
             ZStack {
                 LinearGradient(
-                    colors: [chromeBackground, JameBrand.orange.opacity(chromeTheme == .light ? 0.045 : 0.075), chromeBackground],
+                    colors: [chromeBackground, chromeAccent.opacity(chromeTheme == .light ? 0.045 : 0.075), chromeBackground],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -529,7 +948,7 @@ struct JameRootView: View {
 
                 switch selectedSection ?? .chat {
                 case .chat:
-                    ChatView(port: Int(settings.port) ?? 18800)
+                    ChatView(port: Int(settings.port) ?? 18800, chat: chat)
                 case .fixedChats:
                     SessionsView(port: Int(settings.port) ?? 18800, pinnedOnly: true, resumeSession: openSessionInChat)
                 case .memory:
@@ -548,12 +967,12 @@ struct JameRootView: View {
                     ArtifactsView()
                 case .settings:
                     QuickSettingsView(settings: settings) {
-                        selectedSection = .archivedChats
+                        selectDesktopSection(.archivedChats, selection: $selectedSection)
                     }
                 }
             }
         }
-        .tint(JameBrand.orange)
+        .tint(chromeAccent)
         .buttonBorderShape(.roundedRectangle(radius: 0))
         .textFieldStyle(SquareTextFieldStyle())
         .preferredColorScheme(launcherThemePreference(from: savedTheme).preferredColorScheme)
@@ -584,11 +1003,11 @@ struct JameRootView: View {
                     .accessibilityLabel("Terminal and documents")
 
                     Button {
-                        selectedSection = .settings
+                        selectDesktopSection(.settings, selection: $selectedSection)
                     } label: {
                         Image(systemName: selectedSection == .settings ? "gearshape.fill" : "gearshape")
                             .frame(width: 28, height: 24)
-                            .background(selectedSection == .settings ? JameBrand.orange : chromePanel)
+                            .background(selectedSection == .settings ? chromeAccent : chromePanel)
                             .foregroundStyle(selectedSection == .settings ? JameBrand.ink : chromeForeground)
                             .overlay(Rectangle().stroke(chromeRule, lineWidth: 1))
                             .contentShape(Rectangle())
@@ -607,7 +1026,7 @@ struct JameRootView: View {
                 ? DesktopSection.capabilities
                 : DesktopSection(rawValue: sectionName)
             guard let section else { return }
-            selectedSection = section
+            selectDesktopSection(section, selection: $selectedSection)
             if notification.userInfo?["new_chat"] as? Bool == true {
                 // Defer until the chat view is mounted when the launcher has
                 // just opened Jame, while immediately clearing an existing chat.
@@ -620,7 +1039,7 @@ struct JameRootView: View {
             showingCommandPalette = true
         }
         .sheet(isPresented: $showingCommandPalette) {
-            QuickActionPalette(selectedSection: $selectedSection) {
+            QuickActionPalette(selectedSection: stableSectionSelection) {
                 showingCommandPalette = false
             }
         }
@@ -636,7 +1055,7 @@ struct JameRootView: View {
     }
 
     private func openSessionInChat(_ request: NativeSessionResumeRequest) {
-        selectedSection = .chat
+        selectDesktopSection(.chat, selection: $selectedSection)
         // The session list and Chat are mutually exclusive detail views. Post
         // after SwiftUI mounts Chat so its store receives the handoff.
         DispatchQueue.main.async {
@@ -647,14 +1066,22 @@ struct JameRootView: View {
 
 private struct DesktopSidebar: View {
     @Binding var selectedSection: DesktopSection?
+    let isAgentWorking: Bool
+    let agentStatus: String
+    let conversationCount: Int
     let openCommandPalette: () -> Void
+    @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
+    @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @Environment(\.colorScheme) private var colorScheme
+    @State private var sessionsGlow = false
 
     private var background: Color { colorScheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
     private var panel: Color { colorScheme == .light ? .white : JameBrand.elevated }
     private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
     private var muted: Color { colorScheme == .light ? JameBrand.ink.opacity(0.58) : JameBrand.muted }
     private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
+    private var theme: LauncherTheme { launcherThemePreference(from: savedTheme).resolved(for: colorScheme) }
+    private var accent: Color { launcherAccentPreference(from: savedAccent, theme: theme) }
 
     var body: some View {
         ScrollView {
@@ -680,7 +1107,7 @@ private struct DesktopSidebar: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 0) {
                             Text("JameClaw").foregroundStyle(primary)
-                            Text(".").foregroundStyle(JameBrand.orange)
+                            Text(".").foregroundStyle(accent)
                         }
                         .font(.system(.headline, design: .rounded).weight(.semibold))
                         Label("Local agent", systemImage: "checkmark.circle.fill")
@@ -690,6 +1117,16 @@ private struct DesktopSidebar: View {
                     }
                     Spacer()
                 }
+                JamePresenceCard(
+                    isWorking: isAgentWorking,
+                    status: agentStatus,
+                    conversationCount: conversationCount,
+                    accent: accent,
+                    panel: panel,
+                    primary: primary,
+                    muted: muted,
+                    rule: rule
+                )
                 Button(action: openCommandPalette) {
                     HStack(spacing: 7) {
                         Image(systemName: "magnifyingglass")
@@ -711,7 +1148,7 @@ private struct DesktopSidebar: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 7) {
-                Circle().fill(JameBrand.orange).frame(width: 7, height: 7)
+                Circle().fill(accent).frame(width: 7, height: 7)
                 Text("Ready on this Mac")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -722,26 +1159,127 @@ private struct DesktopSidebar: View {
             .background(background.opacity(0.97))
         }
         .navigationTitle("")
+        .onAppear { sessionsGlow = isAgentWorking }
+        .onChange(of: isAgentWorking) { _, working in
+            sessionsGlow = working
+        }
     }
 
     private func navigationButton(_ section: DesktopSection) -> some View {
-        Button {
+        let showWorkingGlow = isAgentWorking && selectedSection != .chat && section == .sessions
+        return Button {
             selectedSection = section
         } label: {
-            DesktopNavigationRow(section: section)
+            DesktopNavigationRow(section: section, accent: accent, isWorking: showWorkingGlow)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .foregroundStyle(primary)
-                .background(selectedSection == section ? panel : Color.clear)
+                .background(
+                    selectedSection == section
+                        ? panel
+                        : showWorkingGlow ? accent.opacity(sessionsGlow ? 0.22 : 0.08) : Color.clear
+                )
                 .overlay(alignment: .leading) {
                     if selectedSection == section {
-                        Rectangle().fill(JameBrand.orange).frame(width: 3)
+                        Rectangle().fill(accent).frame(width: 3)
                     }
                 }
+                .overlay {
+                    if showWorkingGlow {
+                        Rectangle()
+                            .stroke(accent.opacity(sessionsGlow ? 0.95 : 0.36), lineWidth: sessionsGlow ? 1.7 : 1)
+                    }
+                }
+                .shadow(
+                    color: showWorkingGlow ? accent.opacity(sessionsGlow ? 0.76 : 0.20) : .clear,
+                    radius: showWorkingGlow ? (sessionsGlow ? 11 : 3) : 0
+                )
+                .scaleEffect(showWorkingGlow && sessionsGlow ? 1.012 : 1)
+                .animation(
+                    showWorkingGlow
+                        ? .easeInOut(duration: 0.72).repeatForever(autoreverses: true)
+                        : .easeOut(duration: 0.18),
+                    value: sessionsGlow
+                )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(
+            showWorkingGlow
+                ? "Sessions — Jame is still working in Chat"
+                : section.title
+        )
+        .help(showWorkingGlow ? "Jame is still working. Open Sessions or return to Chat." : section.title)
+    }
+}
+
+private struct JamePresenceCard: View {
+    let isWorking: Bool
+    let status: String
+    let conversationCount: Int
+    let accent: Color
+    let panel: Color
+    let primary: Color
+    let muted: Color
+    let rule: Color
+
+    private var workspaceName: String {
+        let name = jameTaskFolderURL().lastPathComponent
+        return name.isEmpty ? "JameClaw workspace" : name
+    }
+
+    private var activityLabel: String {
+        if isWorking { return "Jame is working" }
+        if status.localizedCaseInsensitiveContains("connect") || status.localizedCaseInsensitiveContains("start") {
+            return "Jame is waking up"
+        }
+        return "Jame is here"
+    }
+
+    private var focusLabel: String {
+        if isWorking { return "Following the current task in Chat" }
+        if conversationCount > 0 { return "Your last conversation is ready to continue" }
+        return "Ready for a new direction" 
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                Circle().stroke(accent.opacity(0.28), lineWidth: 5)
+                Circle().fill(isWorking ? accent : primary.opacity(0.86)).frame(width: 7, height: 7)
+            }
+            .frame(width: 26, height: 26)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(activityLabel.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .tracking(0.7)
+                    .foregroundStyle(accent)
+                Text(focusLabel)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 5) {
+                    Image(systemName: "folder.fill")
+                    Text(workspaceName)
+                    if conversationCount > 0 {
+                        Text("·")
+                        Text("\(conversationCount) open")
+                    }
+                }
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(muted)
+                .lineLimit(1)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(panel, in: Rectangle())
+        .overlay(alignment: .leading) { Rectangle().fill(accent).frame(width: 3) }
+        .overlay(Rectangle().stroke(rule, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(activityLabel). \(focusLabel). Workspace: \(workspaceName).")
     }
 }
 
@@ -844,15 +1382,26 @@ private struct DesktopNavigationHeader: View {
 
 private struct DesktopNavigationRow: View {
     let section: DesktopSection
+    let accent: Color
+    let isWorking: Bool
 
     var body: some View {
-        Label {
-            Text(section.title).font(.system(.body, design: .rounded).weight(.medium))
-        } icon: {
-            Image(systemName: section.symbol)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(section.tint)
-                .frame(width: 18)
+        HStack(spacing: 8) {
+            Label {
+                Text(section.title).font(.system(.body, design: .rounded).weight(.medium))
+            } icon: {
+                Image(systemName: section.symbol)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(accent)
+                    .frame(width: 18)
+            }
+            Spacer(minLength: 4)
+            if isWorking {
+                Text("...")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -1700,10 +2249,12 @@ private struct SessionsView: View {
                         .overlay(Rectangle().stroke(rule))
 
                         HStack {
-                            Picker("Conversation source", selection: $store.selectedSource) {
-                                ForEach(store.sources, id: \.self) { source in Text(source).tag(source) }
-                            }
-                            .labelsHidden().pickerStyle(.menu).frame(maxWidth: 150)
+                            JameDropdownPicker(
+                                label: "Conversation source",
+                                options: store.sources.map { (label: $0, value: $0) },
+                                selection: $store.selectedSource,
+                                minWidth: 158
+                            )
 
                             Spacer()
                             Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
@@ -2559,9 +3110,15 @@ private struct ArtifactWebView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {}
 }
 
+private enum ProviderSetupPurpose {
+    case primary
+    case fallback
+}
+
 private struct ProviderSetupSheet: View {
     let port: Int
     @ObservedObject var providers: NativeProviderStore
+    let purpose: ProviderSetupPurpose
     let done: () -> Void
     @State private var step: Step = .configure
     @State private var providerID = ""
@@ -2574,10 +3131,14 @@ private struct ProviderSetupSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(step == .configure ? "Add AI provider" : "Set global fallback provider")
+                    Text(step == .configure
+                         ? (purpose == .primary ? "Add new AI provider" : "Add fallback provider")
+                         : "Set global fallback provider")
                         .font(.title3.weight(.semibold))
                     Text(step == .configure
-                         ? "Configure a second provider, then choose it as JameClaw's fallback."
+                         ? (purpose == .primary
+                            ? "Connect a completely new provider and make it JameClaw's primary AI provider."
+                            : "Configure a second provider, then choose it as JameClaw's fallback.")
                          : "This fallback is saved globally for Desktop, Web Console, agents, and channels.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -2594,7 +3155,10 @@ private struct ProviderSetupSheet: View {
                     providerID: $providerID,
                     presetID: $presetID,
                     apiKey: $apiKey,
-                    continueToFallback: { step = .select }
+                    setAsPrimary: purpose == .primary,
+                    completed: {
+                        if purpose == .primary { done() } else { step = .select }
+                    }
                 )
             } else {
                 GlobalFallbackSelection(providers: providers, port: port, configureAgain: { step = .configure }, done: done)
@@ -2610,13 +3174,20 @@ private struct NativeProviderSetupForm: View {
     @Binding var providerID: String
     @Binding var presetID: String
     @Binding var apiKey: String
-    let continueToFallback: () -> Void
+    let setAsPrimary: Bool
+    let completed: () -> Void
+    @State private var discoveredModels: [NativeDiscoveredProviderModel] = []
+    @State private var isDiscoveringModels = false
 
     private var selectedProvider: NativeProviderInfo? {
         providers.catalog.first(where: { $0.id == providerID })
     }
     private var presets: [NativeProviderModelPreset] { selectedProvider?.recommendedModels ?? [] }
     private var selectedPreset: NativeProviderModelPreset? { presets.first(where: { $0.id == presetID }) }
+    private var selectedRemoteModel: NativeDiscoveredProviderModel? {
+        guard presetID.hasPrefix("remote:") else { return nil }
+        return discoveredModels.first(where: { $0.id == String(presetID.dropFirst("remote:".count)) })
+    }
     private var requiresKey: Bool { selectedPreset?.requiresAPIKey ?? selectedProvider?.requiresAPIKey ?? false }
 
     var body: some View {
@@ -2639,11 +3210,19 @@ private struct NativeProviderSetupForm: View {
                     .onChange(of: providerID) { _, _ in
                         presetID = presets.first?.id ?? ""
                         apiKey = ""
+                        discoveredModels = []
                     }
                     Picker("Model", selection: $presetID) {
                         Text("Choose a model").tag("")
                         ForEach(presets) { preset in
                             Text(preset.name).tag(preset.id)
+                        }
+                        if !discoveredModels.isEmpty {
+                            Section("Available from this API") {
+                                ForEach(discoveredModels) { model in
+                                    Text(model.name).tag("remote:\(model.id)")
+                                }
+                            }
                         }
                     }
                     if let provider = selectedProvider {
@@ -2656,17 +3235,33 @@ private struct NativeProviderSetupForm: View {
                 .formStyle(.grouped)
                 HStack {
                     Button("Refresh providers") { Task { await providers.load(port: port) } }
-                    Spacer()
-                    Button("Add provider") {
-                        guard let provider = selectedProvider, let preset = selectedPreset else { return }
+                    Button(isDiscoveringModels ? "Fetching models…" : "Fetch available models") {
+                        guard let provider = selectedProvider else { return }
                         Task {
-                            if await providers.addCatalogModel(provider: provider, preset: preset, apiKey: apiKey, port: port) {
-                                continueToFallback()
+                            isDiscoveringModels = true
+                            discoveredModels = await providers.discoverCatalogModels(provider: provider, apiKey: apiKey, port: port)
+                            isDiscoveringModels = false
+                        }
+                    }
+                    .disabled(selectedProvider == nil || isDiscoveringModels)
+                    Spacer()
+                    Button(setAsPrimary ? "Add and use as primary" : "Add provider") {
+                        guard let provider = selectedProvider, selectedPreset != nil || selectedRemoteModel != nil else { return }
+                        Task {
+                            if await providers.addCatalogModel(
+                                provider: provider,
+                                preset: selectedPreset,
+                                remoteModelID: selectedRemoteModel?.id,
+                                apiKey: apiKey,
+                                setAsPrimary: setAsPrimary,
+                                port: port
+                            ) {
+                                completed()
                             }
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedProvider == nil || selectedPreset == nil || (requiresKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                    .disabled(selectedProvider == nil || (selectedPreset == nil && selectedRemoteModel == nil) || (requiresKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                 }
             }
             if !providers.status.isEmpty { Text(providers.status).font(.caption).foregroundStyle(.secondary) }
@@ -3483,19 +4078,101 @@ private struct NativeCreateAgentRequest: Encodable {
 private struct NativeCreateAgentHuman: Encodable {
     let agentName: String
     let persona: String
+    let memoryNotes: String
 
     enum CodingKeys: String, CodingKey {
         case agentName = "agent_name"
         case persona
+        case memoryNotes = "memory_notes"
     }
 }
 
 private struct NativeLocalAgent: Identifiable {
     let preset: TeamAgentPreset
     let location: String
+    let runtimeProvider: String?
+    let runtimeModel: String?
 
     var id: String { preset.id }
     var title: String { preset.title }
+}
+
+private struct NativeLocalAgentRuntime {
+    let provider: String
+    let model: String
+}
+
+private func agentIdentitySymbol(_ agent: NativeAgentSummary) -> String {
+    if agent.id == "main" { return "sparkles" }
+    if let preset = TeamAgentPreset(rawValue: agent.id) { return preset.symbol }
+    let symbols = [
+        "scope", "lightbulb.fill", "hammer.fill", "magnifyingglass",
+        "chart.bar.fill", "shield.fill", "paperplane.fill", "terminal.fill",
+        "book.closed.fill", "puzzlepiece.extension.fill", "wand.and.stars", "gearshape.2.fill",
+    ]
+    let stableIndex = agent.id.utf8.reduce(0) { (result, byte) in
+        (result &* 31 &+ Int(byte)) % symbols.count
+    }
+    return symbols[stableIndex]
+}
+
+private func unquotedYAMLValue(_ rawValue: Substring) -> String {
+    var value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let commentIndex = value.firstIndex(of: "#") {
+        value = String(value[..<commentIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if value.count >= 2,
+       let first = value.first,
+       let last = value.last,
+       (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+        value.removeFirst()
+        value.removeLast()
+    }
+    return value
+}
+
+private func hermesRuntimeMetadata() -> NativeLocalAgentRuntime {
+    // Hermes is a separate local runtime. Never infer its provider from
+    // JameClaw's default model; read Hermes' own non-secret model metadata.
+    let fallback = NativeLocalAgentRuntime(provider: "Nous Research", model: "")
+    let configURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".hermes/config.yaml")
+    guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else {
+        return fallback
+    }
+
+    var insideModelSection = false
+    var provider = ""
+    var model = ""
+    for rawLine in contents.split(whereSeparator: \.isNewline) {
+        let line = String(rawLine)
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+        let isTopLevel = line.first.map { !$0.isWhitespace } ?? true
+        if isTopLevel {
+            insideModelSection = trimmed == "model:"
+            continue
+        }
+        guard insideModelSection,
+              let separator = trimmed.firstIndex(of: ":") else { continue }
+        let key = trimmed[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = unquotedYAMLValue(trimmed[trimmed.index(after: separator)...])
+        switch key {
+        case "provider": provider = value
+        case "default": model = value
+        default: break
+        }
+    }
+
+    let providerName: String
+    switch provider.lowercased() {
+    case "nous": providerName = "Nous Research"
+    case "openrouter": providerName = "OpenRouter"
+    case "openai": providerName = "OpenAI"
+    case "anthropic": providerName = "Anthropic"
+    default: providerName = provider.isEmpty ? fallback.provider : provider
+    }
+    return NativeLocalAgentRuntime(provider: providerName, model: model)
 }
 
 private func detectedLocalAgents() -> [NativeLocalAgent] {
@@ -3537,15 +4214,26 @@ private func detectedLocalAgents() -> [NativeLocalAgent] {
     ]
 
     return candidates.compactMap { preset, commands, applications in
+        let runtime = preset == .hermes ? hermesRuntimeMetadata() : nil
         if let commandPath = commands.lazy.compactMap({ command in
             executableDirectories
                 .map { $0.appendingPathComponent(command).path }
                 .first(where: { fileManager.isExecutableFile(atPath: $0) })
         }).first {
-            return NativeLocalAgent(preset: preset, location: commandPath)
+            return NativeLocalAgent(
+                preset: preset,
+                location: commandPath,
+                runtimeProvider: runtime?.provider,
+                runtimeModel: runtime?.model
+            )
         }
         if let appPath = discoveredMacApp(named: applications, in: applicationDirectories, fileManager: fileManager) {
-            return NativeLocalAgent(preset: preset, location: appPath)
+            return NativeLocalAgent(
+                preset: preset,
+                location: appPath,
+                runtimeProvider: runtime?.provider,
+                runtimeModel: runtime?.model
+            )
         }
         return nil
     }
@@ -3628,7 +4316,7 @@ private final class NativeAgentStore: ObservableObject {
         }
     }
 
-    func createAgent(id: String, name: String, workspace: String, persona: String, parentID: String?, managedByMain: Bool) async -> Bool {
+    func createAgent(id: String, name: String, workspace: String, persona: String, memoryNotes: String, parentID: String?, managedByMain: Bool) async -> Bool {
         let cleanID = id.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanID.isEmpty else {
@@ -3648,7 +4336,11 @@ private final class NativeAgentStore: ObservableObject {
                     workspace: workspace.trimmingCharacters(in: .whitespacesAndNewlines),
                     managedByMain: managedByMain,
                     parentID: parentID,
-                    human: NativeCreateAgentHuman(agentName: cleanName.isEmpty ? cleanID : cleanName, persona: persona.trimmingCharacters(in: .whitespacesAndNewlines))
+                    human: NativeCreateAgentHuman(
+                        agentName: cleanName.isEmpty ? cleanID : cleanName,
+                        persona: persona.trimmingCharacters(in: .whitespacesAndNewlines),
+                        memoryNotes: memoryNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
                 )
             )
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -3740,8 +4432,10 @@ private struct AgentManagerView: View {
                 } else {
                     List(store.agents, selection: $selectedID) { agent in
                         HStack(spacing: 10) {
-                            Image(systemName: agent.isDefault ? "star.fill" : "sparkles")
-                                .foregroundStyle(agent.isDefault ? .yellow : .blue)
+                            Image(systemName: agentIdentitySymbol(agent))
+                                .foregroundStyle(agent.id == "main" ? JameBrand.orange : .blue)
+                                .frame(width: 18)
+                                .accessibilityLabel(agent.id == "main" ? "JameClaw icon" : "Unique \(agent.name.isEmpty ? agent.id : agent.name) icon")
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(agent.name.isEmpty ? agent.id : agent.name).font(.headline)
                                 Text(agent.id).font(.caption.monospaced()).foregroundStyle(.secondary)
@@ -3790,6 +4484,9 @@ private struct AgentManagerView: View {
         .task {
             await store.load()
             if selectedID.isEmpty { selectedID = store.agents.first?.id ?? "" }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawTeamGrid)) { _ in
+            showingTeamGrid = true
         }
         .sheet(isPresented: $showingCreate) {
             CreateAgentView(mode: creationMode, parent: selected, store: store) { newID in
@@ -3887,6 +4584,59 @@ private struct TeamGridActivityResponse: Codable {
     let sources: [TeamGridInformationSource]
 }
 
+private struct TeamGridPermissionConfig: Codable {
+    let agents: TeamGridPermissionAgents
+    let tools: TeamGridPermissionTools
+}
+
+private struct TeamGridPermissionAgents: Codable {
+    let defaults: TeamGridPermissionDefaults
+}
+
+private struct TeamGridPermissionDefaults: Codable {
+    let workspace: String
+    let restrictToWorkspace: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case workspace
+        case restrictToWorkspace = "restrict_to_workspace"
+    }
+}
+
+private struct TeamGridPermissionTools: Codable {
+    let allowWritePaths: [String]
+    let writeFile: TeamGridToolPermission?
+    let editFile: TeamGridToolPermission?
+    let appendFile: TeamGridToolPermission?
+
+    enum CodingKeys: String, CodingKey {
+        case allowWritePaths = "allow_write_paths"
+        case writeFile = "write_file"
+        case editFile = "edit_file"
+        case appendFile = "append_file"
+    }
+}
+
+private struct TeamGridToolPermission: Codable {
+    let enabled: Bool
+}
+
+private struct TeamGridArtifactList: Codable {
+    let items: [TeamGridArtifact]
+}
+
+private struct TeamGridArtifact: Codable, Identifiable {
+    let id: String
+    let name: String
+    let kind: String
+    let updatedAtMS: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, kind
+        case updatedAtMS = "updated_at_ms"
+    }
+}
+
 private struct TeamGridFileAccess: Codable, Identifiable {
     let path: String
     let accesses: Int
@@ -3943,6 +4693,7 @@ private struct TeamOperationsGoal: Codable, Identifiable {
 private struct TeamOperationsTask: Codable, Identifiable {
     let id: String
     let goalID: String
+    let kind: String?
     let title: String
     let description: String?
     let ownerAgentID: String?
@@ -3957,7 +4708,7 @@ private struct TeamOperationsTask: Codable, Identifiable {
     let blockedReason: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, status, result, verification
+        case id, kind, title, description, status, result, verification
         case goalID = "goal_id"
         case ownerAgentID = "owner_agent_id"
         case dependsOn = "depends_on"
@@ -3967,6 +4718,8 @@ private struct TeamOperationsTask: Codable, Identifiable {
         case tokenBudget = "token_budget"
         case blockedReason = "blocked_reason"
     }
+
+    var nodeKind: String { kind == "loop" ? "loop" : "task" }
 }
 
 private struct TeamOperationsSnapshot: Codable {
@@ -4006,6 +4759,8 @@ private final class TeamGridActivityStore: ObservableObject {
     @Published var sources: [TeamGridInformationSource] = []
     @Published var initiative: TeamGridInitiativeResponse?
     @Published var operations = TeamOperationsSnapshot.empty
+    @Published var permissions: TeamGridPermissionConfig?
+    @Published var artifacts: [TeamGridArtifact] = []
     @Published var error = ""
     @Published var operationsStatus = ""
 
@@ -4024,14 +4779,24 @@ private final class TeamGridActivityStore: ObservableObject {
             async let operationsResponse: (Data, URLResponse) = URLSession.shared.data(
                 for: authenticatedConsoleRequest(port: port, path: "/api/agents/team-operations")
             )
+            async let permissionResponse: (Data, URLResponse) = URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/config")
+            )
+            async let artifactResponse: (Data, URLResponse) = URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/artifacts")
+            )
             let (serverData, serverHTTP) = try await serverResponse
             let (activityData, activityHTTP) = try await activityResponse
             let (initiativeData, initiativeHTTP) = try await initiativeResponse
             let (operationsData, operationsHTTP) = try await operationsResponse
+            let (permissionData, permissionHTTP) = try await permissionResponse
+            let (artifactData, artifactHTTP) = try await artifactResponse
             guard let serverHTTP = serverHTTP as? HTTPURLResponse, (200..<300).contains(serverHTTP.statusCode),
                   let activityHTTP = activityHTTP as? HTTPURLResponse, (200..<300).contains(activityHTTP.statusCode),
                   let initiativeHTTP = initiativeHTTP as? HTTPURLResponse, (200..<300).contains(initiativeHTTP.statusCode),
-                  let operationsHTTP = operationsHTTP as? HTTPURLResponse, (200..<300).contains(operationsHTTP.statusCode) else {
+                  let operationsHTTP = operationsHTTP as? HTTPURLResponse, (200..<300).contains(operationsHTTP.statusCode),
+                  let permissionHTTP = permissionHTTP as? HTTPURLResponse, (200..<300).contains(permissionHTTP.statusCode),
+                  let artifactHTTP = artifactHTTP as? HTTPURLResponse, (200..<300).contains(artifactHTTP.statusCode) else {
                 throw NSError(domain: "JameClaw", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not load team-grid activity."])
             }
             servers = try JSONDecoder().decode(MCPServerList.self, from: serverData).servers
@@ -4040,6 +4805,8 @@ private final class TeamGridActivityStore: ObservableObject {
             sources = activity.sources
             initiative = try JSONDecoder().decode(TeamGridInitiativeResponse.self, from: initiativeData)
             operations = try JSONDecoder().decode(TeamOperationsSnapshot.self, from: operationsData)
+            permissions = try JSONDecoder().decode(TeamGridPermissionConfig.self, from: permissionData)
+            artifacts = try JSONDecoder().decode(TeamGridArtifactList.self, from: artifactData).items
         } catch {
             self.error = error.localizedDescription
         }
@@ -4057,6 +4824,7 @@ private final class TeamGridActivityStore: ObservableObject {
 
     func createTask(
         port: Int,
+        kind: String,
         title: String,
         description: String,
         ownerAgentID: String,
@@ -4071,6 +4839,7 @@ private final class TeamGridActivityStore: ObservableObject {
             path: "/api/agents/team-operations/tasks",
             method: "POST",
             payload: [
+                "kind": kind,
                 "title": title,
                 "description": description,
                 "owner_agent_id": ownerAgentID,
@@ -4080,13 +4849,14 @@ private final class TeamGridActivityStore: ObservableObject {
                 "time_budget_minutes": timeBudgetMinutes,
                 "token_budget": tokenBudget,
             ],
-            success: "Team task created."
+            success: kind == "loop" ? "Loop node created. The next step is gated until it is verified." : "Team task created."
         )
     }
 
     func updateTask(
         port: Int,
         task: TeamOperationsTask,
+        kind: String,
         title: String,
         description: String,
         ownerAgentID: String,
@@ -4101,6 +4871,7 @@ private final class TeamGridActivityStore: ObservableObject {
             path: "/api/agents/team-operations/tasks/\(task.id)",
             method: "PATCH",
             payload: [
+                "kind": kind,
                 "title": title,
                 "description": description,
                 "owner_agent_id": ownerAgentID,
@@ -4158,13 +4929,17 @@ private struct TeamGridView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var activity = TeamGridActivityStore()
+    @StateObject private var providers = NativeProviderStore()
     @State private var selectedAgentID = "main"
     @State private var showingCreate = false
     @State private var creationMode: AgentCreationMode = .subagent
     @State private var showingGoalEditor = false
     @State private var showingTaskEditor = false
     @State private var editingTask: TeamOperationsTask?
+    @State private var preferredTaskOwnerID = ""
+    @State private var preferredNodeKind = "task"
     @State private var taskActionRequest: TeamTaskActionRequest?
+    @AppStorage("launcher.teamGrid.zoom") private var gridZoom = 1.0
 
     private var agents: [NativeAgentSummary] { store.agents }
 
@@ -4180,6 +4955,76 @@ private struct TeamGridView: View {
     }
     private var independentTeam: [NativeAgentSummary] {
         agents.filter { $0.id != "main" && !spawnedIDs.contains($0.id) }
+    }
+
+    private func modelLabel(for agent: NativeAgentSummary) -> String {
+        let identities = [agent.id, agent.name, agent.human?.agentName ?? ""]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        if identities.contains("hermes") {
+            // Hermes is an external Nous runtime. A missing JameClaw override
+            // does not mean it inherited the global Codex CLI model.
+            let runtime = store.localAgents.first(where: { $0.preset == .hermes })
+            let provider = runtime?.runtimeProvider?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let model = runtime?.runtimeModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "\((provider?.isEmpty == false ? provider! : "Nous Research")) · \((model?.isEmpty == false ? model! : "Model not reported"))"
+        }
+        let configuredModel = agent.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelName = configuredModel.isEmpty ? providers.defaultModel : configuredModel
+        guard !modelName.isEmpty else { return "Default model (not reported)" }
+        let inheritedSuffix = configuredModel.isEmpty ? " · inherited" : ""
+        if let model = providers.models.first(where: { $0.modelName == modelName }) {
+            return "\(providers.providerName(for: model)) · \(modelName)\(inheritedSuffix)"
+        }
+        return modelName + inheritedSuffix
+    }
+
+    private func activeTask(for agent: NativeAgentSummary) -> TeamOperationsTask? {
+        let priority = ["working", "review", "planned", "blocked", "paused", "unassigned"]
+        return activity.operations.tasks
+            .filter { $0.ownerAgentID == agent.id && $0.status != "done" }
+            .sorted {
+                (priority.firstIndex(of: $0.status) ?? priority.count)
+                    < (priority.firstIndex(of: $1.status) ?? priority.count)
+            }
+            .first
+    }
+
+    private var delegatableTasks: [TeamOperationsTask] {
+        activity.operations.tasks.filter { !["working", "review", "done"].contains($0.status) }
+    }
+
+    private func delegate(_ task: TeamOperationsTask, to agent: NativeAgentSummary) {
+        Task {
+            _ = await activity.updateTask(
+                port: port,
+                task: task,
+                kind: task.nodeKind,
+                title: task.title,
+                description: task.description ?? "",
+                ownerAgentID: agent.id,
+                dependsOn: task.dependsOn,
+                acceptanceCriteria: task.acceptanceCriteria,
+                fileScopes: task.fileScopes,
+                timeBudgetMinutes: task.timeBudgetMinutes,
+                tokenBudget: Int(task.tokenBudget)
+            )
+        }
+    }
+
+    private func createTask(for agent: NativeAgentSummary) {
+        selectedAgentID = agent.id
+        preferredTaskOwnerID = agent.id
+        preferredNodeKind = "task"
+        editingTask = nil
+        showingTaskEditor = true
+    }
+
+    private func createLoop(for agent: NativeAgentSummary? = nil) {
+        if let agent { selectedAgentID = agent.id }
+        preferredTaskOwnerID = agent?.id ?? ""
+        preferredNodeKind = "loop"
+        editingTask = nil
+        showingTaskEditor = true
     }
 
     var body: some View {
@@ -4198,13 +5043,40 @@ private struct TeamGridView: View {
                     HStack(spacing: 8) {
                         Button { Task { await refreshGrid() } } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.bordered).help("Refresh agents and activity")
+                        HStack(spacing: 4) {
+                            Button {
+                                gridZoom = max(0.6, ((gridZoom - 0.1) * 10).rounded() / 10)
+                            } label: {
+                                Image(systemName: "minus")
+                            }
+                            .disabled(gridZoom <= 0.6)
+                            .help("Minimize Team Grid")
+                            Text("\(Int((gridZoom * 100).rounded()))%")
+                                .font(.caption.monospaced().weight(.semibold))
+                                .frame(width: 42)
+                            Button {
+                                gridZoom = min(1.4, ((gridZoom + 0.1) * 10).rounded() / 10)
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                            .disabled(gridZoom >= 1.4)
+                            .help("Enlarge Team Grid")
+                        }
+                        .buttonStyle(.bordered)
                         Button(activity.operations.goal == nil ? "Set team goal" : "Edit goal") {
                             showingGoalEditor = true
                         }
                         .buttonStyle(.bordered)
                         Button("Add task") {
+                            preferredTaskOwnerID = ""
+                            preferredNodeKind = "task"
                             editingTask = nil
                             showingTaskEditor = true
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(activity.operations.goal == nil)
+                        Button("Add loop", systemImage: "repeat") {
+                            createLoop()
                         }
                         .buttonStyle(.bordered)
                         .disabled(activity.operations.goal == nil)
@@ -4228,12 +5100,14 @@ private struct TeamGridView: View {
 
             HStack(spacing: 0) {
                 ScrollView([.horizontal, .vertical]) {
+                    TeamGridZoomContainer(scale: gridZoom) {
                     VStack(spacing: 28) {
                         TeamOperationsBoard(
                             snapshot: activity.operations,
                             agents: agents,
                             editTask: { task in
                                 editingTask = task
+                                preferredNodeKind = task.nodeKind
                                 showingTaskEditor = true
                             },
                             act: { task, action in
@@ -4259,6 +5133,12 @@ private struct TeamGridView: View {
                                 agentsByID: agentsByID,
                                 visited: [],
                                 selectedAgentID: selectedAgentID,
+                                modelLabel: modelLabel,
+                                activeTask: activeTask,
+                                delegatableTasks: delegatableTasks,
+                                delegateTask: delegate,
+                                createTask: createTask,
+                                createLoop: { createLoop(for: $0) },
                                 select: { selectedAgentID = $0 }
                             )
                         } else {
@@ -4278,12 +5158,25 @@ private struct TeamGridView: View {
                                             agent: agent,
                                             kind: .team,
                                             isSelected: selectedAgentID == agent.id,
+                                            modelLabel: modelLabel(for: agent),
+                                            activeTask: activeTask(for: agent),
+                                            delegatableTasks: delegatableTasks,
+                                            delegateTask: { delegate($0, to: agent) },
+                                            createTask: { createTask(for: agent) },
+                                            createLoop: { createLoop(for: agent) },
                                             select: { selectedAgentID = agent.id }
                                         )
                                     }
                                 }
                             }
                             .padding(.top, 8)
+                        }
+
+                        if let permissions = activity.permissions {
+                            TeamGridModificationSection(
+                                permissions: permissions,
+                                artifacts: activity.artifacts
+                            )
                         }
 
                         TeamGridFileSection(files: activity.files)
@@ -4301,6 +5194,7 @@ private struct TeamGridView: View {
                     }
                     .padding(36)
                     .frame(minWidth: 440, minHeight: 400)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -4308,9 +5202,14 @@ private struct TeamGridView: View {
 
                 TeamGridInspector(
                     agent: selectedAgent,
+                    modelLabel: selectedAgent.map(modelLabel) ?? "Model unavailable",
+                    tasks: selectedAgent.map { selected in
+                        activity.operations.tasks.filter { $0.ownerAgentID == selected.id }
+                    } ?? [],
                     sources: activity.sources,
                     files: activity.files,
                     initiative: activity.initiative,
+                    permissions: activity.permissions,
                     spawnSubagent: {
                         creationMode = .subagent
                         showingCreate = true
@@ -4327,7 +5226,7 @@ private struct TeamGridView: View {
         }
         .foregroundStyle(teamPrimary(colorScheme))
         .background(teamPageBackground(colorScheme))
-        .frame(minWidth: 720, minHeight: 500)
+        .frame(minWidth: 1060, idealWidth: 1240, minHeight: 500)
         .task {
             await refreshGrid()
             if agentsByID[selectedAgentID] == nil { selectedAgentID = mainAgent?.id ?? agents.first?.id ?? "" }
@@ -4354,17 +5253,19 @@ private struct TeamGridView: View {
                 task: editingTask,
                 tasks: activity.operations.tasks,
                 agents: agents,
-                save: { title, description, owner, dependencies, criteria, scopes, minutes, tokens in
+                defaultOwnerAgentID: preferredTaskOwnerID,
+                defaultNodeKind: preferredNodeKind,
+                save: { kind, title, description, owner, dependencies, criteria, scopes, minutes, tokens in
                     let saved: Bool
                     if let editingTask {
                         saved = await activity.updateTask(
-                            port: port, task: editingTask, title: title, description: description,
+                            port: port, task: editingTask, kind: kind, title: title, description: description,
                             ownerAgentID: owner, dependsOn: dependencies, acceptanceCriteria: criteria,
                             fileScopes: scopes, timeBudgetMinutes: minutes, tokenBudget: tokens
                         )
                     } else {
                         saved = await activity.createTask(
-                            port: port, title: title, description: description,
+                            port: port, kind: kind, title: title, description: description,
                             ownerAgentID: owner, dependsOn: dependencies, acceptanceCriteria: criteria,
                             fileScopes: scopes, timeBudgetMinutes: minutes, tokenBudget: tokens
                         )
@@ -4382,8 +5283,10 @@ private struct TeamGridView: View {
     }
 
     private func refreshGrid() async {
-        await store.load()
-        await activity.load(port: port)
+        async let agentsLoad: Void = store.load()
+        async let activityLoad: Void = activity.load(port: port)
+        async let providersLoad: Void = providers.load(port: port)
+        _ = await (agentsLoad, activityLoad, providersLoad)
     }
 }
 
@@ -4441,7 +5344,7 @@ private struct TeamOperationsBoard: View {
                             .foregroundStyle(JameBrand.orange)
                         Text("Lead · \(agentNames[goal.leadAgentID] ?? goal.leadAgentID)")
                             .font(.caption.weight(.semibold)).foregroundStyle(primary)
-                        Text("\(snapshot.tasks.filter { $0.status == "done" }.count)/\(snapshot.tasks.count) tasks verified")
+                        Text("\(snapshot.tasks.filter { $0.status == "done" }.count)/\(snapshot.tasks.count) nodes verified")
                             .font(.caption2).foregroundStyle(muted)
                     }
                 }
@@ -4496,6 +5399,12 @@ private struct TeamTaskLane: View {
             } else {
                 ForEach(tasks) { task in
                     VStack(alignment: .leading, spacing: 7) {
+                        if task.nodeKind == "loop" {
+                            Label("LOOP GATE", systemImage: "repeat")
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .tracking(0.7)
+                                .foregroundStyle(JameBrand.orange)
+                        }
                         Text(task.title).font(.subheadline.weight(.semibold)).foregroundStyle(primary).lineLimit(2)
                         Label(agentNames[task.ownerAgentID ?? ""] ?? "Unassigned", systemImage: "person.fill")
                             .font(.caption2).foregroundStyle(muted)
@@ -4538,9 +5447,9 @@ private struct TeamTaskLane: View {
             case "unassigned":
                 Button("Assign") { editTask(task) }
             case "planned", "blocked", "paused":
-                Button("Start") { act(task, "start") }
+                Button(task.nodeKind == "loop" ? "Run loop" : "Start") { act(task, "start") }
             case "working":
-                Button("Review") { act(task, "submit_review") }
+                Button(task.nodeKind == "loop" ? "Review loop" : "Review") { act(task, "submit_review") }
             case "review":
                 Button("Verify") { act(task, "complete") }
             case "done":
@@ -4611,10 +5520,11 @@ private struct TeamTaskEditor: View {
     let task: TeamOperationsTask?
     let tasks: [TeamOperationsTask]
     let agents: [NativeAgentSummary]
-    let save: (String, String, String, [String], [String], [String], Int, Int) async -> Void
+    let save: (String, String, String, String, [String], [String], [String], Int, Int) async -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var taskDescription: String
+    @State private var nodeKind: String
     @State private var ownerAgentID: String
     @State private var dependencyIDs: Set<String>
     @State private var criteriaText: String
@@ -4623,14 +5533,22 @@ private struct TeamTaskEditor: View {
     @State private var tokenBudget: Int
     @State private var saving = false
 
-    init(task: TeamOperationsTask?, tasks: [TeamOperationsTask], agents: [NativeAgentSummary], save: @escaping (String, String, String, [String], [String], [String], Int, Int) async -> Void) {
+    init(
+        task: TeamOperationsTask?,
+        tasks: [TeamOperationsTask],
+        agents: [NativeAgentSummary],
+        defaultOwnerAgentID: String = "",
+        defaultNodeKind: String = "task",
+        save: @escaping (String, String, String, String, [String], [String], [String], Int, Int) async -> Void
+    ) {
         self.task = task
         self.tasks = tasks
         self.agents = agents
         self.save = save
         _title = State(initialValue: task?.title ?? "")
         _taskDescription = State(initialValue: task?.description ?? "")
-        _ownerAgentID = State(initialValue: task?.ownerAgentID ?? "")
+        _nodeKind = State(initialValue: task?.nodeKind ?? defaultNodeKind)
+        _ownerAgentID = State(initialValue: task?.ownerAgentID ?? defaultOwnerAgentID)
         _dependencyIDs = State(initialValue: Set(task?.dependsOn ?? []))
         _criteriaText = State(initialValue: (task?.acceptanceCriteria ?? []).joined(separator: "\n"))
         _scopesText = State(initialValue: (task?.fileScopes ?? []).joined(separator: "\n"))
@@ -4646,8 +5564,18 @@ private struct TeamTaskEditor: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
-                Text(task == nil ? "Create team task" : "Edit task contract").font(.title2.weight(.semibold))
-                Text("Define one owner, completion evidence, dependencies, scope, and budget before work starts.")
+                HStack {
+                    Text(task == nil ? (nodeKind == "loop" ? "Create loop node" : "Create team task") : "Edit node contract")
+                        .font(.title2.weight(.semibold))
+                    if nodeKind == "loop" {
+                        Label("LOOP", systemImage: "repeat")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(JameBrand.orange)
+                    }
+                }
+                Text(nodeKind == "loop"
+                     ? "This checkpoint repeats until its evidence is verified. Every next node is automatically blocked behind it."
+                     : "Define one owner, completion evidence, dependencies, scope, and budget before work starts.")
                     .font(.caption).foregroundStyle(.secondary)
                 TextField("Task title", text: $title)
                 TextField("Deliverable", text: $taskDescription, axis: .vertical).lineLimit(2...5)
@@ -4675,10 +5603,10 @@ private struct TeamTaskEditor: View {
                 HStack {
                     Spacer()
                     Button("Cancel") { dismiss() }
-                    Button(saving ? "Saving…" : (task == nil ? "Create task" : "Save contract")) {
+                    Button(saving ? "Saving…" : (task == nil ? (nodeKind == "loop" ? "Create loop" : "Create task") : "Save contract")) {
                         saving = true
                         Task {
-                            await save(title, taskDescription, ownerAgentID, Array(dependencyIDs), lines(criteriaText), lines(scopesText), timeBudgetMinutes, tokenBudget)
+                            await save(nodeKind, title, taskDescription, ownerAgentID, Array(dependencyIDs), lines(criteriaText), lines(scopesText), timeBudgetMinutes, tokenBudget)
                             saving = false
                         }
                     }
@@ -4831,11 +5759,45 @@ private struct TeamGridFlowLine: View {
     }
 }
 
+private struct TeamGridContentSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next.width > 0, next.height > 0 { value = next }
+    }
+}
+
+private struct TeamGridZoomContainer<Content: View>: View {
+    let scale: Double
+    @ViewBuilder let content: () -> Content
+    @State private var contentSize = CGSize(width: 440, height: 400)
+
+    var body: some View {
+        content()
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: TeamGridContentSizeKey.self, value: proxy.size)
+                }
+            }
+            .onPreferenceChange(TeamGridContentSizeKey.self) { contentSize = $0 }
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(
+                width: max(1, contentSize.width * scale),
+                height: max(1, contentSize.height * scale),
+                alignment: .topLeading
+            )
+            .animation(.easeInOut(duration: 0.16), value: scale)
+    }
+}
+
 private struct TeamGridInspector: View {
     let agent: NativeAgentSummary?
+    let modelLabel: String
+    let tasks: [TeamOperationsTask]
     let sources: [TeamGridInformationSource]
     let files: [TeamGridFileAccess]
     let initiative: TeamGridInitiativeResponse?
+    let permissions: TeamGridPermissionConfig?
     let spawnSubagent: () -> Void
     let addTeamAgent: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -4873,10 +5835,54 @@ private struct TeamGridInspector: View {
                         Text(agent.human?.persona?.isEmpty == false ? agent.human!.persona! : "No persona configured")
                             .font(.subheadline).foregroundStyle(teamPrimary(colorScheme))
                     }
+                    inspectorSection("Manages") {
+                        Text(agent.human?.memoryNotes?.isEmpty == false ? agent.human!.memoryNotes! : "No management responsibility saved")
+                            .font(.subheadline).foregroundStyle(teamPrimary(colorScheme))
+                    }
                     inspectorSection("Runtime") {
-                        Label(agent.model.isEmpty ? "Inherited default model" : agent.model, systemImage: "cpu")
+                        Label(modelLabel, systemImage: "cpu")
+                            .foregroundStyle(JameBrand.orange)
                         Label(agent.workspace.isEmpty ? "Default workspace" : agent.workspace, systemImage: "folder")
                             .lineLimit(2).truncationMode(.middle)
+                    }
+                    inspectorSection("Modification access") {
+                        if let permissions {
+                            let writeTools = [
+                                permissions.tools.writeFile?.enabled == true ? "create" : nil,
+                                permissions.tools.editFile?.enabled == true ? "edit" : nil,
+                                permissions.tools.appendFile?.enabled == true ? "append" : nil,
+                            ].compactMap { $0 }
+                            Label(
+                                writeTools.isEmpty ? "File modification disabled" : "Can \(writeTools.joined(separator: ", ")) files",
+                                systemImage: writeTools.isEmpty ? "lock.fill" : "pencil.and.outline"
+                            )
+                            if permissions.agents.defaults.restrictToWorkspace {
+                                Label(agent.workspace.isEmpty ? permissions.agents.defaults.workspace : agent.workspace, systemImage: "folder.badge.checkmark")
+                                    .lineLimit(3).truncationMode(.middle)
+                                if !permissions.tools.allowWritePaths.isEmpty {
+                                    Text("Plus \(permissions.tools.allowWritePaths.count) approved external write area\(permissions.tools.allowWritePaths.count == 1 ? "" : "s").")
+                                }
+                            } else {
+                                Label("Workspace restriction is off", systemImage: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(JameBrand.orange)
+                            }
+                        } else {
+                            Text("Modification permissions unavailable.")
+                        }
+                    }
+                    inspectorSection("Delegated tasks") {
+                        if tasks.isEmpty {
+                            Text("No task delegated yet.")
+                                .foregroundStyle(teamMuted(colorScheme))
+                        } else {
+                            ForEach(tasks.prefix(5)) { task in
+                                Label(task.title, systemImage: task.status == "done" ? "checkmark.circle" : "flag.fill")
+                                    .lineLimit(2)
+                                Text(task.status.replacingOccurrences(of: "_", with: " ").uppercased())
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(JameBrand.orange)
+                            }
+                        }
                     }
                     inspectorSection("Skills & delegation") {
                         Text((agent.skills ?? []).isEmpty ? "No dedicated skills" : (agent.skills ?? []).joined(separator: ", "))
@@ -5050,6 +6056,152 @@ private struct TeamGridMCPSection: View {
     }
 }
 
+private struct TeamGridModificationSection: View {
+    let permissions: TeamGridPermissionConfig
+    let artifacts: [TeamGridArtifact]
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var enabledWriteTools: [String] {
+        [
+            permissions.tools.writeFile?.enabled == true ? "CREATE" : nil,
+            permissions.tools.editFile?.enabled == true ? "EDIT" : nil,
+            permissions.tools.appendFile?.enabled == true ? "APPEND" : nil,
+        ].compactMap { $0 }
+    }
+
+    private var modificationAreas: [String] {
+        guard permissions.agents.defaults.restrictToWorkspace else {
+            return ["Host filesystem — workspace restriction is off"]
+        }
+        var seen = Set<String>()
+        return ([permissions.agents.defaults.workspace] + permissions.tools.allowWritePaths)
+            .map { NSString(string: $0).expandingTildeInPath }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    private var artifactsPath: String {
+        let workspace = NSString(string: permissions.agents.defaults.workspace).expandingTildeInPath
+        return URL(fileURLWithPath: workspace, isDirectory: true)
+            .appendingPathComponent("artifacts", isDirectory: true).path
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            TeamGridFlowLine(length: 22)
+            VStack(spacing: 3) {
+                Label("What JameClaw can modify", systemImage: "pencil.and.outline")
+                    .font(.headline)
+                    .foregroundStyle(JameBrand.orange)
+                Text("Live workspace restrictions and approved write areas from JameClaw settings.")
+                    .font(.caption)
+                    .foregroundStyle(teamMuted(colorScheme))
+            }
+
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 7) {
+                        Image(systemName: enabledWriteTools.isEmpty ? "lock.fill" : "folder.badge.gearshape")
+                        Text("MODIFICATION ACCESS")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .tracking(0.8)
+                        Spacer()
+                        Text(enabledWriteTools.isEmpty ? "READ ONLY" : "ENABLED")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(JameBrand.orange)
+
+                    if enabledWriteTools.isEmpty {
+                        Text("Create, edit, and append tools are disabled.")
+                            .font(.caption)
+                            .foregroundStyle(teamMuted(colorScheme))
+                    } else {
+                        Text(enabledWriteTools.joined(separator: "  ·  "))
+                            .font(.caption2.monospaced().weight(.semibold))
+                            .foregroundStyle(teamPrimary(colorScheme))
+                    }
+
+                    ForEach(Array(modificationAreas.enumerated()), id: \.offset) { index, path in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(index == 0 ? "PRIMARY WORKSPACE" : "APPROVED WRITE AREA", systemImage: index == 0 ? "internaldrive" : "checkmark.shield.fill")
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .foregroundStyle(JameBrand.orange)
+                            Text(path)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(teamPrimary(colorScheme))
+                                .lineLimit(3)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(teamSurface(colorScheme), in: Rectangle())
+                    }
+                }
+                .padding(15)
+                .frame(width: 390, alignment: .leading)
+                .background(teamPanel(colorScheme), in: Rectangle())
+                .overlay(Rectangle().stroke(JameBrand.orange.opacity(0.45)))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "shippingbox.fill")
+                        Text("ARTIFACTS")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .tracking(0.8)
+                        Spacer()
+                        Text("\(artifacts.count)")
+                            .font(.caption.monospaced().weight(.bold))
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(JameBrand.orange, in: Rectangle())
+                            .foregroundStyle(JameBrand.ink)
+                    }
+                    .foregroundStyle(JameBrand.orange)
+
+                    Text("Apps, websites, and code projects JameClaw can create and edit.")
+                        .font(.caption)
+                        .foregroundStyle(teamMuted(colorScheme))
+                    Text(artifactsPath)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(teamMuted(colorScheme))
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+
+                    if artifacts.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label("No artifacts yet", systemImage: "plus.square.dashed")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Ask JameClaw to build an app, website, or code artifact and it will appear in this box.")
+                                .font(.caption)
+                                .foregroundStyle(teamMuted(colorScheme))
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(teamSurface(colorScheme), in: Rectangle())
+                    } else {
+                        ForEach(artifacts.prefix(5)) { artifact in
+                            HStack(spacing: 9) {
+                                Image(systemName: artifact.kind == "app" ? "macwindow" : "chevron.left.forwardslash.chevron.right")
+                                    .foregroundStyle(JameBrand.orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(artifact.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Text("\(artifact.kind.uppercased()) · \(Date(timeIntervalSince1970: TimeInterval(artifact.updatedAtMS) / 1000).formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption2).foregroundStyle(teamMuted(colorScheme))
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(15)
+                .frame(width: 390, alignment: .leading)
+                .background(teamPanel(colorScheme), in: Rectangle())
+                .overlay(Rectangle().stroke(JameBrand.orange.opacity(0.45)))
+            }
+        }
+        .frame(maxWidth: 820)
+    }
+}
+
 private struct TeamGridFileSection: View {
     let files: [TeamGridFileAccess]
 
@@ -5118,6 +6270,12 @@ private struct AgentTreeBranch: View {
     let agentsByID: [String: NativeAgentSummary]
     let visited: Set<String>
     let selectedAgentID: String
+    let modelLabel: (NativeAgentSummary) -> String
+    let activeTask: (NativeAgentSummary) -> TeamOperationsTask?
+    let delegatableTasks: [TeamOperationsTask]
+    let delegateTask: (TeamOperationsTask, NativeAgentSummary) -> Void
+    let createTask: (NativeAgentSummary) -> Void
+    let createLoop: (NativeAgentSummary) -> Void
     let select: (String) -> Void
 
     private var children: [NativeAgentSummary] {
@@ -5131,6 +6289,12 @@ private struct AgentTreeBranch: View {
                 agent: agent,
                 kind: agent.id == "main" ? .main : .spawned,
                 isSelected: selectedAgentID == agent.id,
+                modelLabel: modelLabel(agent),
+                activeTask: activeTask(agent),
+                delegatableTasks: delegatableTasks,
+                delegateTask: { delegateTask($0, agent) },
+                createTask: { createTask(agent) },
+                createLoop: { createLoop(agent) },
                 select: { select(agent.id) }
             )
             if !children.isEmpty {
@@ -5144,6 +6308,12 @@ private struct AgentTreeBranch: View {
                                 agentsByID: agentsByID,
                                 visited: visited.union([agent.id]),
                                 selectedAgentID: selectedAgentID,
+                                modelLabel: modelLabel,
+                                activeTask: activeTask,
+                                delegatableTasks: delegatableTasks,
+                                delegateTask: delegateTask,
+                                createTask: createTask,
+                                createLoop: createLoop,
                                 select: select
                             )
                         }
@@ -5159,6 +6329,12 @@ private struct TeamGridNode: View {
     let agent: NativeAgentSummary
     let kind: Kind
     let isSelected: Bool
+    let modelLabel: String
+    let activeTask: TeamOperationsTask?
+    let delegatableTasks: [TeamOperationsTask]
+    let delegateTask: (TeamOperationsTask) -> Void
+    let createTask: () -> Void
+    let createLoop: () -> Void
     let select: () -> Void
     @AppStorage("launcher.design.teamGlow") private var teamGlow = true
     @Environment(\.colorScheme) private var colorScheme
@@ -5170,11 +6346,16 @@ private struct TeamGridNode: View {
         }
     }
 
+    private var identitySymbol: String {
+        agentIdentitySymbol(agent)
+    }
+
     var body: some View {
         Button(action: select) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    Image(systemName: kind == .main ? "sparkles" : kind == .team ? "person.3.fill" : "arrow.triangle.branch")
+                    Image(systemName: identitySymbol)
+                        .accessibilityLabel(kind == .main ? "JameClaw icon" : "Unique \(agent.name.isEmpty ? agent.id : agent.name) icon")
                     Text(label).font(.system(size: 9, weight: .semibold, design: .rounded))
                     Spacer()
                     if (agent.messageCount ?? 0) > 0 {
@@ -5186,10 +6367,37 @@ private struct TeamGridNode: View {
                     .font(.headline)
                     .foregroundStyle(isSelected ? JameBrand.ink : teamPrimary(colorScheme))
                     .lineLimit(1)
-                Text(agent.human?.persona?.isEmpty == false ? agent.human!.persona! : agent.model.isEmpty ? "Uses the default model" : agent.model)
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.64) : teamMuted(colorScheme))
-                    .lineLimit(2)
+                if agent.human?.persona?.isEmpty == false {
+                    Text(agent.human!.persona!)
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.64) : teamMuted(colorScheme))
+                        .lineLimit(2)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(modelLabel)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .lineLimit(2)
+                }
+                .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.78) : JameBrand.orange)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
+                .background(
+                    isSelected ? JameBrand.ink.opacity(0.08) : JameBrand.orange.opacity(0.10),
+                    in: Rectangle()
+                )
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Image(systemName: activeTask == nil ? "tray" : activeTask?.nodeKind == "loop" ? "repeat" : "flag.fill")
+                        Text(activeTask == nil ? "NO ACTIVE TASK" : (activeTask?.nodeKind == "loop" ? "LOOP · " : "") + activeTask!.status.uppercased())
+                    }
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    Text(activeTask?.title ?? "Right-click to delegate work")
+                        .font(.caption2.weight(activeTask == nil ? .regular : .semibold))
+                        .lineLimit(2)
+                }
+                .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.72) : teamMuted(colorScheme))
                 HStack(spacing: 8) {
                     Label("\(agent.sessionCount ?? 0)", systemImage: "bubble.left")
                     Label("\(agent.toolCalls ?? 0)", systemImage: "wrench.and.screwdriver")
@@ -5198,7 +6406,7 @@ private struct TeamGridNode: View {
                 .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.64) : teamMuted(colorScheme))
             }
             .padding(14)
-            .frame(width: 205, alignment: .leading)
+            .frame(width: 230, alignment: .leading)
             .background(isSelected ? JameBrand.orange : teamPanel(colorScheme), in: Rectangle())
             .overlay(Rectangle().stroke(JameBrand.orange.opacity(isSelected ? 1 : 0.42), lineWidth: isSelected ? 2 : 1))
             .shadow(
@@ -5207,6 +6415,26 @@ private struct TeamGridNode: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Select agent") { select() }
+            Divider()
+            if delegatableTasks.isEmpty {
+                Button("No planned tasks available") { }
+                    .disabled(true)
+            } else {
+                Menu("Delegate existing task") {
+                    ForEach(delegatableTasks) { task in
+                        Button(task.title) { delegateTask(task) }
+                    }
+                }
+            }
+            Button("Create task for \(agent.name.isEmpty ? agent.id : agent.name)…") {
+                createTask()
+            }
+            Button("Create loop for \(agent.name.isEmpty ? agent.id : agent.name)…", systemImage: "repeat") {
+                createLoop()
+            }
+        }
     }
 }
 
@@ -5255,9 +6483,19 @@ private struct CreateAgentView: View {
     @State private var role = ""
     @State private var task = ""
     @State private var company = ""
+    @State private var manages = ""
+
+    private var cleanManagement: String {
+        manages.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var managementMemory: String {
+        "Manages: \(cleanManagement)\nUse this as the agent's durable ownership boundary when accepting or delegating work."
+    }
 
     private var teamContext: String {
         var lines = ["Role: \(role.trimmingCharacters(in: .whitespacesAndNewlines))"]
+        lines.append("Manages: \(cleanManagement)")
         let cleanTask = task.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanCompany = company.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanTask.isEmpty { lines.append("Task: \(cleanTask)") }
@@ -5339,6 +6577,16 @@ private struct CreateAgentView: View {
             TextField("Agent ID (for example, researcher)", text: $id)
             TextField("Display name", text: $name)
             TextField("Workspace (optional)", text: $workspace)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("What does this agent manage? *")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(JameBrand.orange)
+                TextField("Required — for example, releases, product research, or customer support", text: $manages, axis: .vertical)
+                    .lineLimit(2...4)
+                Text("Saved in this agent's memory and shown in Team Grid.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if mode == .team {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Role *").font(.caption.weight(.semibold)).foregroundStyle(JameBrand.orange)
@@ -5362,6 +6610,7 @@ private struct CreateAgentView: View {
                             name: name,
                             workspace: workspace,
                             persona: mode == .team ? teamContext : role,
+                            memoryNotes: managementMemory,
                             parentID: mode == .subagent ? (parent?.id ?? "main") : nil,
                             managedByMain: mode == .subagent
                         )
@@ -5372,6 +6621,7 @@ private struct CreateAgentView: View {
                 .disabled(
                     store.isCreating
                         || id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || cleanManagement.isEmpty
                         || (mode == .team && role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 )
             }
@@ -5538,6 +6788,21 @@ private struct NativeProviderCatalogResponse: Codable {
     let providers: [NativeProviderInfo]
 }
 
+private struct NativeDiscoveredProviderModel: Codable, Identifiable {
+    let id: String
+    let name: String
+    let ownedBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case ownedBy = "owned_by"
+    }
+}
+
+private struct NativeProviderModelDiscoveryResponse: Codable {
+    let models: [NativeDiscoveredProviderModel]
+}
+
 @MainActor
 private final class NativeProviderStore: ObservableObject {
     @Published var models: [NativeModelInfo] = []
@@ -5590,10 +6855,16 @@ private final class NativeProviderStore: ObservableObject {
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
             }
+            let restart = authenticatedConsoleRequest(port: port, path: "/api/gateway/restart", method: "POST")
+            let (_, restartResponse) = try await URLSession.shared.data(for: restart)
+            guard let http = restartResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
             defaultModel = modelName
-            status = "Chat model updated. New chats will use it."
+            selectedModel = modelName
+            status = "Primary AI provider changed. Gateway restarted."
         } catch {
-            status = "Could not change the chat model."
+            status = "Could not change the primary AI provider."
         }
     }
 
@@ -5632,27 +6903,65 @@ private final class NativeProviderStore: ObservableObject {
         }
     }
 
-    func addCatalogModel(provider: NativeProviderInfo, preset: NativeProviderModelPreset, apiKey: String, port: Int) async -> Bool {
+    func addCatalogModel(
+        provider: NativeProviderInfo,
+        preset: NativeProviderModelPreset?,
+        remoteModelID: String?,
+        apiKey: String,
+        setAsPrimary: Bool,
+        port: Int
+    ) async -> Bool {
         do {
             var request = authenticatedConsoleRequest(port: port, path: "/api/models/from-catalog", method: "POST")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: [
                 "provider_id": provider.id,
-                "preset_id": preset.id,
+                "preset_id": preset?.id ?? "",
+                "remote_model_id": remoteModelID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
                 "api_key": apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
-                "set_default": false,
+                "set_default": setAsPrimary,
             ])
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
             }
+            if setAsPrimary {
+                let restart = authenticatedConsoleRequest(port: port, path: "/api/gateway/restart", method: "POST")
+                let (_, restartResponse) = try await URLSession.shared.data(for: restart)
+                guard let http = restartResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+            }
             await load(port: port)
-            selectedFallbackModel = models.first(where: { $0.modelName != selectedModel && providerNames[$0.modelName] == provider.name })?.modelName ?? selectedFallbackModel
-            status = "Provider added. Choose it as the global fallback."
+            if setAsPrimary {
+                status = "New AI provider connected and set as primary."
+            } else {
+                selectedFallbackModel = models.first(where: { $0.modelName != selectedModel && providerNames[$0.modelName] == provider.name })?.modelName ?? selectedFallbackModel
+                status = "Provider added. Choose it as the global fallback."
+            }
             return true
         } catch {
             status = "Could not add this provider. Check the model and API key."
             return false
+        }
+    }
+
+    func discoverCatalogModels(provider: NativeProviderInfo, apiKey: String, port: Int) async -> [NativeDiscoveredProviderModel] {
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/models/catalog/discover", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "provider_id": provider.id,
+                "api_key": apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            return (try JSONDecoder().decode(NativeProviderModelDiscoveryResponse.self, from: data)).models
+        } catch {
+            status = "Could not fetch models from this API. Check the API key and provider access."
+            return []
         }
     }
 
@@ -5675,10 +6984,120 @@ private final class NativeProviderStore: ObservableObject {
     }
 }
 
+private struct NativeResearchProviderInfo: Codable, Identifiable {
+    let id: String
+    let name: String
+    let description: String
+    let requiresAPIKey: Bool
+    let configured: Bool
+    let enabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, configured, enabled
+        case requiresAPIKey = "requires_api_key"
+    }
+}
+
+private struct NativeResearchProviderResponse: Codable {
+    let providers: [NativeResearchProviderInfo]
+    let activeProvider: String
+
+    enum CodingKeys: String, CodingKey {
+        case providers
+        case activeProvider = "active_provider"
+    }
+}
+
+@MainActor
+private final class NativeResearchProviderStore: ObservableObject {
+    @Published var providers: [NativeResearchProviderInfo] = []
+    @Published var selectedProviderID = ""
+    @Published var activeProviderID = ""
+    @Published var status = ""
+    @Published var isLoading = false
+
+    func load(port: Int, preserveStatus: Bool = false) async {
+        isLoading = true
+        if !preserveStatus { status = "" }
+        defer { isLoading = false }
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                from: authenticatedConsoleURL(port: port, path: "/api/research-providers")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let result = try JSONDecoder().decode(NativeResearchProviderResponse.self, from: data)
+            providers = result.providers
+            activeProviderID = result.activeProvider
+            if selectedProviderID.isEmpty {
+                selectedProviderID = result.activeProvider.isEmpty ? (result.providers.first?.id ?? "") : result.activeProvider
+            }
+        } catch {
+            status = "Could not load research providers."
+        }
+    }
+
+    func connect(apiKey: String, port: Int) async {
+        guard !selectedProviderID.isEmpty else {
+            status = "Choose a research provider."
+            return
+        }
+        await save(providerID: selectedProviderID, apiKey: apiKey, enabled: true, port: port)
+    }
+
+    func disconnect(port: Int) async {
+        guard !activeProviderID.isEmpty else { return }
+        await save(providerID: activeProviderID, apiKey: "", enabled: false, port: port)
+    }
+
+    private func save(providerID: String, apiKey: String, enabled: Bool, port: Int) async {
+        isLoading = true
+        status = enabled ? "Connecting research provider…" : "Disconnecting research provider…"
+        defer { isLoading = false }
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/research-providers/\(providerID)", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "api_key": apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                "enabled": enabled,
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let detail = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                throw NSError(
+                    domain: "JameClawResearch",
+                    code: (response as? HTTPURLResponse)?.statusCode ?? 1,
+                    userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Could not save the research provider."]
+                )
+            }
+
+            var restarted = false
+            let restart = authenticatedConsoleRequest(port: port, path: "/api/gateway/restart", method: "POST")
+            if let restartResponse = try? await URLSession.shared.data(for: restart).1 as? HTTPURLResponse {
+                restarted = (200..<300).contains(restartResponse.statusCode)
+            }
+            await load(port: port, preserveStatus: true)
+            if enabled {
+                status = restarted
+                    ? "Research provider connected and ready."
+                    : "Research provider connected. Restart the gateway to apply it."
+            } else {
+                status = restarted
+                    ? "Research provider disconnected."
+                    : "Research provider disconnected. Restart the gateway to apply it."
+            }
+        } catch {
+            status = error.localizedDescription.isEmpty ? "Could not connect the research provider." : error.localizedDescription
+        }
+    }
+}
+
 struct QuickSettingsView: View {
     @ObservedObject var settings: LauncherSettingsStore
     let openArchivedChats: () -> Void
     @StateObject private var providers = NativeProviderStore()
+    @StateObject private var researchProviders = NativeResearchProviderStore()
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @AppStorage("launcher.design.density") private var savedDensity = ChatDensity.comfortable.rawValue
@@ -5691,10 +7110,40 @@ struct QuickSettingsView: View {
     @AppStorage("jame.notifications.taskCompletion") private var taskCompletionNotifications = true
     @State private var showingBackgroundPicker = false
     @State private var showingProviderSetup = false
+    @State private var providerSetupPurpose = ProviderSetupPurpose.primary
     @State private var allowOpenMacApps = false
     @State private var allowMusicPlaylists = false
     @State private var musicPlaylistStatus = ""
     @State private var documentSafetyStatus = ""
+    @State private var researchAPIKey = ""
+
+    private var selectedResearchProvider: NativeResearchProviderInfo? {
+        researchProviders.providers.first(where: { $0.id == researchProviders.selectedProviderID })
+    }
+
+    private var activeDesignPreset: NativeDesignPreset {
+        NativeDesignPreset.allCases.first(where: { preset in
+            guard let configuration = preset.configuration else { return false }
+            return savedTheme == configuration.theme.rawValue
+                && savedAccent == configuration.accent.rawValue
+                && savedDensity == configuration.density.rawValue
+                && savedSurface == configuration.surface.rawValue
+                && abs(fontScale - configuration.fontScale) < 0.001
+                && abs(windowOpacity - configuration.windowOpacity) < 0.001
+                && teamGlow == configuration.teamGlow
+                && backgroundPath.isEmpty
+        }) ?? .custom
+    }
+
+    private var designPresetSelection: Binding<String> {
+        Binding(
+            get: { activeDesignPreset.rawValue },
+            set: { newValue in
+                guard let preset = NativeDesignPreset(rawValue: newValue) else { return }
+                applyDesignPreset(preset)
+            }
+        )
+    }
 
     var body: some View {
         Form {
@@ -5782,7 +7231,7 @@ struct QuickSettingsView: View {
                     if providers.selectedFallbackModel.isEmpty {
                         HStack(spacing: 10) {
                             Button("Add fallback provider") {
-                                openProviderSetup()
+                                openProviderSetup(.fallback)
                             }
                             .buttonStyle(.bordered)
                             Text("Add another provider or model, then select it here as the fallback.")
@@ -5806,10 +7255,26 @@ struct QuickSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    HStack {
+                        Button("Change primary provider") {
+                            Task {
+                                await providers.setDefaultModel(
+                                    providers.selectedModel,
+                                    port: Int(settings.port) ?? 18800
+                                )
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(providers.selectedModel.isEmpty || providers.selectedModel == providers.defaultModel)
+                        Button("Add new AI provider") {
+                            openProviderSetup(.primary)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
                 if providers.models.isEmpty {
-                    Button("Add provider") {
-                        openProviderSetup()
+                    Button("Add new AI provider") {
+                        openProviderSetup(.primary)
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -5821,6 +7286,83 @@ struct QuickSettingsView: View {
                 }
                 if !providers.status.isEmpty {
                     Text(providers.status).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section("Research Provider") {
+                if researchProviders.providers.isEmpty {
+                    Text(researchProviders.isLoading ? "Loading research providers…" : "No research providers available.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Dedicated research provider", selection: $researchProviders.selectedProviderID) {
+                        ForEach(researchProviders.providers) { provider in
+                            Text(provider.name).tag(provider.id)
+                        }
+                    }
+                    if let selectedResearchProvider {
+                        Text(selectedResearchProvider.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Label(
+                            selectedResearchProvider.enabled
+                                ? "Connected and active"
+                                : selectedResearchProvider.configured ? "Key saved — connect when ready" : "Not connected",
+                            systemImage: selectedResearchProvider.enabled ? "checkmark.circle.fill" : "magnifyingglass.circle"
+                        )
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(selectedResearchProvider.enabled ? Color.green : Color.secondary)
+                        if selectedResearchProvider.requiresAPIKey {
+                            SecureField(
+                                selectedResearchProvider.configured
+                                    ? "API key saved — leave blank to reuse it"
+                                    : "Research provider API key",
+                                text: $researchAPIKey
+                            )
+                            Text("The API key is stored in JameClaw's private security configuration and is never returned to the interface.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("No API key is required for this provider.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Button(selectedResearchProvider.enabled ? "Update connection" : "Connect research provider") {
+                                Task {
+                                    await researchProviders.connect(
+                                        apiKey: researchAPIKey,
+                                        port: Int(settings.port) ?? 18800
+                                    )
+                                    researchAPIKey = ""
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                researchProviders.isLoading
+                                    || (selectedResearchProvider.requiresAPIKey
+                                        && !selectedResearchProvider.configured
+                                        && researchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            )
+                            if !researchProviders.activeProviderID.isEmpty {
+                                Button("Disconnect") {
+                                    Task { await researchProviders.disconnect(port: Int(settings.port) ?? 18800) }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(researchProviders.isLoading)
+                            }
+                            if researchProviders.isLoading { ProgressView().controlSize(.small) }
+                        }
+                    }
+                }
+                Text("Research providers power JameClaw's source-backed web research without changing the primary AI chat provider.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Refresh research providers") {
+                        Task { await researchProviders.load(port: Int(settings.port) ?? 18800) }
+                    }
+                    if !researchProviders.status.isEmpty {
+                        Text(researchProviders.status).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             Section("Desktop app commands") {
@@ -5836,6 +7378,18 @@ struct QuickSettingsView: View {
                 }
             }
             Section("Design") {
+                Picker("Full design theme", selection: designPresetSelection) {
+                    ForEach(NativeDesignPreset.allCases) { preset in
+                        Text(preset.label).tag(preset.rawValue)
+                    }
+                }
+                Text("One selection applies theme, accent, chat spacing, message style, text size, transparency, team glow, and the default background.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Label(activeDesignPreset.detail, systemImage: activeDesignPreset == .custom ? "slider.horizontal.3" : "paintpalette.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tint)
+                Divider()
                 Picker("Theme", selection: $savedTheme) {
                     ForEach(LauncherTheme.allCases) { theme in
                         Text(theme.label).tag(theme.rawValue)
@@ -5899,6 +7453,7 @@ struct QuickSettingsView: View {
             if savedTheme != normalizedTheme { savedTheme = normalizedTheme }
             let port = Int(settings.port) ?? 18800
             await providers.load(port: port)
+            await researchProviders.load(port: port)
             await loadMusicPlaylistPermission(port: port)
         }
         .fileImporter(
@@ -5912,14 +7467,33 @@ struct QuickSettingsView: View {
         .sheet(isPresented: $showingProviderSetup, onDismiss: {
             Task { await providers.load(port: Int(settings.port) ?? 18800) }
         }) {
-            ProviderSetupSheet(port: Int(settings.port) ?? 18800, providers: providers) {
+            ProviderSetupSheet(
+                port: Int(settings.port) ?? 18800,
+                providers: providers,
+                purpose: providerSetupPurpose
+            ) {
                 showingProviderSetup = false
             }
         }
     }
 
-    private func openProviderSetup() {
+    private func openProviderSetup(_ purpose: ProviderSetupPurpose) {
+        providerSetupPurpose = purpose
         showingProviderSetup = true
+    }
+
+    private func applyDesignPreset(_ preset: NativeDesignPreset) {
+        guard let configuration = preset.configuration else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            savedTheme = configuration.theme.rawValue
+            savedAccent = configuration.accent.rawValue
+            savedDensity = configuration.density.rawValue
+            savedSurface = configuration.surface.rawValue
+            fontScale = configuration.fontScale
+            windowOpacity = configuration.windowOpacity
+            teamGlow = configuration.teamGlow
+            backgroundPath = ""
+        }
     }
 
     private func saveDocumentSafety() {
@@ -6241,6 +7815,7 @@ final class NativeChatStore: ObservableObject {
     @Published var agentName = "Jame"
     @Published var status = "Connecting…"
     @Published var isThinking = false
+    @Published var isExecutingPlan = false
     @Published var lastError: NativeAppError?
     @Published var workspaceName = "Choose workspace"
     @Published var workspacePath = ""
@@ -6251,11 +7826,14 @@ final class NativeChatStore: ObservableObject {
     private var pendingMessages: [PendingNativeChatMessage] = []
     private var pendingMemorySummary: String?
     private var reconnectTask: Task<Void, Never>?
-    private var launcherProcess: Process?
+    private var responseWatchdogTask: Task<Void, Never>?
     private var lastSentTextRequest: (content: String, modelOverride: String)?
-    private var attemptedLauncherRecovery = false
     private var reconnectAttempt = 0
     private var connectionEpoch = 0
+
+    var isResponseInProgress: Bool {
+        isThinking || isExecutingPlan
+    }
 
     init(port: Int) {
         self.port = port
@@ -6384,6 +7962,7 @@ final class NativeChatStore: ObservableObject {
         isThinking = true
         status = socket == nil ? "Reconnecting to retry…" : "Retrying message…"
         let id = "native-retry-\(UUID().uuidString)"
+        armResponseWatchdog(for: id)
         if socket == nil {
             pendingMessages.append(PendingNativeChatMessage(
                 id: id,
@@ -6443,6 +8022,7 @@ final class NativeChatStore: ObservableObject {
         connectionEpoch += 1
         reconnectTask?.cancel()
         reconnectTask = nil
+        cancelResponseWatchdog()
         let previousSocket = socket
         socket = nil
         previousSocket?.cancel(with: .goingAway, reason: nil)
@@ -6454,6 +8034,7 @@ final class NativeChatStore: ObservableObject {
         lastSentTextRequest = nil
         draft = ""
         isThinking = false
+        isExecutingPlan = false
         lastError = nil
         reconnectAttempt = 0
         status = statusText
@@ -6573,30 +8154,10 @@ final class NativeChatStore: ObservableObject {
         workspacePath = resolved.path
     }
 
-    // Jame.app is also useful when opened directly from Finder. In that case
-    // its menu-bar launcher may not already be running, so recover by starting
-    // the backend bundled alongside this app.
+    // The top-level desktop app owns the visible window. Start its bundled
+    // backend helper when needed so Finder and Dock launches are self-contained.
     private func startBundledLauncherIfNeeded() {
-        guard !attemptedLauncherRecovery else { return }
-        attemptedLauncherRecovery = true
-
-        let resourcesDirectory = Bundle.main.bundleURL.deletingLastPathComponent()
-        let contentsDirectory = resourcesDirectory.deletingLastPathComponent()
-        let launcherURL = contentsDirectory
-            .appendingPathComponent("MacOS", isDirectory: true)
-            .appendingPathComponent("jameclaw-launcher")
-        guard FileManager.default.isExecutableFile(atPath: launcherURL.path) else { return }
-
-        let process = Process()
-        process.executableURL = launcherURL
-        process.arguments = ["-no-browser"]
-        do {
-            try process.run()
-            launcherProcess = process
-        } catch {
-            // The launcher may already be running and holding the local port.
-            // Retrying the connection below is still the correct recovery path.
-        }
+        NativeLaunchCoordinator.shared.startIfNeeded()
     }
 
     func send(modelOverride: String = "") {
@@ -6606,6 +8167,7 @@ final class NativeChatStore: ObservableObject {
         let id = "native-\(UUID().uuidString)"
         messages.append(NativeChatMessage(id: id, role: "user", content: content))
         isThinking = true
+        armResponseWatchdog(for: id)
         let outboundContent = taskFolderInstruction(for: nativeAppCommandInstruction(for: content))
         lastSentTextRequest = (outboundContent, modelOverride)
         guard socket != nil else {
@@ -6680,6 +8242,7 @@ final class NativeChatStore: ObservableObject {
         let displayContent = content.isEmpty ? "📎 \(filename)" : "\(content)\n📎 \(filename)"
         messages.append(NativeChatMessage(id: id, role: "user", content: displayContent))
         isThinking = true
+        armResponseWatchdog(for: id)
         var payload: [String: Any] = [
             "content": taskFolderInstruction(for: content),
             "data": data.base64EncodedString(),
@@ -6719,8 +8282,11 @@ final class NativeChatStore: ObservableObject {
     }
 
     private func reportError(title: String, detail: String) {
+        cancelResponseWatchdog()
         status = title
         isThinking = false
+        isExecutingPlan = false
+        removeExecutionPlanMessages()
         lastError = NativeAppError(title: title, detail: detail)
     }
 
@@ -6782,19 +8348,45 @@ final class NativeChatStore: ObservableObject {
         let payload = event["payload"] as? [String: Any] ?? [:]
         switch type {
         case "typing.start": isThinking = true
-        case "typing.stop": isThinking = false
+        case "typing.stop":
+            isThinking = false
         case "message.create":
             let content = responseContent(from: payload)
             let id = (payload["message_id"] as? String) ?? (event["id"] as? String) ?? UUID().uuidString
+            if nativePlanSteps(from: content) != nil {
+                isExecutingPlan = true
+                isThinking = true
+            } else if isThinkingPlaceholder(content) {
+                isThinking = true
+            } else {
+                removeExecutionPlanMessages()
+                isExecutingPlan = false
+                isThinking = false
+                cancelResponseWatchdog()
+            }
             upsertAssistantMessage(id: id, content: content)
-            lastSentTextRequest = nil
-            isThinking = false
+            if !isThinkingPlaceholder(content), nativePlanSteps(from: content) == nil {
+                lastSentTextRequest = nil
+            }
         case "message.update":
             let id = (payload["message_id"] as? String) ?? (event["id"] as? String) ?? UUID().uuidString
+            let content = responseContent(from: payload)
+            if nativePlanSteps(from: content) != nil {
+                isExecutingPlan = true
+                isThinking = true
+            } else if isThinkingPlaceholder(content) {
+                isThinking = true
+            } else if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                removeExecutionPlanMessages()
+                isExecutingPlan = false
+                // Streaming final text is already a response, but keep the
+                // send control busy until typing.stop or message.create.
+                isThinking = true
+            }
             // A gateway can begin streaming before its placeholder reaches the
             // desktop. Treat that update as the first visible assistant reply
             // instead of dropping it.
-            upsertAssistantMessage(id: id, content: responseContent(from: payload))
+            upsertAssistantMessage(id: id, content: content)
         case "plan.update":
             applyPlanUpdate(payload)
         case "memory.changed":
@@ -6805,6 +8397,10 @@ final class NativeChatStore: ObservableObject {
             appendPendingMemoryNoticeIfPossible()
         case "task.complete":
             lastSentTextRequest = nil
+            removeExecutionPlanMessages()
+            isExecutingPlan = false
+            isThinking = false
+            cancelResponseWatchdog()
             appendPendingMemoryNoticeIfPossible()
             notifyTaskCompletion(responseContent(from: payload))
         case "error":
@@ -6815,11 +8411,51 @@ final class NativeChatStore: ObservableObject {
         }
     }
 
+    /// A provider can leave a websocket open forever without ever returning a
+    /// completion event. Give long-running agent work plenty of room, then
+    /// return control to the user with explicit Retry and Continue actions.
+    private func armResponseWatchdog(for messageID: String) {
+        responseWatchdogTask?.cancel()
+        responseWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8 * 60))
+            guard !Task.isCancelled,
+                  let self,
+                  self.isResponseInProgress else { return }
+            self.responseWatchdogTask = nil
+            self.reportError(
+                title: "Response appears stuck",
+                detail: "Jame has not completed this response after 8 minutes. Retry the message or continue the conversation."
+            )
+            NSLog("[JameChat] response watchdog fired for %@", messageID)
+        }
+    }
+
+    private func cancelResponseWatchdog() {
+        responseWatchdogTask?.cancel()
+        responseWatchdogTask = nil
+    }
+
     private func responseContent(from payload: [String: Any], fallback: String = "") -> String {
         for key in ["content", "text", "message", "error"] {
             if let value = payload[key] as? String, !value.isEmpty { return value }
         }
         return fallback
+    }
+
+    private func isThinkingPlaceholder(_ content: String) -> Bool {
+        let normalized = content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized == "thinking"
+            || normalized == "thinking..."
+            || normalized == "thinking…"
+            || (normalized.contains("thinking") && normalized.contains("💭"))
+    }
+
+    private func removeExecutionPlanMessages() {
+        messages.removeAll { message in
+            message.role == "assistant" && nativePlanSteps(from: message.content) != nil
+        }
     }
 
     private func upsertAssistantMessage(id: String, content: String) {
@@ -6873,6 +8509,9 @@ final class NativeChatStore: ObservableObject {
         } else {
             return
         }
+
+        isExecutingPlan = true
+        isThinking = true
 
         let content = nativePlanContent(from: steps)
         if let planIndex {
@@ -7482,7 +9121,7 @@ private func nativeAppCommandInstruction(for content: String) -> String {
 }
 
 struct ChatView: View {
-    @StateObject private var chat: NativeChatStore
+    @ObservedObject private var chat: NativeChatStore
     @StateObject private var discussionProviders = NativeProviderStore()
     private let port: Int
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
@@ -7493,6 +9132,8 @@ struct ChatView: View {
     @AppStorage("launcher.design.backgroundPath") private var backgroundPath = ""
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var isRecording = false
+    @State private var isTranscribingVoice = false
+    @State private var thinkingButtonGlow = false
     @State private var recorder: AVAudioRecorder?
     @State private var recordingURL: URL?
     @State private var suggestions: [ChatComposerSuggestion] = []
@@ -7501,9 +9142,9 @@ struct ChatView: View {
     @State private var isFolderDropTargeted = false
     @State private var discussionModelOverride = ""
 
-    init(port: Int) {
+    init(port: Int, chat: NativeChatStore) {
         self.port = port
-        _chat = StateObject(wrappedValue: NativeChatStore(port: port))
+        _chat = ObservedObject(wrappedValue: chat)
     }
 
     private var theme: LauncherTheme {
@@ -7523,6 +9164,20 @@ struct ChatView: View {
     }
     private var isConnectingToJame: Bool {
         chat.status != "Ready" && chat.messages.isEmpty && chat.lastError == nil
+    }
+    private var discussionProviderOptions: [(label: String, value: String)] {
+        var options: [(label: String, value: String)] = [("Auto failover", "")]
+        if let primary = discussionProviders.models.first(where: {
+            $0.modelName == discussionProviders.selectedModel
+        }) {
+            options.append(("Use \(discussionProviders.providerName(for: primary))", primary.modelName))
+        }
+        if let fallback = discussionProviders.models.first(where: {
+            $0.modelName == discussionProviders.selectedFallbackModel
+        }) {
+            options.append(("Use \(discussionProviders.providerName(for: fallback))", fallback.modelName))
+        }
+        return options
     }
     private var composerBackground: Color {
         theme == .light ? Color.white.opacity(0.98) : theme.panel.opacity(0.98)
@@ -7644,7 +9299,11 @@ struct ChatView: View {
                                 .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
                                 .id(message.id)
                         }
-                        if chat.isThinking { Text("jame > thinking…").font(.system(size: 12 * fontScale, design: .monospaced)).foregroundStyle(JameBrand.orange) }
+                        if chat.isResponseInProgress {
+                            Text("Thinking... 💭")
+                                .font(.system(size: 12 * fontScale, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(JameBrand.orange)
+                        }
                         }.padding(density.contentPadding)
                     }
                     .frame(maxWidth: .infinity)
@@ -7713,7 +9372,7 @@ struct ChatView: View {
                     .background(composerSurface)
                     .overlay(Rectangle().stroke(composerBorder))
                     .help("Choose agent workspace")
-                    .disabled(chat.isThinking)
+                    .disabled(chat.isResponseInProgress)
 
                     Button {
                         uploadItem()
@@ -7725,20 +9384,20 @@ struct ChatView: View {
                     .background(composerSurface)
                     .overlay(Rectangle().stroke(composerBorder))
                     .help("Upload a file or workspace skill")
-                    .disabled(chat.isThinking)
+                    .disabled(chat.isResponseInProgress)
 
                     Button {
                         toggleRecording()
                     } label: {
-                        Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
+                        Image(systemName: isRecording ? "stop.circle.fill" : isTranscribingVoice ? "waveform.badge.magnifyingglass" : "mic.fill")
                             .foregroundStyle(isRecording ? Color.red : accent)
                     }
                     .buttonStyle(.plain)
                     .frame(width: 34, height: 34)
                     .background(composerSurface)
                     .overlay(Rectangle().stroke(composerBorder))
-                    .help(isRecording ? "Stop and send recording" : "Record a voice message")
-                    .disabled(chat.isThinking && !isRecording)
+                    .help(isRecording ? "Stop and transcribe recording" : isTranscribingVoice ? "Transcribing voice into the message box" : "Record a voice message")
+                    .disabled((chat.isResponseInProgress || isTranscribingVoice) && !isRecording)
 
                     TextField("type a message…", text: $chat.draft, axis: .vertical)
                         .font(.system(size: 14 * fontScale, design: .monospaced))
@@ -7752,27 +9411,43 @@ struct ChatView: View {
                                 .stroke(composerBorder, lineWidth: theme == .light ? 1.2 : 1)
                         }
                         .onChange(of: chat.draft) { _, value in updateSuggestions(for: value) }
-                    Button("Send") { sendComposer() }
+                    Button { sendComposer() } label: {
+                        Text(chat.isResponseInProgress ? "..." : "Send")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .frame(minWidth: 36)
+                    }
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 16)
                         .frame(height: 34)
-                        .background(accent)
-                        .overlay(Rectangle().stroke(accent.opacity(0.85)))
+                        .background(chat.isResponseInProgress ? accent.opacity(0.78) : accent)
+                        .overlay(Rectangle().stroke(accent.opacity(chat.isResponseInProgress ? 1 : 0.85), lineWidth: chat.isResponseInProgress ? 1.5 : 1))
+                        .shadow(
+                            color: chat.isResponseInProgress ? accent.opacity(thinkingButtonGlow ? 0.92 : 0.28) : .clear,
+                            radius: chat.isResponseInProgress ? (thinkingButtonGlow ? 13 : 4) : 0
+                        )
+                        .scaleEffect(chat.isResponseInProgress && thinkingButtonGlow ? 1.035 : 1)
+                        .animation(
+                            chat.isResponseInProgress
+                                ? .easeInOut(duration: 0.68).repeatForever(autoreverses: true)
+                                : .easeOut(duration: 0.18),
+                            value: thinkingButtonGlow
+                        )
+                        .onAppear { thinkingButtonGlow = chat.isResponseInProgress }
+                        .onChange(of: chat.isResponseInProgress) { _, isInProgress in
+                            thinkingButtonGlow = isInProgress
+                        }
+                        .disabled(chat.isResponseInProgress)
+                        .accessibilityLabel(chat.isResponseInProgress ? "Jame is thinking" : "Send")
+                        .help(chat.isResponseInProgress ? "Jame is thinking…" : "Send message")
                         .keyboardShortcut(.defaultAction)
                     if discussionProviders.selectedFallbackModel.isEmpty == false {
-                        Picker("Discussion provider", selection: $discussionModelOverride) {
-                            Text("Auto failover").tag("")
-                            if let primary = discussionProviders.models.first(where: { $0.modelName == discussionProviders.selectedModel }) {
-                                Text("Use \(discussionProviders.providerName(for: primary))").tag(primary.modelName)
-                            }
-                            if let fallback = discussionProviders.models.first(where: { $0.modelName == discussionProviders.selectedFallbackModel }) {
-                                Text("Use \(discussionProviders.providerName(for: fallback))").tag(fallback.modelName)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .frame(maxWidth: 145)
+                        JameDropdownPicker(
+                            label: "Discussion provider",
+                            options: discussionProviderOptions,
+                            selection: $discussionModelOverride,
+                            minWidth: 168
+                        )
                         .help("Choose the provider for this discussion. Auto failover uses the global primary and fallback pair.")
                     }
                 }
@@ -7832,6 +9507,17 @@ struct ChatView: View {
             )
         }
         .background(chatBackground)
+        // Chat's canvas and composer have a large natural fitting height.
+        // Keep that ideal size compressible so entering Chat does not enlarge
+        // the user's existing desktop window.
+        .frame(
+            minWidth: 0,
+            idealWidth: 680,
+            maxWidth: .infinity,
+            minHeight: 0,
+            idealHeight: 480,
+            maxHeight: .infinity
+        )
         .preferredColorScheme(launcherThemePreference(from: savedTheme).preferredColorScheme)
         .overlay {
             if isConnectingToJame {
@@ -7883,7 +9569,10 @@ struct ChatView: View {
                 ProgressView()
                     .controlSize(.large)
                     .tint(accent)
-                Text("Connecting to JameClaw on localhost…")
+                Text(chat.status)
+                    .font(.system(size: 14 * fontScale, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("Starting your private local gateway on localhost…")
                     .font(.system(size: 13 * fontScale, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -8045,12 +9734,6 @@ struct ChatView: View {
     private func sendComposer() {
         let content = chat.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || pendingAttachment != nil else { return }
-        if pendingAttachment == nil, let response = fastGreetingResponse(for: content) {
-            chat.draft = ""
-            suggestions = []
-            chat.addFastPathExchange(user: content, response: response)
-            return
-        }
         if pendingAttachment == nil, let query = localFileSearchQuery(from: content) {
             chat.draft = ""
             suggestions = []
@@ -8095,21 +9778,6 @@ struct ChatView: View {
         } catch {
             chat.addFastPathExchange(user: originalRequest, response: "Local file search is not available right now. JameClaw can still search through the normal agent workflow.")
         }
-    }
-
-    private func fastGreetingResponse(for text: String) -> String? {
-        let normalized = text.lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-        let phrase = normalized.joined(separator: " ")
-        let exactGreetings = ["good morning", "good afternoon", "good evening"]
-        let greetingWords = Set(["hi", "hello", "hey", "yo", "salut"])
-        let casualSuffixes = Set(["bro", "buddy", "dude", "friend", "jame", "there", "man"])
-        let isShortCasualGreeting = (1...3).contains(normalized.count)
-            && normalized.first.map(greetingWords.contains) == true
-            && normalized.dropFirst().allSatisfy(casualSuffixes.contains)
-        guard exactGreetings.contains(phrase) || isShortCasualGreeting else { return nil }
-        return "Hello — I’m ready. You can ask me to search files, work in your workspace, or handle a larger task."
     }
 
     private func localFileSearchQuery(from text: String) -> String? {
@@ -8239,12 +9907,8 @@ struct ChatView: View {
             isRecording = false
             defer { recorder = nil }
             guard let url = recordingURL else { return }
-            do {
-                let data = try Data(contentsOf: url)
-                chat.sendMedia(data: data, filename: "voice-\(Int(Date().timeIntervalSince1970)).m4a", contentType: "audio/mp4", kind: "audio", modelOverride: discussionModelOverride)
-            } catch {
-                chat.status = "Could not read the recording."
-            }
+            recordingURL = nil
+            Task { await transcribeRecording(at: url) }
             return
         }
 
@@ -8271,6 +9935,53 @@ struct ChatView: View {
                     chat.status = "Could not start recording."
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func transcribeRecording(at url: URL) async {
+        isTranscribingVoice = true
+        chat.status = "Transcribing voice into the message box…"
+        defer {
+            isTranscribingVoice = false
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        do {
+            let audio = try Data(contentsOf: url)
+            let boundary = "JameClawVoice-\(UUID().uuidString)"
+            var body = Data()
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"recording.m4a\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: audio/mp4\r\n\r\n".data(using: .utf8)!)
+            body.append(audio)
+            body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+            var request = authenticatedConsoleRequest(port: port, path: "/api/voice/transcribe", method: "POST")
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            request.timeoutInterval = 120
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let detail = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                throw NSError(
+                    domain: "JameClawVoice",
+                    code: (response as? HTTPURLResponse)?.statusCode ?? 1,
+                    userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Voice transcription failed."]
+                )
+            }
+            struct VoiceTranscription: Decodable { let text: String }
+            let transcription = try JSONDecoder().decode(VoiceTranscription.self, from: data)
+            let text = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                throw NSError(domain: "JameClawVoice", code: 2, userInfo: [NSLocalizedDescriptionKey: "The transcription was empty. Try recording again."])
+            }
+            let existing = chat.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            chat.draft = existing.isEmpty ? text : existing + "\n" + text
+            chat.status = "Voice transcription ready. Review it, then press Send."
+        } catch {
+            chat.status = error.localizedDescription.isEmpty ? "Could not transcribe the recording." : error.localizedDescription
         }
     }
 }

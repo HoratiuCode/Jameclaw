@@ -594,6 +594,18 @@ func TestNormalizeModel_UsesAPIBase(t *testing.T) {
 	); got != "deepseek/deepseek-v3.2" {
 		t.Fatalf("normalizeModel(novita) = %q, want %q", got, "deepseek/deepseek-v3.2")
 	}
+	if got := normalizeModel(
+		"nous/anthropic/claude-sonnet-4.6",
+		"https://inference-api.nousresearch.com/v1",
+	); got != "anthropic/claude-sonnet-4.6" {
+		t.Fatalf("normalizeModel(nous) = %q, want %q", got, "anthropic/claude-sonnet-4.6")
+	}
+	if got := normalizeModel(
+		"nous/default",
+		"https://inference-api.nousresearch.com/v1",
+	); got != "anthropic/claude-sonnet-4.6" {
+		t.Fatalf("normalizeModel(legacy nous default) = %q, want %q", got, "anthropic/claude-sonnet-4.6")
+	}
 }
 
 func TestProvider_RequestTimeoutDefault(t *testing.T) {

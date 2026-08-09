@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/extensions"
@@ -19,12 +22,118 @@ import (
 func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/models", h.handleListModels)
 	mux.HandleFunc("GET /api/models/catalog", h.handleModelCatalog)
+	mux.HandleFunc("POST /api/models/catalog/discover", h.handleDiscoverProviderModels)
 	mux.HandleFunc("POST /api/models", h.handleAddModel)
 	mux.HandleFunc("POST /api/models/from-catalog", h.handleAddModelFromCatalog)
 	mux.HandleFunc("POST /api/models/default", h.handleSetDefaultModel)
 	mux.HandleFunc("POST /api/models/failover", h.handleSetModelFailover)
 	mux.HandleFunc("PUT /api/models/{index}", h.handleUpdateModel)
 	mux.HandleFunc("DELETE /api/models/{index}", h.handleDeleteModel)
+}
+
+// handleDiscoverProviderModels retrieves the models exposed by a catalog
+// provider's OpenAI-compatible GET /models endpoint. Keeping this server-side
+// avoids browser CORS issues and never returns the supplied API key.
+func (h *Handler) handleDiscoverProviderModels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ProviderID string `json:"provider_id"`
+		APIKey     string `json:"api_key"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	provider, ok := extensions.FindProvider(req.ProviderID)
+	if !ok || strings.TrimSpace(provider.DefaultAPIBase) == "" {
+		http.Error(w, "provider does not expose a discoverable models endpoint", http.StatusBadRequest)
+		return
+	}
+	apiKey := strings.TrimSpace(req.APIKey)
+	if apiKey == "" {
+		cfg, err := config.LoadConfig(h.configPath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+			return
+		}
+		apiKey = storedProviderAPIKey(cfg.ModelList, provider.ID)
+	}
+	if provider.RequiresAPIKey && apiKey == "" {
+		http.Error(w, "API key is required to fetch this provider's models", http.StatusBadRequest)
+		return
+	}
+
+	base, err := url.Parse(strings.TrimRight(provider.DefaultAPIBase, "/") + "/models")
+	if err != nil || (base.Scheme != "https" && base.Scheme != "http") {
+		http.Error(w, "provider has an invalid models endpoint", http.StatusBadRequest)
+		return
+	}
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, base.String(), nil)
+	if err != nil {
+		http.Error(w, "failed to create models request", http.StatusInternalServerError)
+		return
+	}
+	request.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
+	if err != nil {
+		http.Error(w, "could not reach provider models endpoint", http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		http.Error(w, fmt.Sprintf("provider models endpoint returned %s", response.Status), http.StatusBadGateway)
+		return
+	}
+
+	var payload struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+		Models []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&payload); err != nil {
+		http.Error(w, "provider returned an invalid models response", http.StatusBadGateway)
+		return
+	}
+	entries := payload.Data
+	if len(entries) == 0 {
+		entries = payload.Models
+	}
+	seen := make(map[string]bool, len(entries))
+	models := make([]map[string]string, 0, len(entries))
+	for _, entry := range entries {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		models = append(models, map[string]string{"id": id, "name": id, "owned_by": entry.OwnedBy})
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i]["name"] < models[j]["name"] })
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"models": models})
+}
+
+func storedProviderAPIKey(existing []*config.ModelConfig, providerID string) string {
+	for _, candidate := range existing {
+		if candidate == nil || candidate.APIKey() == "" {
+			continue
+		}
+		ref := providers.ParseModelRef(candidate.Model, "")
+		if ref != nil && ref.Provider == providerID {
+			return candidate.APIKey()
+		}
+	}
+	return ""
 }
 
 func (h *Handler) handleModelCatalog(w http.ResponseWriter, r *http.Request) {
@@ -249,21 +358,11 @@ func (h *Handler) handleAddModel(w http.ResponseWriter, r *http.Request) {
 
 func inheritedProviderAPIKey(existing []*config.ModelConfig, target *config.ModelConfig) string {
 	targetRef := providers.ParseModelRef(target.Model, "")
-	if targetRef == nil || targetRef.Provider != "openrouter" {
+	if targetRef == nil || targetRef.Provider == "" {
 		return ""
 	}
 
-	for _, candidate := range existing {
-		if candidate == nil || candidate.APIKey() == "" {
-			continue
-		}
-		ref := providers.ParseModelRef(candidate.Model, "")
-		if ref != nil && ref.Provider == targetRef.Provider {
-			return candidate.APIKey()
-		}
-	}
-
-	return ""
+	return storedProviderAPIKey(existing, targetRef.Provider)
 }
 
 func (h *Handler) handleAddModelFromCatalog(w http.ResponseWriter, r *http.Request) {
@@ -275,24 +374,44 @@ func (h *Handler) handleAddModelFromCatalog(w http.ResponseWriter, r *http.Reque
 	defer r.Body.Close()
 
 	var req struct {
-		ProviderID string `json:"provider_id"`
-		PresetID   string `json:"preset_id"`
-		ModelName  string `json:"model_name"`
-		APIKey     string `json:"api_key"`
-		SetDefault bool   `json:"set_default"`
+		ProviderID    string `json:"provider_id"`
+		PresetID      string `json:"preset_id"`
+		RemoteModelID string `json:"remote_model_id"`
+		ModelName     string `json:"model_name"`
+		APIKey        string `json:"api_key"`
+		SetDefault    bool   `json:"set_default"`
 	}
 	if err = json.Unmarshal(body, &req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	_, preset, ok := extensions.FindPreset(req.ProviderID, req.PresetID)
-	if !ok {
+	provider, preset, ok := extensions.FindPreset(req.ProviderID, req.PresetID)
+	remoteModelID := strings.TrimSpace(req.RemoteModelID)
+	if remoteModelID == "" && !ok {
 		http.Error(w, "unknown provider or model preset", http.StatusBadRequest)
 		return
 	}
 
-	modelCfg := preset.ToModelConfig(req.ModelName)
+	var modelCfg *config.ModelConfig
+	if remoteModelID != "" {
+		provider, ok = extensions.FindProvider(req.ProviderID)
+		if !ok || strings.TrimSpace(provider.DefaultAPIBase) == "" {
+			http.Error(w, "unknown provider", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.ModelName) == "" {
+			req.ModelName = remoteModelID
+		}
+		modelCfg = &config.ModelConfig{
+			ModelName:      strings.TrimSpace(req.ModelName),
+			Model:          provider.ID + "/" + remoteModelID,
+			APIBase:        provider.DefaultAPIBase,
+			RequestTimeout: 60,
+		}
+	} else {
+		modelCfg = preset.ToModelConfig(req.ModelName)
+	}
 	if req.APIKey != "" {
 		modelCfg.SetAPIKey(req.APIKey)
 	}

@@ -17,7 +17,12 @@ APP_PATH="./build/${APP_NAME}.app"
 APP_CONTENTS="${APP_PATH}/Contents"
 APP_MACOS="${APP_CONTENTS}/MacOS"
 APP_RESOURCES="${APP_CONTENTS}/Resources"
-APP_EXECUTABLE="jameclaw-launcher"
+LAUNCHER_EXECUTABLE="jameclaw-launcher"
+NATIVE_EXECUTABLE="Jame"
+NATIVE_SOURCES=(
+    "./macos/JameClawHome/JameClawHome.swift"
+    "./macos/JameClawHome/NativeAppInfrastructure.swift"
+)
 ICON_SOURCE="./scripts/icon.icns"
 
 # Clean up existing .app
@@ -33,13 +38,15 @@ mkdir -p "$APP_RESOURCES"
 
 # Copy executable
 echo "Copying executable..."
-if [ -f "./web/build/${APP_EXECUTABLE}" ]; then
-    cp "./web/build/${APP_EXECUTABLE}" "${APP_MACOS}/"
+if [ -f "./web/build/${LAUNCHER_EXECUTABLE}" ]; then
+    cp "./web/build/${LAUNCHER_EXECUTABLE}" "${APP_MACOS}/"
 else
     echo "Error: ./web/build/${APP_EXECUTABLE} not found. Please build the web backend first."
     echo "Run: make build in web dir"
     exit 1
 fi
+echo "Building native desktop executable..."
+swiftc -parse-as-library "${NATIVE_SOURCES[@]}" -o "${APP_MACOS}/${NATIVE_EXECUTABLE}" -framework SwiftUI -framework AppKit -framework UserNotifications
 if [ -f "./build/jameclaw" ]; then
     cp "./build/jameclaw" "${APP_MACOS}/"
 else
@@ -57,7 +64,7 @@ cat > "${APP_CONTENTS}/Info.plist" << 'EOF'
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>jameclaw-launcher</string>
+    <string>Jame</string>
     <key>CFBundleIdentifier</key>
     <string>com.jameclaw.launcher</string>
     <key>CFBundleName</key>
@@ -72,6 +79,10 @@ cat > "${APP_CONTENTS}/Info.plist" << 'EOF'
     <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>LSUIElement</key>
+    <false/>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
@@ -94,6 +105,8 @@ cat > "${APP_CONTENTS}/Info.plist" << 'EOF'
     <string>JameClaw can access Reminders when you ask an agent to work with reminders.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
         <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
     </dict>
@@ -109,14 +122,14 @@ EOF
 #}
 
 cp $ICON_SOURCE "${APP_RESOURCES}/icon.icns"
-bash ./scripts/build-macos-settings-app.sh "${APP_RESOURCES}/JameClaw Settings.app"
-bash ./scripts/build-macos-home-app.sh "${APP_RESOURCES}/Jame.app"
+cp "./macos/JameClawHome/creation-of-adam.jpg" "${APP_RESOURCES}/creation-of-adam.jpg"
 
-# The Go executables carry linker-generated ad-hoc signatures. Embedding the
-# Swift child apps after copying those executables changes the resource seal,
-# which can make Launch Services report a misleading kLSNoExecutableErr.
-# Re-sign the completed nested bundle so the runnable .app opens reliably.
+# JameClaw Desktop is now the native SwiftUI application itself. The Go
+# launcher and agent binary are ordinary helper executables in Contents/MacOS,
+# so they cannot create a second macOS app or Dock identity.
 codesign --force --deep --sign - "$APP_PATH"
+
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 echo ""
 echo "=========================================="
@@ -127,5 +140,5 @@ echo "To launch JameClaw:"
 echo "  1. Double-click ${APP_NAME}.app in Finder"
 echo "  2. Or use: open ${APP_PATH}"
 echo ""
-echo "Note: The app will run in the menu bar (systray) without a terminal window."
+echo "Note: JameClaw Desktop owns the Dock window; its launcher runs as an internal menu-bar helper."
 echo ""

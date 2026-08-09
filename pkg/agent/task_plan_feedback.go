@@ -71,7 +71,18 @@ func (al *AgentLoop) shouldPublishTaskPlan(ts *turnState) bool {
 	if strings.HasPrefix(request, "/") || len([]rune(request)) < al.cfg.Agents.Defaults.GetTaskPlanMinLength() {
 		return false
 	}
+	// Planning with a second model request makes ordinary work feel stalled.
+	// Fast lane is the default: the main agent begins responding immediately.
+	// A user can still explicitly ask for a plan or steps before work starts.
+	if al.cfg.Agents.Defaults.TaskPlanFeedback.OnlyOnExplicitRequest {
+		return requestsVisiblePlan(request)
+	}
 	return hasTaskPlanningSignal(request)
+}
+
+func requestsVisiblePlan(request string) bool {
+	request = strings.ToLower(request)
+	return strings.Contains(request, "plan") || strings.Contains(request, "steps") || strings.Contains(request, "how will you")
 }
 
 func hasTaskPlanningSignal(request string) bool {

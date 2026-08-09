@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>jameclaw-launcher</string>
+    <string>Jame</string>
     <key>CFBundleIdentifier</key>
     <string>com.jameclaw.launcher</string>
     <key>CFBundleName</key>
@@ -18,6 +18,10 @@
     <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>LSUIElement</key>
+    <false/>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
@@ -40,6 +44,8 @@
     <string>JameClaw can access Reminders when you ask an agent to work with reminders.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
         <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
     </dict>

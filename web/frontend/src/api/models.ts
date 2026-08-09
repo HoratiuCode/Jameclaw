@@ -92,9 +92,16 @@ interface ModelCatalogResponse {
 export interface AddModelFromCatalogPayload {
   provider_id: string
   preset_id: string
+  remote_model_id?: string
   model_name?: string
   api_key?: string
   set_default?: boolean
+}
+
+export interface DiscoveredProviderModel {
+  id: string
+  name: string
+  owned_by?: string
 }
 
 export type ModelRole = "chat" | "image" | "voice"
@@ -115,6 +122,21 @@ export async function getModels(): Promise<ModelsListResponse> {
 
 export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   return request<ModelCatalogResponse>("/api/models/catalog")
+}
+
+export async function discoverProviderModels(
+  providerID: string,
+  apiKey: string,
+): Promise<DiscoveredProviderModel[]> {
+  const response = await request<{ models: DiscoveredProviderModel[] }>(
+    "/api/models/catalog/discover",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider_id: providerID, api_key: apiKey }),
+    },
+  )
+  return response.models
 }
 
 export async function addModel(

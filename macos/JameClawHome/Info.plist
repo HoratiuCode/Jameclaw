@@ -3,12 +3,16 @@
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>Jame</string>
   <key>CFBundleIdentifier</key><string>com.jameclaw.home</string>
-  <key>CFBundleName</key><string>Jame</string>
+  <key>CFBundleName</key><string>JameClaw Desktop</string>
+  <key>CFBundleDisplayName</key><string>JameClaw Desktop</string>
   <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
-  <key>LSUIElement</key><true/>
+  <!-- Jame is the visible desktop window. The separate launcher owns the
+       menu-bar-only lifecycle, so this nested app must remain a regular
+       foreground application that Finder and Dock can reliably reopen. -->
+  <key>LSUIElement</key><false/>
   <key>NSMicrophoneUsageDescription</key><string>Jame uses the microphone when you record a voice message for your local agent.</string>
   <key>NSUserNotificationUsageDescription</key><string>Jame notifies you when an agent finishes a task.</string>
   <key>NSAppTransportSecurity</key>
