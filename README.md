@@ -1,5 +1,5 @@
 <div align="center">
-<img src="assets/logo.png" alt="JameClaw" width="512">
+<img src="assets/jameclaw-banner.png" alt="JameClaw" width="720">
 
 <h1>Your AI agent for fancy jobs</h1>
 
