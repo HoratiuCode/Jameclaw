@@ -272,6 +272,7 @@ func setupAndStartServices(
 	if err = runningServices.CronService.Start(); err != nil {
 		return nil, fmt.Errorf("error starting cron service: %w", err)
 	}
+	agentLoop.SetCronService(runningServices.CronService)
 	fmt.Println("✓ Cron service started")
 
 	runningServices.HeartbeatService = heartbeat.NewHeartbeatServiceWithInitiative(
@@ -324,6 +325,7 @@ func setupAndStartServices(
 	runningServices.HealthServer.SetAgentActiveFunc(func() bool {
 		return agentLoop.GetActiveTurn() != nil
 	})
+	runningServices.HealthServer.SetChannelStatusFunc(runningServices.ChannelManager.GetStatus)
 	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, agentLoop, msgBus.PublishOutbound)
 	automationRegistrar := createAutomationRegistrar(cfg, runningServices.CronService)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar, automationRegistrar)
@@ -479,6 +481,7 @@ func restartServices(
 	if err = runningServices.CronService.Start(); err != nil {
 		return fmt.Errorf("error restarting cron service: %w", err)
 	}
+	al.SetCronService(runningServices.CronService)
 	fmt.Println("  ✓ Cron service restarted")
 
 	runningServices.HeartbeatService = heartbeat.NewHeartbeatServiceWithInitiative(
@@ -525,6 +528,7 @@ func restartServices(
 	runningServices.HealthServer.SetAgentActiveFunc(func() bool {
 		return al.GetActiveTurn() != nil
 	})
+	runningServices.HealthServer.SetChannelStatusFunc(runningServices.ChannelManager.GetStatus)
 	hookIngressRegistrar := createHookIngressRegistrar(cfg, configDir, al, msgBus.PublishOutbound)
 	automationRegistrar := createAutomationRegistrar(cfg, runningServices.CronService)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, hookIngressRegistrar, automationRegistrar)

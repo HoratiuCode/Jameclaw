@@ -687,6 +687,9 @@ func (h *Handler) gatewayStatusData() map[string]any {
 		logger.ErrorC("gateway", fmt.Sprintf("Gateway health check failed: %v", err))
 	} else {
 		logger.InfoC("gateway", fmt.Sprintf("Gateway health status: %d", statusCode))
+		if healthResp.Channels != nil {
+			data["channels"] = healthResp.Channels
+		}
 		if statusCode != http.StatusOK {
 			gateway.mu.Lock()
 			setGatewayRuntimeStatusLocked("error")

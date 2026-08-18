@@ -13,6 +13,8 @@ extension Notification.Name {
     static let jameclawCommandPalette = Notification.Name("jameclaw.command-palette")
     static let jameclawTeamGrid = Notification.Name("jameclaw.team-grid")
     static let jameclawWorkspaceChanged = Notification.Name("jameclaw.workspace-changed")
+    static let jameclawAutomationChanged = Notification.Name("jameclaw.automation-changed")
+    static let jameclawFixedChatsChanged = Notification.Name("jameclaw.fixed-chats-changed")
 }
 
 private func authenticatedConsoleURL(
@@ -892,9 +894,128 @@ struct JameClawHomeApp: App {
     }
 }
 
+@MainActor
+private final class NativeDesktopNavigationStore: ObservableObject {
+    @Published private(set) var hasAutomations = false
+    @Published private(set) var hasFixedChats = false
+    @Published private(set) var messagingPlatformLabel = "No messaging connected"
+
+    private let port: Int
+    private var isRefreshing = false
+
+    init(port: Int) {
+        self.port = port
+    }
+
+    func monitor() async {
+        while !Task.isCancelled {
+            await refresh()
+            try? await Task.sleep(for: .seconds(5))
+        }
+    }
+
+    func refresh() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        await loadAutomationVisibility()
+        await loadFixedChatsVisibility()
+        await loadMessagingPlatforms()
+    }
+
+    private func loadFixedChatsVisibility() async {
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(
+                    port: port,
+                    path: "/api/sessions",
+                    queryItems: [
+                        URLQueryItem(name: "offset", value: "0"),
+                        URLQueryItem(name: "limit", value: "10000"),
+                    ]
+                )
+            )
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let sessions = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+            hasFixedChats = sessions.contains { $0["pinned"] as? Bool == true }
+        } catch {
+            // Preserve the last known navigation state during gateway restarts.
+        }
+    }
+
+    private func loadAutomationVisibility() async {
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/automation")
+            )
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = body["items"] as? [Any] else { return }
+            hasAutomations = !items.isEmpty
+        } catch {
+            // Preserve the last known navigation state during gateway restarts.
+        }
+    }
+
+    private func loadMessagingPlatforms() async {
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/gateway/status")
+            )
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let channels = body["channels"] as? [String: Any] else {
+                messagingPlatformLabel = "No messaging connected"
+                return
+            }
+
+            let activePlatforms = Self.messagingChannels.compactMap { channel -> String? in
+                guard let status = channels[channel.key] as? [String: Any],
+                      status["running"] as? Bool == true else { return nil }
+                return channel.name
+            }
+            messagingPlatformLabel = Self.platformLabel(for: activePlatforms)
+        } catch {
+            messagingPlatformLabel = "No messaging connected"
+        }
+    }
+
+    private static let messagingChannels: [(key: String, name: String)] = [
+        ("telegram", "Telegram"),
+        ("discord", "Discord"),
+        ("whatsapp", "WhatsApp"),
+        ("slack", "Slack"),
+        ("matrix", "Matrix"),
+        ("line", "LINE"),
+        ("feishu", "Feishu"),
+        ("dingtalk", "DingTalk"),
+        ("qq", "QQ"),
+        ("onebot", "OneBot"),
+        ("wecom", "WeCom"),
+        ("wecom_app", "WeCom"),
+        ("wecom_aibot", "WeCom"),
+        ("weixin", "WeChat"),
+        ("irc", "IRC"),
+        ("maixcam", "MaixCam"),
+    ]
+
+    private static func platformLabel(for platforms: [String]) -> String {
+        let unique = platforms.reduce(into: [String]()) { result, platform in
+            if !result.contains(platform) { result.append(platform) }
+        }
+        guard !unique.isEmpty else { return "No messaging connected" }
+        return "\(unique.joined(separator: " + ")) connected"
+    }
+}
+
 struct JameRootView: View {
     @StateObject private var settings: LauncherSettingsStore
     @StateObject private var chat: NativeChatStore
+    @StateObject private var navigationContext: NativeDesktopNavigationStore
     @State private var showingCommandPalette = false
     @State private var showingTerminalWorkspace = false
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
@@ -907,8 +1028,10 @@ struct JameRootView: View {
 
     init(selectedSection: Binding<DesktopSection?>) {
         let settings = LauncherSettingsStore()
+        let port = Int(settings.port) ?? 18800
         _settings = StateObject(wrappedValue: settings)
-        _chat = StateObject(wrappedValue: NativeChatStore(port: Int(settings.port) ?? 18800))
+        _chat = StateObject(wrappedValue: NativeChatStore(port: port))
+        _navigationContext = StateObject(wrappedValue: NativeDesktopNavigationStore(port: port))
         _selectedSection = selectedSection
     }
 
@@ -932,8 +1055,9 @@ struct JameRootView: View {
             DesktopSidebar(
                 selectedSection: stableSectionSelection,
                 isAgentWorking: chat.isResponseInProgress,
-                agentStatus: chat.status,
-                conversationCount: chat.messages.count
+                hasAutomations: navigationContext.hasAutomations,
+                hasFixedChats: navigationContext.hasFixedChats,
+                messagingPlatformLabel: navigationContext.messagingPlatformLabel
             ) {
                 showingCommandPalette = true
             }
@@ -1038,6 +1162,15 @@ struct JameRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .jameclawCommandPalette)) { _ in
             showingCommandPalette = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawAutomationChanged)) { _ in
+            Task { await navigationContext.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawFixedChatsChanged)) { _ in
+            Task { await navigationContext.refresh() }
+        }
+        .task {
+            await navigationContext.monitor()
+        }
         .sheet(isPresented: $showingCommandPalette) {
             QuickActionPalette(selectedSection: stableSectionSelection) {
                 showingCommandPalette = false
@@ -1067,8 +1200,9 @@ struct JameRootView: View {
 private struct DesktopSidebar: View {
     @Binding var selectedSection: DesktopSection?
     let isAgentWorking: Bool
-    let agentStatus: String
-    let conversationCount: Int
+    let hasAutomations: Bool
+    let hasFixedChats: Bool
+    let messagingPlatformLabel: String
     let openCommandPalette: () -> Void
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
@@ -1088,13 +1222,13 @@ private struct DesktopSidebar: View {
             LazyVStack(alignment: .leading, spacing: 2) {
                 DesktopNavigationHeader(title: "Workspace")
                     .padding(.horizontal, 14)
-                ForEach(DesktopSection.workspace) { section in
+                ForEach(DesktopSection.workspace.filter { $0 != .fixedChats || hasFixedChats }) { section in
                     navigationButton(section)
                 }
                 DesktopNavigationHeader(title: "Agent")
                     .padding(.horizontal, 14)
                     .padding(.top, 8)
-                ForEach(DesktopSection.agentTools) { section in
+                ForEach(DesktopSection.agentTools.filter { $0 != .automations || hasAutomations }) { section in
                     navigationButton(section)
                 }
             }
@@ -1117,16 +1251,6 @@ private struct DesktopSidebar: View {
                     }
                     Spacer()
                 }
-                JamePresenceCard(
-                    isWorking: isAgentWorking,
-                    status: agentStatus,
-                    conversationCount: conversationCount,
-                    accent: accent,
-                    panel: panel,
-                    primary: primary,
-                    muted: muted,
-                    rule: rule
-                )
                 Button(action: openCommandPalette) {
                     HStack(spacing: 7) {
                         Image(systemName: "magnifyingglass")
@@ -1149,9 +1273,11 @@ private struct DesktopSidebar: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 7) {
                 Circle().fill(accent).frame(width: 7, height: 7)
-                Text("Ready on this Mac")
+                Text(messagingPlatformLabel)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(messagingPlatformLabel)
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -1211,75 +1337,6 @@ private struct DesktopSidebar: View {
                 : section.title
         )
         .help(showWorkingGlow ? "Jame is still working. Open Sessions or return to Chat." : section.title)
-    }
-}
-
-private struct JamePresenceCard: View {
-    let isWorking: Bool
-    let status: String
-    let conversationCount: Int
-    let accent: Color
-    let panel: Color
-    let primary: Color
-    let muted: Color
-    let rule: Color
-
-    private var workspaceName: String {
-        let name = jameTaskFolderURL().lastPathComponent
-        return name.isEmpty ? "JameClaw workspace" : name
-    }
-
-    private var activityLabel: String {
-        if isWorking { return "Jame is working" }
-        if status.localizedCaseInsensitiveContains("connect") || status.localizedCaseInsensitiveContains("start") {
-            return "Jame is waking up"
-        }
-        return "Jame is here"
-    }
-
-    private var focusLabel: String {
-        if isWorking { return "Following the current task in Chat" }
-        if conversationCount > 0 { return "Your last conversation is ready to continue" }
-        return "Ready for a new direction" 
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ZStack {
-                Circle().stroke(accent.opacity(0.28), lineWidth: 5)
-                Circle().fill(isWorking ? accent : primary.opacity(0.86)).frame(width: 7, height: 7)
-            }
-            .frame(width: 26, height: 26)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(activityLabel.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .tracking(0.7)
-                    .foregroundStyle(accent)
-                Text(focusLabel)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 5) {
-                    Image(systemName: "folder.fill")
-                    Text(workspaceName)
-                    if conversationCount > 0 {
-                        Text("·")
-                        Text("\(conversationCount) open")
-                    }
-                }
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(muted)
-                .lineLimit(1)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(panel, in: Rectangle())
-        .overlay(alignment: .leading) { Rectangle().fill(accent).frame(width: 3) }
-        .overlay(Rectangle().stroke(rule, lineWidth: 1))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(activityLabel). \(focusLabel). Workspace: \(workspaceName).")
     }
 }
 
@@ -1620,6 +1677,7 @@ private final class NativeAutomationStore: ObservableObject {
                 throw URLError(.badServerResponse)
             }
             await load()
+            NotificationCenter.default.post(name: .jameclawAutomationChanged, object: nil)
             return true
         } catch {
             self.error = "Could not schedule \(blueprint.title). Check the template fields and try again."
@@ -2088,6 +2146,7 @@ private final class NativeSessionStore: ObservableObject {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
             await load()
+            NotificationCenter.default.post(name: .jameclawFixedChatsChanged, object: nil)
         } catch { self.error = "Could not update fixed chat." }
     }
 
@@ -7810,12 +7869,14 @@ private enum SkillUploadError: LocalizedError {
 
 @MainActor
 final class NativeChatStore: ObservableObject {
-    @Published var messages: [NativeChatMessage] = []
+	@Published var messages: [NativeChatMessage] = []
+	@Published var activity: [String] = []
     @Published var draft = ""
     @Published var agentName = "Jame"
     @Published var status = "Connecting…"
     @Published var isThinking = false
     @Published var isExecutingPlan = false
+    @Published var queuedMessageCount = 0
     @Published var lastError: NativeAppError?
     @Published var workspaceName = "Choose workspace"
     @Published var workspacePath = ""
@@ -7975,11 +8036,23 @@ final class NativeChatStore: ObservableObject {
         send(id: id, content: request.content, modelOverride: request.modelOverride)
     }
 
-    func continueConversation(modelOverride: String = "") {
+	func continueConversation(modelOverride: String = "") {
         lastError = nil
         draft = "Continue from where you stopped. Keep the work already completed and finish the remaining task."
-        send(modelOverride: modelOverride)
-    }
+		send(modelOverride: modelOverride)
+	}
+
+	/// Sends a control command from the native status bar through the same
+	/// authenticated session as normal chat. Keeping these actions on the
+	/// shared command path also makes the native UI and Telegram consistent.
+	func sendControlCommand(_ command: String) {
+		let value = command.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !value.isEmpty else { return }
+		let commandName = value.split(separator: " ").first.map(String.init)?.lowercased() ?? ""
+		guard !isResponseInProgress || ["/stop", "/abort", "/cancel"].contains(commandName) else { return }
+		draft = value
+		send()
+	}
 
     private func loadDisplayName() {
         Task {
@@ -8028,7 +8101,8 @@ final class NativeChatStore: ObservableObject {
         previousSocket?.cancel(with: .goingAway, reason: nil)
         sessionID = newSessionID
         UserDefaults.standard.set(newSessionID, forKey: "jameclaw.native-chat.session-id")
-        messages = restoredMessages
+		messages = restoredMessages
+		activity.removeAll()
         pendingMessages.removeAll()
         pendingMemorySummary = nil
         lastSentTextRequest = nil
@@ -8163,9 +8237,11 @@ final class NativeChatStore: ObservableObject {
     func send(modelOverride: String = "") {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
+        let wasBusy = isResponseInProgress
         draft = ""
         let id = "native-\(UUID().uuidString)"
         messages.append(NativeChatMessage(id: id, role: "user", content: content))
+        if wasBusy { queuedMessageCount += 1 }
         isThinking = true
         armResponseWatchdog(for: id)
         let outboundContent = taskFolderInstruction(for: nativeAppCommandInstruction(for: content))
@@ -8347,7 +8423,7 @@ final class NativeChatStore: ObservableObject {
               let type = event["type"] as? String else { return }
         let payload = event["payload"] as? [String: Any] ?? [:]
         switch type {
-        case "typing.start": isThinking = true
+		case "typing.start": isThinking = true
         case "typing.stop":
             isThinking = false
         case "message.create":
@@ -8389,21 +8465,30 @@ final class NativeChatStore: ObservableObject {
             upsertAssistantMessage(id: id, content: content)
         case "plan.update":
             applyPlanUpdate(payload)
-        case "memory.changed":
+		case "memory.changed":
             let summary = (payload["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             pendingMemorySummary = summary?.isEmpty == false
                 ? summary
                 : "Jame updated memory for future conversations."
-            appendPendingMemoryNoticeIfPossible()
-        case "task.complete":
+			appendPendingMemoryNoticeIfPossible()
+		case "activity.update":
+			let label = (payload["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+			guard !label.isEmpty else { return }
+			activity.append(label)
+			if activity.count > 8 { activity.removeFirst(activity.count - 8) }
+		case "task.complete":
+			queuedMessageCount = max(0, queuedMessageCount - 1)
             lastSentTextRequest = nil
             removeExecutionPlanMessages()
             isExecutingPlan = false
             isThinking = false
             cancelResponseWatchdog()
-            appendPendingMemoryNoticeIfPossible()
+			appendPendingMemoryNoticeIfPossible()
+			activity.removeAll()
+            NotificationCenter.default.post(name: .jameclawAutomationChanged, object: nil)
             notifyTaskCompletion(responseContent(from: payload))
-        case "error":
+		case "error":
+			queuedMessageCount = max(0, queuedMessageCount - 1)
             let message = responseContent(from: payload, fallback: "The provider could not complete this request.")
             messages.append(NativeChatMessage(id: UUID().uuidString, role: "error", content: message))
             reportError(title: "Provider error", detail: message)
@@ -8544,6 +8629,94 @@ final class NativeChatStore: ObservableObject {
             trigger: nil
         ))
     }
+}
+
+private struct NativeActivityRail: View {
+	let activity: [String]
+	let accent: Color
+	let fontScale: CGFloat
+	@State private var isExpanded = true
+
+	var body: some View {
+		if !activity.isEmpty {
+			VStack(alignment: .leading, spacing: 6) {
+				HStack(spacing: 7) {
+					Button { isExpanded.toggle() } label: {
+						Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+							.font(.system(size: 9 * fontScale, weight: .bold))
+						Circle().fill(accent).frame(width: 6, height: 6)
+						Text("LIVE ACTIVITY")
+					}
+					.buttonStyle(.plain)
+						.font(.system(size: 10 * fontScale, weight: .semibold, design: .monospaced))
+						.foregroundStyle(accent)
+					Spacer()
+					Text("latest")
+						.font(.system(size: 10 * fontScale, design: .monospaced))
+						.foregroundStyle(.secondary)
+				}
+				if isExpanded {
+					ForEach(Array(activity.suffix(3).enumerated()), id: \.offset) { _, item in
+						Text(item)
+							.font(.system(size: 11 * fontScale, design: .monospaced))
+							.foregroundStyle(.secondary)
+							.lineLimit(1)
+					}
+				}
+			}
+			.padding(10)
+			.background(accent.opacity(0.07), in: Rectangle())
+			.overlay(alignment: .leading) { Rectangle().fill(accent).frame(width: 2) }
+		}
+	}
+}
+
+private struct NativeAgentControlBar: View {
+	@ObservedObject var chat: NativeChatStore
+	let accent: Color
+	let fontScale: CGFloat
+	let modelName: String
+	let providerName: String
+
+	var body: some View {
+		HStack(spacing: 8) {
+			Image(systemName: chat.isResponseInProgress ? "bolt.fill" : "checkmark.circle.fill")
+				.foregroundStyle(chat.isResponseInProgress ? accent : .green)
+			Text(chat.isResponseInProgress ? "WORKING" : "READY")
+				.font(.system(size: 10 * fontScale, weight: .semibold, design: .monospaced))
+				.foregroundStyle(.secondary)
+			Text("· \(chat.messages.count) messages")
+				.font(.system(size: 10 * fontScale, design: .monospaced))
+				.foregroundStyle(.secondary)
+			if !modelName.isEmpty {
+				Text("· \(providerName.isEmpty ? "Auto" : providerName) / \(modelName)")
+					.font(.system(size: 10 * fontScale, design: .monospaced))
+					.foregroundStyle(.secondary)
+					.lineLimit(1)
+			}
+			Spacer()
+			if chat.isResponseInProgress {
+				Button("Stop", systemImage: "stop.fill") { chat.sendControlCommand("/stop") }
+					.tint(.red)
+			}
+			if chat.queuedMessageCount > 0 {
+				Text("· \(chat.queuedMessageCount) queued")
+					.font(.system(size: 10 * fontScale, design: .monospaced))
+					.foregroundStyle(accent)
+			}
+			Button("Status") { chat.sendControlCommand("/status") }
+			Button("Undo") { chat.sendControlCommand("/undo") }
+			Button("Compact") { chat.sendControlCommand("/compact") }
+			Button("New chat") { chat.startNewChat() }
+		}
+		.font(.caption)
+		.buttonStyle(.bordered)
+		.controlSize(.small)
+		.disabled(false)
+		.padding(.horizontal, 14)
+		.padding(.vertical, 8)
+		.background(accent.opacity(0.045))
+	}
 }
 
 private enum NativeGatewayError: LocalizedError {
@@ -9032,7 +9205,7 @@ private struct NativeFileSearchResponse: Codable {
 }
 
 private struct ChatComposerSuggestion: Identifiable {
-    enum Kind { case app, skill, file }
+	enum Kind { case app, skill, file, command }
     let id: String
     let kind: Kind
     let title: String
@@ -9043,6 +9216,7 @@ private struct ChatComposerSuggestion: Identifiable {
         case .app: return "app.badge"
         case .skill: return "wand.and.stars"
         case .file: return "doc"
+		case .command: return "terminal"
         }
     }
 }
@@ -9222,7 +9396,15 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .help("Choose agent workspace")
             .background(theme.panel.opacity(0.9))
-            if let error = chat.lastError {
+			NativeAgentControlBar(
+				chat: chat,
+				accent: accent,
+				fontScale: fontScale,
+				modelName: discussionProviders.selectedModel,
+				providerName: discussionProviders.providerNames[discussionProviders.selectedModel] ?? ""
+			)
+			NativeActivityRail(activity: chat.activity, accent: accent, fontScale: fontScale)
+			if let error = chat.lastError {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
@@ -9412,7 +9594,7 @@ struct ChatView: View {
                         }
                         .onChange(of: chat.draft) { _, value in updateSuggestions(for: value) }
                     Button { sendComposer() } label: {
-                        Text(chat.isResponseInProgress ? "..." : "Send")
+                        Text(chat.isResponseInProgress ? "Queue" : "Send")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .frame(minWidth: 36)
                     }
@@ -9437,9 +9619,9 @@ struct ChatView: View {
                         .onChange(of: chat.isResponseInProgress) { _, isInProgress in
                             thinkingButtonGlow = isInProgress
                         }
-                        .disabled(chat.isResponseInProgress)
-                        .accessibilityLabel(chat.isResponseInProgress ? "Jame is thinking" : "Send")
-                        .help(chat.isResponseInProgress ? "Jame is thinking…" : "Send message")
+                        .disabled(chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityLabel(chat.isResponseInProgress ? "Queue message" : "Send")
+                        .help(chat.isResponseInProgress ? "Queue this message for Jame" : "Send message")
                         .keyboardShortcut(.defaultAction)
                     if discussionProviders.selectedFallbackModel.isEmpty == false {
                         JameDropdownPicker(
@@ -9594,6 +9776,20 @@ struct ChatView: View {
         let matchingAppItems = trigger == "@" ? appCommands.filter {
             query.isEmpty || $0.title.lowercased().contains(query) || $0.subtitle.lowercased().contains(query)
         } : []
+        let builtInCommands: [ChatComposerSuggestion] = [
+            ("status", "Show agent and task status"), ("stop", "Stop the active task"),
+            ("queue", "Show or clear queued messages"), ("model", "Show or switch model"),
+            ("new", "Start a fresh conversation"), ("sessions", "Open saved sessions"),
+            ("stats", "Show session context"), ("usage", "Show context usage"),
+            ("insights", "Summarize conversation state"), ("undo", "Undo the last turn"),
+            ("compact", "Compact older context"), ("automations", "List automations"),
+            ("run", "Run an automation"), ("pause", "Pause an automation"),
+            ("resume", "Resume an automation"), ("approvals", "Show safety controls"), ("help", "List commands")
+        ]
+        .filter { query.isEmpty || $0.0.contains(query) || $0.1.lowercased().contains(query) }
+        .map { name, description in
+            ChatComposerSuggestion(id: "command.\(name)", kind: .command, title: "/\(name)", subtitle: description, insertion: "/\(name) ")
+        }
         if trigger == "@" {
             suggestions = matchingAppItems
         }
@@ -9607,6 +9803,9 @@ struct ChatView: View {
                     .map { skill in
                         ChatComposerSuggestion(id: skill.id, kind: .skill, title: skill.name, subtitle: skill.description.isEmpty ? "\(skill.source) skill" : skill.description, insertion: trigger == "/" ? "/\(skill.name) " : "@skill:\(skill.name) ")
                     }
+                if trigger == "/" {
+                    items.insert(contentsOf: builtInCommands, at: 0)
+                }
                 if trigger == "@" {
                     items.insert(contentsOf: matchingAppItems, at: 0)
                     let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""

@@ -19,19 +19,19 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			QfYwVcLjGgytqTYTU66lFQqGDn4=
+			Zu3+ApFt/T093kFocyS0dq7Pwjc=
 			</data>
 			<key>requirement</key>
-			<string>cdhash H"41f63055c2e31a0cada9361353aea5150a860e7e"</string>
+			<string>cdhash H"66edfe02916dfd3d3dde41687324b476aecfc237"</string>
 		</dict>
 		<key>MacOS/jameclaw-launcher</key>
 		<dict>
 			<key>cdhash</key>
 			<data>
-			kbIFAL+3VOBRvQu9nLrOAqUVaE8=
+			P+xo5hhubj5c8pqohSnnwrGIy1k=
 			</data>
 			<key>requirement</key>
-			<string>cdhash H"91b20500bfb754e051bd0bbd9cbace02a515684f"</string>
+			<string>cdhash H"3fec68e6186e6e3e5cf29aa88529e7c2b188cb59"</string>
 		</dict>
 		<key>Resources/creation-of-adam.jpg</key>
 		<dict>

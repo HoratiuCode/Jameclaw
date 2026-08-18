@@ -55,6 +55,15 @@ func mockGatewayHealthResponseWithActivity(statusCode, pid int, active bool) *ht
 	}
 }
 
+func mockGatewayHealthResponseWithChannels(statusCode, pid int) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Body: io.NopCloser(strings.NewReader(
+			`{"status":"ok","uptime":"1s","pid":` + strconv.Itoa(pid) + `,"channels":{"telegram":{"enabled":true,"running":true}}}`,
+		)),
+	}
+}
+
 func startIgnoringTermProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
 
@@ -503,6 +512,44 @@ func TestGatewayStatusReportsRunningFromHealthProbe(t *testing.T) {
 	}
 	if got := body["gateway_restart_required"]; got != false {
 		t.Fatalf("gateway_restart_required = %#v, want false", got)
+	}
+}
+
+func TestGatewayStatusIncludesLiveChannels(t *testing.T) {
+	resetGatewayTestState(t)
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	cmd := startLongRunningProcess(t)
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	})
+
+	gatewayHealthGet = func(string, time.Duration) (*http.Response, error) {
+		return mockGatewayHealthResponseWithChannels(http.StatusOK, cmd.Process.Pid), nil
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/gateway/status", nil)
+	mux.ServeHTTP(rec, req)
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	channels, ok := body["channels"].(map[string]any)
+	if !ok {
+		t.Fatalf("channels = %#v, want map", body["channels"])
+	}
+	telegram, ok := channels["telegram"].(map[string]any)
+	if !ok || telegram["running"] != true {
+		t.Fatalf("telegram status = %#v, want running", channels["telegram"])
 	}
 }
 

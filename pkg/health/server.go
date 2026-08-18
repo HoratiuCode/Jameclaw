@@ -12,13 +12,14 @@ import (
 )
 
 type Server struct {
-	server     *http.Server
-	mu         sync.RWMutex
-	ready      bool
-	checks     map[string]Check
-	startTime  time.Time
-	reloadFunc func() error
-	activeFunc func() bool
+	server            *http.Server
+	mu                sync.RWMutex
+	ready             bool
+	checks            map[string]Check
+	startTime         time.Time
+	reloadFunc        func() error
+	activeFunc        func() bool
+	channelStatusFunc func() map[string]any
 }
 
 type Check struct {
@@ -34,6 +35,7 @@ type StatusResponse struct {
 	Checks      map[string]Check `json:"checks,omitempty"`
 	Pid         int              `json:"pid"`
 	AgentActive bool             `json:"agent_active,omitempty"`
+	Channels    map[string]any   `json:"channels,omitempty"`
 }
 
 func NewServer(host string, port int) *Server {
@@ -123,6 +125,12 @@ func (s *Server) SetAgentActiveFunc(fn func() bool) {
 	s.activeFunc = fn
 }
 
+func (s *Server) SetChannelStatusFunc(fn func() map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.channelStatusFunc = fn
+}
+
 func (s *Server) reloadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Content-Type", "application/json")
@@ -160,6 +168,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.RLock()
 	activeFunc := s.activeFunc
+	channelStatusFunc := s.channelStatusFunc
 	s.mu.RUnlock()
 
 	uptime := time.Since(s.startTime)
@@ -168,6 +177,9 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 		Uptime:      uptime.String(),
 		Pid:         os.Getpid(),
 		AgentActive: activeFunc != nil && activeFunc(),
+	}
+	if channelStatusFunc != nil {
+		resp.Channels = channelStatusFunc()
 	}
 
 	json.NewEncoder(w).Encode(resp)

@@ -106,10 +106,12 @@ type turnState struct {
 	lastFinishReason string               // Last LLM finish_reason
 	lastUsage        *providers.UsageInfo // Last LLM usage info
 
-	touchedFiles []string
-	usedCommands []string
-	toolsUsed    []string
-	toolFailures []string
+	touchedFiles         []string
+	usedCommands         []string
+	toolsUsed            []string
+	toolFailures         []string
+	recoveryAttempts     int
+	verificationFailures []string
 
 	// Back-reference to the owning AgentLoop (set for SubTurns only, used for hard abort cascade)
 	al *AgentLoop
@@ -290,6 +292,21 @@ func (ts *turnState) learningSignals() ([]string, []string) {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
 	return append([]string(nil), ts.toolsUsed...), append([]string(nil), ts.toolFailures...)
+}
+
+func (ts *turnState) recordVerificationFailure(command, detail string) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	message := strings.TrimSpace(command + ": " + detail)
+	if message != ": " {
+		ts.verificationFailures = appendUniqueString(ts.verificationFailures, utils.Truncate(message, 500))
+	}
+}
+
+func (ts *turnState) verificationFailureMessages() []string {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return append([]string(nil), ts.verificationFailures...)
 }
 
 func appendUniqueString(values []string, value string) []string {

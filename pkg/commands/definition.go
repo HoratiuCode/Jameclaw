@@ -29,6 +29,8 @@ type Definition struct {
 	Handler     Handler      // for simple commands without sub-commands
 }
 
+func boolPtr(value bool) *bool { return &value }
+
 // EffectiveUsage returns the usage string. When SubCommands are present,
 // it is auto-generated from sub-command names so metadata and behavior
 // cannot drift.

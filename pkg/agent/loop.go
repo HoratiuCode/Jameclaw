@@ -26,6 +26,7 @@ import (
 	"github.com/sipeed/jameclaw/pkg/commands"
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/constants"
+	"github.com/sipeed/jameclaw/pkg/cron"
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/pkg/media"
 	"github.com/sipeed/jameclaw/pkg/providers"
@@ -72,7 +73,16 @@ type AgentLoop struct {
 	turnSeq        atomic.Uint64
 	activeRequests sync.WaitGroup
 
-	reloadFunc func() error
+	reloadFunc  func() error
+	cronService *cron.CronService
+}
+
+// SetCronService connects the shared scheduler to channel commands after the
+// gateway has finished creating it. The service is replaced during reloads.
+func (al *AgentLoop) SetCronService(service *cron.CronService) {
+	al.mu.Lock()
+	al.cronService = service
+	al.mu.Unlock()
 }
 
 // processOptions configures how a message is processed
@@ -688,6 +698,19 @@ func (al *AgentLoop) drainBusToSteering(ctx context.Context, activeScope, active
 					"channel":   msg.Channel,
 					"sender_id": msg.SenderID,
 				})
+			}
+			continue
+		}
+
+		// Immediate controls must bypass the normal steering queue. Otherwise a
+		// stop command sent while a tool is running would wait behind the task it
+		// is meant to cancel.
+		if commandName, ok := commands.CommandName(msg.Content); ok &&
+			(commandName == "stop" || commandName == "abort" || commandName == "cancel") {
+			if err := al.HardAbort(activeScope); err != nil {
+				logger.WarnCF("agent", "Failed to stop active turn", map[string]any{"error": err.Error(), "scope": activeScope})
+			} else {
+				al.publishResponseIfNeeded(ctx, msg.Channel, msg.ChatID, "Stopped the active task. The unfinished turn was rolled back.")
 			}
 			continue
 		}
@@ -2385,7 +2408,9 @@ turnLoop:
 
 		var response *providers.LLMResponse
 		var err error
-		maxRetries := 2
+		// Provider recovery is bounded to two total calls. Tool recovery has
+		// its own objective-level budget below.
+		maxRetries := 1
 		for retry := 0; retry <= maxRetries; retry++ {
 			response, err = callLLM(callMessages, providerToolDefs)
 			if err == nil {
@@ -2929,6 +2954,24 @@ turnLoop:
 				toolResult = tools.ErrorResult("hook returned nil tool result")
 			}
 			ts.recordToolOutcome(toolName, toolResult)
+			if !toolResult.IsError {
+				ts.resetRecoveryAfterSuccess()
+			}
+			if toolResult.IsError {
+				attempt, canRecover := ts.recordRecoveryFailure(toolResult)
+				if canRecover {
+					al.emitReasoningStep(ts, "recover", fmt.Sprintf("The first method failed. Trying a different safe strategy (%d/%d).", attempt, MaxRecoveryAttempts), map[string]any{
+						"tool":    toolName,
+						"attempt": attempt,
+					})
+				} else {
+					ts.requestGracefulInterrupt(fmt.Sprintf("Recovery limit reached after %d attempts. Do not schedule more tools; explain the failure and next safe step.", MaxRecoveryAttempts))
+					al.emitReasoningStep(ts, "recover", "Recovery limit reached. Preparing an honest failure summary.", map[string]any{
+						"tool":    toolName,
+						"attempt": attempt,
+					})
+				}
+			}
 			if toolName == "todo" && !toolResult.IsError {
 				al.publishTurnPlanUpdate(turnCtx, ts, toolResult.ForLLM, false)
 			}
@@ -2972,6 +3015,10 @@ turnLoop:
 			contentForLLM := toolResult.ForLLM
 			if contentForLLM == "" && toolResult.Err != nil {
 				contentForLLM = toolResult.Err.Error()
+			}
+			if toolResult.IsError {
+				attempt := ts.recoveryAttemptCount()
+				contentForLLM = recoveryInstruction(toolName, toolResult, attempt, attempt < MaxRecoveryAttempts && recoverableToolFailure(toolResult))
 			}
 
 			// Filter sensitive data (API keys, tokens, secrets) before sending to LLM
@@ -3122,6 +3169,9 @@ turnLoop:
 	if ts.opts.EnableVerification {
 		al.emitReasoningStep(ts, "verify", "Selecting and running post-turn verification commands.", nil)
 		al.runVerificationHooks(turnCtx, ts)
+		if failures := ts.verificationFailureMessages(); len(failures) > 0 {
+			finalContent += "\n\n⚠️ Verification found an issue:\n- " + strings.Join(failures, "\n- ")
+		}
 	}
 	ts.setFinalContent(finalContent)
 	if !ts.opts.NoHistory {
@@ -3607,6 +3657,8 @@ func placeholderStatusForReasoningStep(step, summary string, details map[string]
 		return "Running a tool..."
 	case "verify":
 		return "Verifying the result..."
+	case "recover":
+		return summary
 	default:
 		if trimmed := strings.TrimSpace(summary); trimmed != "" {
 			return trimmed
@@ -3745,6 +3797,12 @@ func (al *AgentLoop) runVerificationCommand(ctx context.Context, ts *turnState, 
 		if errors.Is(verifyCtx.Err(), context.DeadlineExceeded) {
 			errText = "verification timed out"
 		}
+	}
+	if isError {
+		ts.recordVerificationFailure(commandText, firstNonEmpty(errText, strings.TrimSpace(string(output))))
+		al.publishTurnActivity(ctx, ts, "Verification failed — reviewing the result...")
+	} else {
+		al.publishTurnActivity(ctx, ts, "Verification passed.")
 	}
 
 	al.emitEvent(
@@ -4395,6 +4453,75 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			}
 			return tree
 		},
+		SessionStats: func() (int, int, int, string, error) {
+			if opts == nil {
+				return 0, 0, 0, "", fmt.Errorf("process options not available")
+			}
+			stats, err := al.SessionStats(opts.SessionKey)
+			return stats.MessageCount, stats.TokenEstimate, stats.ContextWindow, stats.Summary, err
+		},
+		UndoLastTurn: func() (int, error) {
+			if opts == nil {
+				return 0, fmt.Errorf("process options not available")
+			}
+			return al.UndoLastTurn(opts.SessionKey)
+		},
+		CompressSession: func() (int, int, bool, error) {
+			if opts == nil {
+				return 0, 0, false, fmt.Errorf("process options not available")
+			}
+			return al.CompressSession(opts.SessionKey)
+		},
+		StopAgent: func(hard bool) error {
+			if opts == nil {
+				return fmt.Errorf("process options not available")
+			}
+			if hard {
+				return al.HardAbort(opts.SessionKey)
+			}
+			return al.InterruptGraceful("Stop the current task and summarize what is complete.")
+		},
+		PendingQueue: func() int {
+			if opts == nil || al.steering == nil {
+				return 0
+			}
+			return al.pendingSteeringCountForScope(opts.SessionKey)
+		},
+		ClearQueue: func() int {
+			if opts == nil || al.steering == nil {
+				return 0
+			}
+			return al.steering.clearScope(opts.SessionKey)
+		},
+		ListAutomations: func() []commands.AutomationSummary {
+			al.mu.RLock()
+			service := al.cronService
+			al.mu.RUnlock()
+			if service == nil {
+				return nil
+			}
+			jobs := service.ListJobs(true)
+			items := make([]commands.AutomationSummary, 0, len(jobs))
+			for _, job := range jobs {
+				state := job.State.LastStatus
+				if state == "" {
+					state = "scheduled"
+				}
+				items = append(items, commands.AutomationSummary{ID: job.ID, Name: job.Name, Enabled: job.Enabled, Running: job.State.RunningAtMS != nil, Status: state, Schedule: job.Schedule.Expr, LastStatus: job.State.LastStatus})
+			}
+			return items
+		},
+		RunAutomation: func(identifier string) error {
+			return al.withAutomation(identifier, func(service *cron.CronService, job *cron.CronJob) error { return service.RunNow(job.ID) })
+		},
+		SetAutomationState: func(identifier string, enabled bool) error {
+			return al.withAutomation(identifier, func(service *cron.CronService, job *cron.CronJob) error {
+				if service.EnableJob(job.ID, enabled) == nil {
+					return fmt.Errorf("automation not found")
+				}
+				return nil
+			})
+		},
 		SwitchChannel: func(value string) error {
 			if al.channelManager == nil {
 				return fmt.Errorf("channel manager not initialized")
@@ -4472,6 +4599,23 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 		}
 	}
 	return rt
+}
+
+func (al *AgentLoop) withAutomation(identifier string, action func(*cron.CronService, *cron.CronJob) error) error {
+	al.mu.RLock()
+	service := al.cronService
+	al.mu.RUnlock()
+	if service == nil {
+		return fmt.Errorf("automation service unavailable")
+	}
+	needle := strings.TrimSpace(identifier)
+	for _, job := range service.ListJobs(true) {
+		if job.ID == needle || strings.EqualFold(job.Name, needle) {
+			copy := job
+			return action(service, &copy)
+		}
+	}
+	return fmt.Errorf("automation %q not found", needle)
 }
 
 func activeSkillNames(agent *AgentInstance, opts processOptions) []string {

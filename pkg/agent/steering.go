@@ -153,6 +153,15 @@ func (sq *steeringQueue) lenScope(scope string) int {
 	return len(sq.queues[normalizeSteeringScope(scope)])
 }
 
+func (sq *steeringQueue) clearScope(scope string) int {
+	sq.mu.Lock()
+	defer sq.mu.Unlock()
+	scope = normalizeSteeringScope(scope)
+	count := len(sq.queues[scope])
+	delete(sq.queues, scope)
+	return count
+}
+
 // setMode updates the steering mode.
 func (sq *steeringQueue) setMode(mode SteeringMode) {
 	sq.mu.Lock()
