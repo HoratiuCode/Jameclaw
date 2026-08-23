@@ -87,6 +87,11 @@ func (t *ImageGenerationTool) Execute(ctx context.Context, args map[string]any) 
 			failures = append(failures, fmt.Sprintf("%s: %v", model.ModelName, err))
 			continue
 		}
+		if err := t.archiveGeneratedImage(path); err != nil {
+			_ = os.Remove(path)
+			failures = append(failures, fmt.Sprintf("%s: archive generated image: %v", model.ModelName, err))
+			continue
+		}
 		if contentType == "" {
 			contentType = "image/png"
 		}
@@ -101,6 +106,40 @@ func (t *ImageGenerationTool) Execute(ctx context.Context, args map[string]any) 
 		return MediaResult(fmt.Sprintf("Image generated with %q and sent to the user", model.ModelName), []string{ref})
 	}
 	return ErrorResult("image generation failed for all configured image models: " + strings.Join(failures, "; "))
+}
+
+// archiveGeneratedImage keeps a durable copy for the native Artifacts gallery.
+// The media store copy remains separate because its lifecycle is scoped to the
+// active conversation and may be cleaned up after delivery.
+func (t *ImageGenerationTool) archiveGeneratedImage(path string) error {
+	if t.cfg == nil {
+		return fmt.Errorf("configuration is unavailable")
+	}
+	archiveDir := filepath.Join(t.cfg.WorkspacePath(), "artifacts", "generated-images")
+	if err := os.MkdirAll(archiveDir, 0o700); err != nil {
+		return err
+	}
+	source, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destinationPath := filepath.Join(archiveDir, filepath.Base(path))
+	destination, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(destination, source); err != nil {
+		destination.Close()
+		_ = os.Remove(destinationPath)
+		return err
+	}
+	if err := destination.Close(); err != nil {
+		_ = os.Remove(destinationPath)
+		return err
+	}
+	return nil
 }
 
 func (t *ImageGenerationTool) imageModels() []*config.ModelConfig {

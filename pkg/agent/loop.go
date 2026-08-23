@@ -1765,8 +1765,12 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	memoryBefore := captureMemoryFiles(agent.Workspace)
+	usedSkills := activeSkillNames(agent, opts)
 	ts := newTurnState(agent, opts, al.newTurnEventScope(agent.ID, opts.SessionKey))
 	result, err := al.runTurn(ctx, ts)
+	for _, skillName := range usedSkills {
+		_ = skills.NewSkillManager(agent.Workspace).RecordUse(skillName, err == nil && result.status == TurnEndStatusCompleted)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -4398,6 +4402,15 @@ func (al *AgentLoop) handleCommand(
 
 	if matched, handled, reply := al.applyExplicitSkillCommand(msg.Content, agent, opts); matched {
 		return reply, handled
+	}
+	if commandName, ok := commands.CommandName(msg.Content); ok && commandName == "learn" {
+		fields := strings.Fields(msg.Content)
+		request := ""
+		if len(fields) > 1 {
+			request = strings.TrimSpace(strings.TrimPrefix(msg.Content, fields[0]))
+		}
+		opts.UserMessage = BuildLearnPrompt(request)
+		return "", false
 	}
 
 	if al.cmdRegistry == nil {

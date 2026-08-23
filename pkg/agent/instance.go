@@ -88,6 +88,14 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("list_dir") {
 		toolsRegistry.Register(tools.NewListDirTool(workspace, readRestrict, allowReadPaths))
 	}
+	// A dedicated recursive finder gives the agent a reliable first step for
+	// file tasks instead of making it guess directories or shell syntax.
+	if cfg.Tools.IsToolEnabled("find_files") {
+		toolsRegistry.Register(tools.NewFindFilesTool(workspace, readRestrict, allowReadPaths))
+	}
+	if cfg.Tools.IsToolEnabled("skill_manage") {
+		toolsRegistry.Register(tools.NewSkillManageTool(workspace))
+	}
 	if cfg.Tools.IsToolEnabled("exec") {
 		execTool, err := tools.NewExecToolWithConfig(workspace, restrict, cfg, allowReadPaths)
 		if err != nil {

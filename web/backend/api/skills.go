@@ -59,11 +59,60 @@ var (
 
 func (h *Handler) registerSkillRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/skills", h.handleListSkills)
+	mux.HandleFunc("GET /api/skills/health", h.handleSkillHealth)
+	mux.HandleFunc("GET /api/skills/bundles", h.handleSkillBundles)
+	mux.HandleFunc("POST /api/skills/curate", h.handleSkillCurate)
 	mux.HandleFunc("GET /api/skills/learned", h.handleListLearnedSkills)
 	mux.HandleFunc("GET /api/skills/{name}", h.handleGetSkill)
 	mux.HandleFunc("POST /api/skills/import", h.handleImportSkill)
 	mux.HandleFunc("POST /api/skills/evolve", h.handleEvolveSkill)
 	mux.HandleFunc("DELETE /api/skills/{name}", h.handleDeleteSkill)
+}
+
+func (h *Handler) skillManager(w http.ResponseWriter) (*skills.SkillManager, bool) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return nil, false
+	}
+	return skills.NewSkillManager(cfg.WorkspacePath()), true
+}
+
+func (h *Handler) handleSkillHealth(w http.ResponseWriter, _ *http.Request) {
+	manager, ok := h.skillManager(w)
+	if !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(manager.ListHealth())
+}
+
+func (h *Handler) handleSkillBundles(w http.ResponseWriter, _ *http.Request) {
+	manager, ok := h.skillManager(w)
+	if !ok {
+		return
+	}
+	bundles, err := manager.ListBundles()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(bundles)
+}
+
+func (h *Handler) handleSkillCurate(w http.ResponseWriter, _ *http.Request) {
+	manager, ok := h.skillManager(w)
+	if !ok {
+		return
+	}
+	archived, err := manager.Curate()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(archived)
 }
 
 func (h *Handler) handleListSkills(w http.ResponseWriter, r *http.Request) {

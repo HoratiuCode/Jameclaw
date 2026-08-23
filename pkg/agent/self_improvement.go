@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sipeed/jameclaw/pkg/fileutil"
+	"github.com/sipeed/jameclaw/pkg/skills"
 	"github.com/sipeed/jameclaw/pkg/utils"
 )
 
@@ -387,7 +388,9 @@ func (s *SelfImprovementStore) createSkill(candidate LearningCandidate) (string,
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
-	description := utils.Truncate(strings.ReplaceAll(candidate.Lesson, "\n", " "), 360)
+	// Leave room for YAML escaping and keep learned skills comfortably inside
+	// the routing-description budget enforced by the skill manager.
+	description := utils.Truncate(strings.ReplaceAll(candidate.Lesson, "\n", " "), skills.MaxSkillDescription-24)
 	descriptionJSON, _ := json.Marshal(description)
 	content := fmt.Sprintf(`---
 name: %s
@@ -410,7 +413,11 @@ Use this learned workflow only for tasks that match its evidence and scope.
 
 Verify the concrete output before reporting completion. If the task differs materially, stop using this workflow and re-plan.
 `, slug, string(descriptionJSON), candidate.Title, candidate.Lesson, markdownToolList(candidate.Tools))
-	if err := fileutil.WriteFileAtomic(path, []byte(content), 0o600); err != nil {
+	if _, err := skills.NewSkillManager(s.workspace).Apply(skills.ManagedSkillRequest{
+		Action:  "create",
+		Name:    slug,
+		Content: content,
+	}); err != nil {
 		return "", err
 	}
 	return path, nil

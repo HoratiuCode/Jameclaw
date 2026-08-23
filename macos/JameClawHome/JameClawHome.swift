@@ -1043,11 +1043,46 @@ struct JameRootView: View {
     private var chromeRule: Color { chromeTheme == .light ? Color.black.opacity(0.14) : JameBrand.rule }
     private var chromeForeground: Color { chromeTheme == .light ? JameBrand.ink : JameBrand.paper }
     private var chromeAccent: Color { launcherAccentPreference(from: savedAccent, theme: chromeTheme) }
+    private var detailBackgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: [chromeBackground, chromeAccent.opacity(chromeTheme == .light ? 0.045 : 0.075), chromeBackground],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
     private var stableSectionSelection: Binding<DesktopSection?> {
         Binding(
             get: { selectedSection },
             set: { selectDesktopSection($0, selection: $selectedSection) }
         )
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        switch selectedSection ?? .chat {
+        case .chat:
+            ChatView(port: Int(settings.port) ?? 18800, chat: chat)
+        case .fixedChats:
+            SessionsView(port: Int(settings.port) ?? 18800, pinnedOnly: true, resumeSession: openSessionInChat)
+        case .memory:
+            AgentMemoryView(port: Int(settings.port) ?? 18800)
+        case .agent:
+            AgentManagerView(port: Int(settings.port) ?? 18800)
+        case .sessions:
+            SessionsView(port: Int(settings.port) ?? 18800, resumeSession: openSessionInChat)
+        case .archivedChats:
+            SessionsView(port: Int(settings.port) ?? 18800, archivedOnly: true, resumeSession: openSessionInChat)
+        case .automations:
+            AutomationsView(port: Int(settings.port) ?? 18800)
+        case .capabilities:
+            CapabilitiesView(port: Int(settings.port) ?? 18800)
+        case .artifacts:
+            ArtifactsView()
+        case .settings:
+            QuickSettingsView(settings: settings) {
+                selectDesktopSection(.archivedChats, selection: $selectedSection)
+            }
+        }
     }
 
     var body: some View {
@@ -1057,43 +1092,15 @@ struct JameRootView: View {
                 isAgentWorking: chat.isResponseInProgress,
                 hasAutomations: navigationContext.hasAutomations,
                 hasFixedChats: navigationContext.hasFixedChats,
-                messagingPlatformLabel: navigationContext.messagingPlatformLabel
-            ) {
-                showingCommandPalette = true
-            }
+                messagingPlatformLabel: navigationContext.messagingPlatformLabel,
+                showingCommandPalette: $showingCommandPalette,
+                openTerminal: { showingTerminalWorkspace = true }
+            )
         } detail: {
             ZStack {
-                LinearGradient(
-                    colors: [chromeBackground, chromeAccent.opacity(chromeTheme == .light ? 0.045 : 0.075), chromeBackground],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                detailBackgroundGradient
                 .ignoresSafeArea()
-
-                switch selectedSection ?? .chat {
-                case .chat:
-                    ChatView(port: Int(settings.port) ?? 18800, chat: chat)
-                case .fixedChats:
-                    SessionsView(port: Int(settings.port) ?? 18800, pinnedOnly: true, resumeSession: openSessionInChat)
-                case .memory:
-                    AgentMemoryView(port: Int(settings.port) ?? 18800)
-                case .agent:
-                    AgentManagerView(port: Int(settings.port) ?? 18800)
-                case .sessions:
-                    SessionsView(port: Int(settings.port) ?? 18800, resumeSession: openSessionInChat)
-                case .archivedChats:
-                    SessionsView(port: Int(settings.port) ?? 18800, archivedOnly: true, resumeSession: openSessionInChat)
-                case .automations:
-                    AutomationsView(port: Int(settings.port) ?? 18800)
-                case .capabilities:
-                    CapabilitiesView(port: Int(settings.port) ?? 18800)
-                case .artifacts:
-                    ArtifactsView()
-                case .settings:
-                    QuickSettingsView(settings: settings) {
-                        selectDesktopSection(.archivedChats, selection: $selectedSection)
-                    }
-                }
+                detailContent
             }
         }
         .tint(chromeAccent)
@@ -1109,39 +1116,6 @@ struct JameRootView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 290)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 6) {
-                    Button {
-                        showingTerminalWorkspace = true
-                    } label: {
-                        Image(systemName: "terminal")
-                            .frame(width: 28, height: 24)
-                            .foregroundStyle(chromeForeground)
-                            .background(chromePanel)
-                            .overlay(Rectangle().stroke(chromeRule, lineWidth: 1))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open terminal and choose where Jame works")
-                    .accessibilityLabel("Terminal and documents")
-
-                    Button {
-                        selectDesktopSection(.settings, selection: $selectedSection)
-                    } label: {
-                        Image(systemName: selectedSection == .settings ? "gearshape.fill" : "gearshape")
-                            .frame(width: 28, height: 24)
-                            .background(selectedSection == .settings ? chromeAccent : chromePanel)
-                            .foregroundStyle(selectedSection == .settings ? JameBrand.ink : chromeForeground)
-                            .overlay(Rectangle().stroke(chromeRule, lineWidth: 1))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open JameClaw Settings")
-                    .accessibilityLabel("Settings")
-                }
-            }
-        }
         .onReceive(
             DistributedNotificationCenter.default().publisher(for: .jameclawHomeNavigation)
         ) { notification in
@@ -1171,11 +1145,6 @@ struct JameRootView: View {
         .task {
             await navigationContext.monitor()
         }
-        .sheet(isPresented: $showingCommandPalette) {
-            QuickActionPalette(selectedSection: stableSectionSelection) {
-                showingCommandPalette = false
-            }
-        }
         .sheet(isPresented: $showingTerminalWorkspace) {
             TerminalWorkspaceView(
                 port: Int(settings.port) ?? 18800,
@@ -1203,7 +1172,8 @@ private struct DesktopSidebar: View {
     let hasAutomations: Bool
     let hasFixedChats: Bool
     let messagingPlatformLabel: String
-    let openCommandPalette: () -> Void
+    @Binding var showingCommandPalette: Bool
+    let openTerminal: () -> Void
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -1250,8 +1220,32 @@ private struct DesktopSidebar: View {
                             .symbolRenderingMode(.hierarchical)
                     }
                     Spacer()
+                    Button(action: openTerminal) {
+                        Image(systemName: "terminal")
+                            .frame(width: 28, height: 24)
+                            .foregroundStyle(primary)
+                            .background(panel)
+                            .overlay(Rectangle().stroke(rule))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open terminal and choose where Jame works")
+                    Button {
+                        selectedSection = .settings
+                    } label: {
+                        Image(systemName: selectedSection == .settings ? "gearshape.fill" : "gearshape")
+                            .frame(width: 28, height: 24)
+                            .foregroundStyle(selectedSection == .settings ? JameBrand.ink : primary)
+                            .background(selectedSection == .settings ? accent : panel)
+                            .overlay(Rectangle().stroke(rule))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open JameClaw Settings")
                 }
-                Button(action: openCommandPalette) {
+                Button {
+                    showingCommandPalette = true
+                } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "magnifyingglass")
                         Text("Quick actions")
@@ -1265,21 +1259,38 @@ private struct DesktopSidebar: View {
                     .overlay(Rectangle().stroke(rule))
                 }
                 .buttonStyle(.plain)
+                .popover(
+                    isPresented: $showingCommandPalette,
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .top
+                ) {
+                    QuickActionPalette(selectedSection: $selectedSection) {
+                        showingCommandPalette = false
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
             .background(background.opacity(0.97))
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 7) {
-                Circle().fill(accent).frame(width: 7, height: 7)
-                Text(messagingPlatformLabel)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .help(messagingPlatformLabel)
-                Spacer()
+            Button {
+                selectedSection = .settings
+            } label: {
+                HStack(spacing: 7) {
+                    Circle().fill(accent).frame(width: 7, height: 7)
+                    Text(messagingPlatformLabel)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                }
             }
+            .buttonStyle(.plain)
+            .help("Open Settings to manage connected platforms")
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .background(background.opacity(0.97))
@@ -2982,58 +2993,92 @@ private struct WorkspaceBrowserView: View {
     }
 }
 
+private enum ArtifactsPage: String, CaseIterable, Identifiable {
+    case projects
+    case generatedImages
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .projects: return "Projects"
+        case .generatedImages: return "Generated Images"
+        }
+    }
+}
+
 struct ArtifactsView: View {
     @StateObject private var browser = WorkspaceBrowser(
         title: "Artifacts",
         directory: jameWorkspaceURL().appendingPathComponent("artifacts")
     )
     @State private var selectedProject: WorkspaceEntry?
+    @State private var selectedPage: ArtifactsPage = .projects
 
-    private var projects: [WorkspaceEntry] { browser.entries.filter(\.isDirectory) }
+    private var projects: [WorkspaceEntry] {
+        browser.entries.filter { $0.isDirectory && $0.url.lastPathComponent != "generated-images" }
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Artifacts").font(.title3.weight(.semibold))
-                    Spacer()
-                    Button { browser.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    Button("Open Folder") { browser.open() }
-                }
-                .padding(16)
-                Divider()
-                if projects.isEmpty {
-                    ContentUnavailableView(
-                        "No artifacts yet",
-                        systemImage: "shippingbox",
-                        description: Text("Save a website artifact from the Web Console and it will appear here.")
-                    )
-                } else {
-                    List(projects) { project in
-                        Button {
-                            selectedProject = project
-                        } label: {
-                            Label(artifactTitle(project.url), systemImage: "folder.fill")
-                                .lineLimit(1)
-                                .foregroundStyle(selectedProject?.id == project.id ? .primary : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.vertical, 3)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Artifacts").font(.title3.weight(.semibold))
+                Picker("Artifact view", selection: $selectedPage) {
+                    ForEach(ArtifactsPage.allCases) { page in
+                        Text(page.title).tag(page)
                     }
-                    .listStyle(.sidebar)
                 }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 310)
+                Spacer()
+                Button { browser.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                Button("Open Folder") { browser.open() }
             }
-            .frame(minWidth: 180, idealWidth: 240, maxWidth: 300)
+            .padding(16)
             Divider()
-            if let project = selectedProject {
-                ArtifactProjectView(projectURL: project.url, title: artifactTitle(project.url))
-                    .id(project.id)
+            if selectedPage == .generatedImages {
+                GeneratedImagesView(
+                    directory: jameWorkspaceURL()
+                        .appendingPathComponent("artifacts", isDirectory: true)
+                        .appendingPathComponent("generated-images", isDirectory: true)
+                )
             } else {
-                ContentUnavailableView(
-                    "Choose an artifact",
-                    systemImage: "folder",
-                    description: Text("Select an artifact folder to view its files or start its website."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        if projects.isEmpty {
+                            ContentUnavailableView(
+                                "No artifacts yet",
+                                systemImage: "shippingbox",
+                                description: Text("Save a website artifact from the Web Console and it will appear here.")
+                            )
+                        } else {
+                            List(projects) { project in
+                                Button {
+                                    selectedProject = project
+                                } label: {
+                                    Label(artifactTitle(project.url), systemImage: "folder.fill")
+                                        .lineLimit(1)
+                                        .foregroundStyle(selectedProject?.id == project.id ? .primary : .secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.vertical, 3)
+                            }
+                            .listStyle(.sidebar)
+                        }
+                    }
+                    .frame(minWidth: 180, idealWidth: 240, maxWidth: 300)
+                    Divider()
+                    if let project = selectedProject {
+                        ArtifactProjectView(projectURL: project.url, title: artifactTitle(project.url))
+                            .id(project.id)
+                    } else {
+                        ContentUnavailableView(
+                            "Choose an artifact",
+                            systemImage: "folder",
+                            description: Text("Select an artifact folder to view its files or start its website."))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
             }
         }
         .task { browser.refresh() }
@@ -3046,6 +3091,133 @@ struct ArtifactsView: View {
               let name = object["name"] as? String,
               !name.isEmpty else { return directory.lastPathComponent }
         return name
+    }
+}
+
+private struct GeneratedImageEntry: Identifiable {
+    let url: URL
+    let modifiedAt: Date
+
+    var id: String { url.path }
+}
+
+private struct GeneratedImagesView: View {
+    let directory: URL
+    @State private var images: [GeneratedImageEntry] = []
+    @State private var selectedImage: GeneratedImageEntry?
+    @State private var status = ""
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 14)
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Images created by JameClaw").font(.headline)
+                    Text("Every image generated by the agent is saved here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { refresh() } label: { Image(systemName: "arrow.clockwise") }
+                Button("Open Folder") { NSWorkspace.shared.open(directory) }
+            }
+            .padding(18)
+            Divider()
+            if images.isEmpty {
+                ContentUnavailableView(
+                    "No generated images yet",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("Ask the agent to create an image and it will appear in this gallery."))
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(images) { image in
+                            Button { selectedImage = image } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if let nsImage = NSImage(contentsOf: image.url) {
+                                        Image(nsImage: nsImage)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 170)
+                                            .background(.quaternary, in: Rectangle())
+                                    } else {
+                                        Image(systemName: "photo")
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 170)
+                                            .background(.quaternary, in: Rectangle())
+                                    }
+                                    Text(image.url.lastPathComponent)
+                                        .font(.caption.weight(.medium))
+                                        .lineLimit(1)
+                                    Text(image.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(8)
+                                .background(.background, in: Rectangle())
+                                .overlay(Rectangle().stroke(.quaternary))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(18)
+                }
+            }
+            HStack {
+                Text(status).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+        }
+        .task { refresh() }
+        .sheet(item: $selectedImage) { image in
+            GeneratedImagePreview(image: image)
+        }
+    }
+
+    private func refresh() {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            images = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey, .typeIdentifierKey],
+                options: [.skipsHiddenFiles]
+            )
+            .filter { ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"].contains($0.pathExtension.lowercased()) }
+            .compactMap { url in
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                return GeneratedImageEntry(url: url, modifiedAt: values?.contentModificationDate ?? .distantPast)
+            }
+            .sorted { $0.modifiedAt > $1.modifiedAt }
+            status = "\(images.count) image\(images.count == 1 ? "" : "s")"
+        } catch {
+            images = []
+            status = "Could not read the generated images folder."
+        }
+    }
+}
+
+private struct GeneratedImagePreview: View {
+    let image: GeneratedImageEntry
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if let nsImage = NSImage(contentsOf: image.url) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 900, maxHeight: 700)
+            }
+            Text(image.url.lastPathComponent).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(minWidth: 520, minHeight: 420)
     }
 }
 
@@ -3411,6 +3583,8 @@ struct SkillsView: View {
     @State private var skillName = ""
     @State private var skillDescription = ""
     @State private var addError = ""
+    @State private var healthItems: [NativeSkillHealth] = []
+    @State private var curatorBusy = false
     private let port: Int
 
     init(port: Int) { self.port = port }
@@ -3424,6 +3598,10 @@ struct SkillsView: View {
                 }
                 Spacer()
                 Button { refreshAgentSkills() } label: { Image(systemName: "arrow.clockwise") }
+                Button(curatorBusy ? "Curating…" : "Curate") {
+                    Task { await curateSkills() }
+                }
+                .disabled(curatorBusy)
                 Button("Add Skill") {
                     skillName = ""
                     skillDescription = ""
@@ -3435,21 +3613,49 @@ struct SkillsView: View {
             }
             .padding(18)
             Divider()
-            if browser.entries.isEmpty {
+            if browser.entries.isEmpty && healthItems.isEmpty {
                 ContentUnavailableView(
                     "No workspace skills yet",
                     systemImage: "wand.and.stars",
                     description: Text("Add a skill here, or use the Web Console to manage skills.")
                 )
             } else {
-                List(browser.entries) { entry in
-                    HStack(spacing: 10) {
-                        Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
-                            .foregroundStyle(entry.isDirectory ? .orange : .secondary)
-                        Text(entry.url.lastPathComponent).lineLimit(1)
-                        Spacer()
-                        Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) }
-                            .buttonStyle(.borderless)
+                List {
+                    if !healthItems.isEmpty {
+                        Section("Skill health") {
+                            ForEach(healthItems) { item in
+                                HStack(spacing: 10) {
+                                    Image(systemName: item.warnings.isEmpty ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                        .foregroundStyle(item.warnings.isEmpty ? .green : .orange)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.name).font(.headline)
+                                        Text(item.description.isEmpty ? "No description" : item.description)
+                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Text("\(item.usageCount) uses · \(item.successCount) ok · \(item.patchCount) changes")
+                                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                    Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)]) }
+                                        .buttonStyle(.borderless)
+                                }
+                                if !item.warnings.isEmpty {
+                                    Text(item.warnings.map(\.message).joined(separator: " · "))
+                                        .font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                                }
+                            }
+                        }
+                    }
+                    Section("Workspace files") {
+                        ForEach(browser.entries) { entry in
+                            HStack(spacing: 10) {
+                                Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
+                                    .foregroundStyle(entry.isDirectory ? .orange : .secondary)
+                                Text(entry.url.lastPathComponent).lineLimit(1)
+                                Spacer()
+                                Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) }
+                                    .buttonStyle(.borderless)
+                            }
+                        }
                     }
                 }
             }
@@ -3469,7 +3675,7 @@ struct SkillsView: View {
                 HStack {
                     Spacer()
                     Button("Cancel") { showingAddSkill = false }
-                    Button("Create Skill") { createSkill() }
+                    Button("Create Skill") { Task { await createSkill() } }
                         .buttonStyle(.borderedProminent)
                         .disabled(skillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -3479,19 +3685,13 @@ struct SkillsView: View {
         }
     }
 
-    private func createSkill() {
+    private func createSkill() async {
         let displayName = skillName.trimmingCharacters(in: .whitespacesAndNewlines)
         let slug = displayName.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         guard !slug.isEmpty else {
             addError = "Use at least one letter or number in the skill name."
-            return
-        }
-        let skillDirectory = browser.directory.appendingPathComponent(slug, isDirectory: true)
-        let skillFile = skillDirectory.appendingPathComponent("SKILL.md")
-        guard !FileManager.default.fileExists(atPath: skillDirectory.path) else {
-            addError = "A skill named \(slug) already exists."
             return
         }
         let description = skillDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3506,30 +3706,55 @@ struct SkillsView: View {
         Add the instructions JameClaw should follow when using this skill.
         """
         do {
-            try FileManager.default.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
-            try document.write(to: skillFile, atomically: true, encoding: .utf8)
+            var request = authenticatedConsoleRequest(port: port, path: "/api/skills/evolve", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "create", "name": slug, "content": document])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let message = String(data: data, encoding: .utf8) ?? "The skill could not be created."
+                throw NSError(domain: "JameClawSkills", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
             browser.refresh()
+            await refreshAgentSkillsAsync()
             showingAddSkill = false
-            NSWorkspace.shared.activateFileViewerSelecting([skillFile])
         } catch {
-            addError = "Could not create this skill."
+            addError = error.localizedDescription
+        }
+    }
+
+    private func curateSkills() async {
+        curatorBusy = true
+        defer { curatorBusy = false }
+        do {
+            let request = authenticatedConsoleRequest(port: port, path: "/api/skills/curate", method: "POST")
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            await refreshAgentSkillsAsync()
+        } catch {
+            browser.status = "Could not curate skills: \(error.localizedDescription)"
         }
     }
 
     private func refreshAgentSkills() {
         Task {
+            await refreshAgentSkillsAsync()
+        }
+    }
+
+    private func refreshAgentSkillsAsync() async {
             do {
                 let (data, response) = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/skills"))
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
                 let skillList = try JSONDecoder().decode(NativeSkillsResponse.self, from: data).skills
                 let directories = skillList.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent() }
                 browser.entries = directories.map { WorkspaceEntry(url: $0, isDirectory: true) }
-                browser.status = "\(skillList.count) skills available to the agent (workspace, global, and bundled)."
+                let healthData = try await URLSession.shared.data(from: authenticatedConsoleURL(port: port, path: "/api/skills/health")).0
+                healthItems = try JSONDecoder().decode([NativeSkillHealth].self, from: healthData)
+                browser.status = "\(skillList.count) skills available · \(healthItems.filter { !$0.warnings.isEmpty }.count) need attention"
             } catch {
                 browser.refresh()
                 browser.status = "Showing workspace skills only. Could not reach the agent skill registry."
             }
-        }
     }
 }
 
@@ -5158,9 +5383,13 @@ private struct TeamGridView: View {
             Rectangle().fill(teamRule(colorScheme)).frame(height: 1)
 
             HStack(spacing: 0) {
-                ScrollView([.horizontal, .vertical]) {
-                    TeamGridZoomContainer(scale: gridZoom) {
-                    VStack(spacing: 28) {
+                // Keep the axes independent so a trackpad or mouse wheel can
+                // move vertically without accidentally locking onto the wide
+                // team map. The inner horizontal scroller handles zoomed maps.
+                ScrollView(.vertical) {
+                    ScrollView(.horizontal) {
+                        TeamGridZoomContainer(scale: gridZoom) {
+                        VStack(spacing: 28) {
                         TeamOperationsBoard(
                             snapshot: activity.operations,
                             agents: agents,
@@ -5251,10 +5480,13 @@ private struct TeamGridView: View {
                                 .foregroundStyle(JameBrand.orange)
                         }
                     }
-                    .padding(36)
-                    .frame(minWidth: 440, minHeight: 400)
+                        .padding(36)
+                        .frame(minWidth: 440, minHeight: 400)
+                        }
                     }
+                    .scrollIndicators(.visible)
                 }
+                .scrollIndicators(.visible)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Rectangle().fill(teamRule(colorScheme)).frame(width: 1)
@@ -5278,14 +5510,14 @@ private struct TeamGridView: View {
                         showingCreate = true
                     }
                 )
-                .frame(width: 250)
+                .frame(minWidth: 220, idealWidth: 250, maxWidth: 280)
                 .frame(maxHeight: .infinity)
                 .background(teamPanel(colorScheme))
             }
         }
         .foregroundStyle(teamPrimary(colorScheme))
         .background(teamPageBackground(colorScheme))
-        .frame(minWidth: 1060, idealWidth: 1240, minHeight: 500)
+        .frame(minWidth: 760, idealWidth: 1240, minHeight: 500)
         .task {
             await refreshGrid()
             if agentsByID[selectedAgentID] == nil { selectedAgentID = mainAgent?.id ?? agents.first?.id ?? "" }
@@ -7152,6 +7384,41 @@ private final class NativeResearchProviderStore: ObservableObject {
     }
 }
 
+private enum AgentPersonalityPreset: String, CaseIterable, Identifiable {
+    case helpful
+    case concise
+    case creative
+    case analytical
+    case custom
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .helpful: return "Helpful guide"
+        case .concise: return "Concise operator"
+        case .creative: return "Creative collaborator"
+        case .analytical: return "Analytical thinker"
+        case .custom: return "Custom"
+        }
+    }
+
+    var instructions: String {
+        switch self {
+        case .helpful:
+            return "Be warm, practical, and proactive. Explain decisions clearly, anticipate useful next steps, and help the user make steady progress."
+        case .concise:
+            return "Be direct and efficient. Lead with the answer, keep explanations compact, and avoid unnecessary sections or repetition."
+        case .creative:
+            return "Be imaginative and collaborative. Offer original options, make thoughtful connections, and keep ideas grounded in something the user can act on."
+        case .analytical:
+            return "Be precise and evidence-driven. State assumptions, separate facts from inferences, identify tradeoffs, and check important details before concluding."
+        case .custom:
+            return ""
+        }
+    }
+}
+
 struct QuickSettingsView: View {
     @ObservedObject var settings: LauncherSettingsStore
     let openArchivedChats: () -> Void
@@ -7175,6 +7442,19 @@ struct QuickSettingsView: View {
     @State private var musicPlaylistStatus = ""
     @State private var documentSafetyStatus = ""
     @State private var researchAPIKey = ""
+    @State private var personalityPreset: AgentPersonalityPreset = .custom
+    @State private var personalityInstructions = ""
+    @State private var personalityAgentName = ""
+    @State private var personalityTone = ""
+    @State private var personalityDiscussionMode = ""
+    @State private var personalityMemoryNotes = ""
+    @State private var personalityStatusStyle = ""
+    @State private var personalityStatus = ""
+    @State private var agentUpdateStatus = ""
+    @State private var agentCurrentVersion = ""
+    @State private var agentLatestVersion = ""
+    @State private var agentUpdateAvailable = false
+    @State private var agentUpdateLoading = false
 
     private var selectedResearchProvider: NativeResearchProviderInfo? {
         researchProviders.providers.first(where: { $0.id == researchProviders.selectedProviderID })
@@ -7216,7 +7496,48 @@ struct QuickSettingsView: View {
             }
             Section("Notifications") {
                 Toggle("Notify me when Jame finishes a task", isOn: $taskCompletionNotifications)
-                Text("JameClaw Desktop sends a macOS notification with a short result preview when an agent turn completes.")
+                    .onChange(of: taskCompletionNotifications) { _, enabled in
+                        guard enabled else { return }
+                        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+                    }
+                Text("When JameClaw is in the background, send a macOS notification with a short result preview when an agent turn completes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("JameClaw AI agent") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Desktop agent version")
+                            .font(.subheadline.weight(.medium))
+                        Text(agentCurrentVersion.isEmpty ? "Version not checked yet" : agentCurrentVersion)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if agentUpdateAvailable {
+                        Label(agentLatestVersion.isEmpty ? "Update available" : agentLatestVersion, systemImage: "arrow.down.circle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                HStack {
+                    Button(agentUpdateLoading ? "Checking…" : "Check for updates") {
+                        Task { await checkForAgentUpdate() }
+                    }
+                    .disabled(agentUpdateLoading)
+                    if agentUpdateAvailable {
+                        Button("Open update page") {
+                            Task { await openAgentUpdate() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                if !agentUpdateStatus.isEmpty {
+                    Text(agentUpdateStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Check for a newer JameClaw AI agent release and open the official update page when one is available.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -7260,6 +7581,39 @@ struct QuickSettingsView: View {
                         .frame(height: 65)
                     Text("One CIDR per line, for example 192.168.1.0/24.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section("Personality") {
+                Picker("Personality style", selection: $personalityPreset) {
+                    ForEach(AgentPersonalityPreset.allCases) { preset in
+                        Text(preset.label).tag(preset)
+                    }
+                }
+                .onChange(of: personalityPreset) { _, preset in
+                    if preset != .custom {
+                        personalityInstructions = preset.instructions
+                    }
+                }
+                if personalityPreset == .custom {
+                    TextEditor(text: $personalityInstructions)
+                        .font(.system(.body, design: .rounded))
+                        .frame(minHeight: 105)
+                    Text("Write custom instructions for how the main agent should speak and make decisions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Jame will automatically use the built-in \(personalityPreset.label) personality.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Save personality") {
+                        savePersonality()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    if !personalityStatus.isEmpty {
+                        Text(personalityStatus).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             Section {
@@ -7514,6 +7868,7 @@ struct QuickSettingsView: View {
             await providers.load(port: port)
             await researchProviders.load(port: port)
             await loadMusicPlaylistPermission(port: port)
+            await loadPersonality(port: port)
         }
         .fileImporter(
             isPresented: $showingBackgroundPicker,
@@ -7539,6 +7894,102 @@ struct QuickSettingsView: View {
     private func openProviderSetup(_ purpose: ProviderSetupPurpose) {
         providerSetupPurpose = purpose
         showingProviderSetup = true
+    }
+
+    private func checkForAgentUpdate() async {
+        agentUpdateLoading = true
+        agentUpdateStatus = ""
+        defer { agentUpdateLoading = false }
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                from: authenticatedConsoleURL(port: Int(settings.port) ?? 18800, path: "/api/update/status")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let status = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            agentCurrentVersion = status["current_version"] as? String ?? ""
+            agentLatestVersion = status["latest_version"] as? String ?? ""
+            agentUpdateAvailable = status["update_available"] as? Bool ?? false
+            if let error = status["check_error"] as? String, !error.isEmpty {
+                agentUpdateStatus = "Could not check for updates: \(error)"
+            } else if agentUpdateAvailable {
+                agentUpdateStatus = "A newer JameClaw AI agent release is available."
+            } else {
+                agentUpdateStatus = "JameClaw is up to date."
+            }
+        } catch {
+            agentUpdateStatus = "Could not check for JameClaw updates."
+        }
+    }
+
+    private func openAgentUpdate() async {
+        do {
+            var request = authenticatedConsoleRequest(port: Int(settings.port) ?? 18800, path: "/api/update/open", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            agentUpdateStatus = "Opened the official JameClaw update page."
+        } catch {
+            agentUpdateStatus = "Could not open the JameClaw update page."
+        }
+    }
+
+    private func loadPersonality(port: Int) async {
+        do {
+            let (data, response) = try await URLSession.shared.data(
+                from: authenticatedConsoleURL(port: port, path: "/api/agents")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let main = try JSONDecoder().decode(NativeAgentsResponse.self, from: data)
+                .agents.first(where: { $0.id == "main" })
+            let human = main?.human
+            personalityAgentName = human?.agentName ?? ""
+            personalityInstructions = human?.persona ?? ""
+            personalityTone = human?.tone ?? ""
+            personalityDiscussionMode = human?.discussionMode ?? ""
+            personalityMemoryNotes = human?.memoryNotes ?? ""
+            personalityStatusStyle = human?.statusStyle ?? ""
+            personalityPreset = AgentPersonalityPreset.allCases.first {
+                $0 != .custom && $0.instructions == personalityInstructions
+            } ?? .custom
+        } catch {
+            personalityStatus = "Could not load the agent personality."
+        }
+    }
+
+    private func savePersonality() {
+        personalityStatus = "Saving…"
+        Task {
+            do {
+                let port = Int(settings.port) ?? 18800
+                var request = authenticatedConsoleRequest(port: port, path: "/api/agents/main", method: "PATCH")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONEncoder().encode(
+                    NativeUpdateAgentRequest(
+                        human: NativeUpdateAgentHuman(
+                            agentName: personalityAgentName,
+                            persona: personalityInstructions,
+                            tone: personalityTone,
+                            discussionMode: personalityDiscussionMode,
+                            memoryNotes: personalityMemoryNotes,
+                            statusStyle: personalityStatusStyle
+                        )
+                    )
+                )
+                let (_, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                personalityStatus = "Personality saved."
+            } catch {
+                personalityStatus = "Could not save the agent personality."
+            }
+        }
     }
 
     private func applyDesignPreset(_ preset: NativeDesignPreset) {
@@ -7880,6 +8331,7 @@ final class NativeChatStore: ObservableObject {
     @Published var lastError: NativeAppError?
     @Published var workspaceName = "Choose workspace"
     @Published var workspacePath = ""
+    @Published var showsTaskFiles = false
 
     private let port: Int
     private var sessionID: String
@@ -8237,6 +8689,9 @@ final class NativeChatStore: ObservableObject {
     func send(modelOverride: String = "") {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
+        if mentionsTaskFiles(in: content) {
+            showsTaskFiles = true
+        }
         let wasBusy = isResponseInProgress
         draft = ""
         let id = "native-\(UUID().uuidString)"
@@ -8298,7 +8753,7 @@ final class NativeChatStore: ObservableObject {
 
     private func taskFolderInstruction(for content: String) -> String {
         let folderPath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !folderPath.isEmpty, folderPath != jameInternalWorkspaceURL().path else { return content }
+        guard showsTaskFiles, !folderPath.isEmpty, folderPath != jameInternalWorkspaceURL().path else { return content }
         return """
         [JameClaw Desktop task folder: \(folderPath)]
         Treat this folder as the working directory for this request. Use absolute paths inside it when reading, creating, editing, or running project files. For multi-file work that does not already belong to a named project, create one clearly named project subfolder here. Never create JameClaw runtime folders such as memory, sessions, cron, skills, or artifacts here; those belong only in JameClaw's private internal workspace.
@@ -8307,8 +8762,22 @@ final class NativeChatStore: ObservableObject {
         """
     }
 
+    private func mentionsTaskFiles(in content: String) -> Bool {
+        let normalized = content.lowercased()
+        let terms = [
+            "task file", "task files", "task folder", "working folder",
+            "project folder", "workspace folder", "workspace", "file",
+            "folder", ".txt", ".md", ".csv", ".json", ".swift", ".go",
+            ".tsx", ".ts", ".js", ".py", ".html", ".css"
+        ]
+        return terms.contains { normalized.contains($0) }
+    }
+
     func sendMedia(data: Data, filename: String, contentType: String, kind: String, content: String = "", modelOverride: String = "") {
         lastSentTextRequest = nil
+        if mentionsTaskFiles(in: content) || mentionsTaskFiles(in: filename) {
+            showsTaskFiles = true
+        }
         guard socket != nil else {
             status = "Connecting to Jame. Try the upload again in a moment."
             connect()
@@ -8612,7 +9081,8 @@ final class NativeChatStore: ObservableObject {
 
     private func notifyTaskCompletion(_ result: String) {
         let key = "jame.notifications.taskCompletion"
-        guard UserDefaults.standard.object(forKey: key) == nil || UserDefaults.standard.bool(forKey: key) else {
+        guard !NSApp.isActive,
+              UserDefaults.standard.object(forKey: key) == nil || UserDefaults.standard.bool(forKey: key) else {
             return
         }
         let content = UNMutableNotificationContent()
@@ -9193,6 +9663,33 @@ private struct NativeSkillsResponse: Codable {
     let skills: [NativeSkillReference]
 }
 
+private struct NativeSkillHealthWarning: Codable, Identifiable {
+    let severity: String
+    let code: String
+    let message: String
+    var id: String { "\(code)-\(message)" }
+}
+
+private struct NativeSkillHealth: Codable, Identifiable {
+    let name: String
+    let path: String
+    let description: String
+    let warnings: [NativeSkillHealthWarning]
+    let usageCount: Int
+    let successCount: Int
+    let failureCount: Int
+    let patchCount: Int
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, path, description, warnings
+        case usageCount = "usage_count"
+        case successCount = "success_count"
+        case failureCount = "failure_count"
+        case patchCount = "patch_count"
+    }
+}
+
 private struct NativeFileReference: Codable, Identifiable {
     let name: String
     let path: String
@@ -9365,6 +9862,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if chat.showsTaskFiles {
             Button {
                 chooseWorkspace()
             } label: {
@@ -9396,6 +9894,7 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .help("Choose agent workspace")
             .background(theme.panel.opacity(0.9))
+            }
 			NativeAgentControlBar(
 				chat: chat,
 				accent: accent,
@@ -9518,6 +10017,7 @@ struct ChatView: View {
                 .padding(.vertical, 8)
                 .background(composerBackground)
             }
+            if chat.showsTaskFiles {
             HStack(spacing: 7) {
                 Image(systemName: isFolderDropTargeted ? "folder.badge.plus" : "folder.fill")
                     .foregroundStyle(isFolderDropTargeted ? JameBrand.orange : accent)
@@ -9542,6 +10042,7 @@ struct ChatView: View {
                     .allowsHitTesting(false)
             }
             .fixedSize(horizontal: false, vertical: true)
+            }
             ZStack(alignment: .bottomLeading) {
                 HStack(alignment: .bottom) {
                     Button {

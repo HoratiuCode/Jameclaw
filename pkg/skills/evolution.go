@@ -2,8 +2,7 @@ package skills
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
+	"fmt"
 	"strings"
 )
 
@@ -30,57 +29,24 @@ type EvolutionResult struct {
 }
 
 func ApplyEvolution(workspace string, req EvolutionRequest) (EvolutionResult, error) {
-	name := normalizeSkillName(req.Name)
-	if name == "" {
+	if strings.TrimSpace(req.Name) == "" {
 		return EvolutionResult{}, errors.New("skill name is required")
 	}
-	skillDir := filepath.Join(workspace, "skills", name)
-	skillFile := filepath.Join(skillDir, "SKILL.md")
-
-	switch req.Action {
-	case EvolutionCreate:
-		if strings.TrimSpace(req.Content) == "" {
-			req.Content = "# " + name + "\n\n" + strings.TrimSpace(req.Description) + "\n"
-		}
-		if err := os.MkdirAll(skillDir, 0o755); err != nil {
-			return EvolutionResult{}, err
-		}
-		if _, err := os.Stat(skillFile); err == nil {
-			return EvolutionResult{}, errors.New("skill already exists")
-		}
-		if err := os.WriteFile(skillFile, []byte(req.Content), 0o644); err != nil {
-			return EvolutionResult{}, err
-		}
-	case EvolutionEdit:
-		if strings.TrimSpace(req.Content) == "" {
-			return EvolutionResult{}, errors.New("content is required")
-		}
-		if err := os.MkdirAll(skillDir, 0o755); err != nil {
-			return EvolutionResult{}, err
-		}
-		if err := os.WriteFile(skillFile, []byte(req.Content), 0o644); err != nil {
-			return EvolutionResult{}, err
-		}
-	case EvolutionPatch:
-		if req.Find == "" {
-			return EvolutionResult{}, errors.New("find is required")
-		}
-		data, err := os.ReadFile(skillFile)
-		if err != nil {
-			return EvolutionResult{}, err
-		}
-		next := strings.Replace(string(data), req.Find, req.Replace, 1)
-		if next == string(data) {
-			return EvolutionResult{}, errors.New("find text not found")
-		}
-		if err := os.WriteFile(skillFile, []byte(next), 0o644); err != nil {
-			return EvolutionResult{}, err
-		}
-	default:
-		return EvolutionResult{}, errors.New("unknown evolution action")
+	manager := NewSkillManager(workspace)
+	health, err := manager.Apply(ManagedSkillRequest{
+		Action:  string(req.Action),
+		Name:    req.Name,
+		Content: req.Content,
+		Find:    req.Find,
+		Replace: req.Replace,
+	})
+	if err != nil {
+		return EvolutionResult{}, err
 	}
-
-	return EvolutionResult{Name: name, Path: skillFile}, nil
+	if health.Path == "" {
+		return EvolutionResult{}, fmt.Errorf("skill %q was not created", req.Name)
+	}
+	return EvolutionResult{Name: health.Name, Path: health.Path}, nil
 }
 
 func normalizeSkillName(name string) string {

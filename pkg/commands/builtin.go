@@ -12,6 +12,7 @@ func BuiltinDefinitions() []Definition {
 		showCommand(),
 		listCommand(),
 		useCommand(),
+		learnCommand(),
 		skillsCommand(),
 		nameCommand(),
 		emojiCommand(),

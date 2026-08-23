@@ -2,8 +2,11 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/sipeed/jameclaw/pkg/skills"
 )
 
 func skillsCommand() Definition {
@@ -41,6 +44,52 @@ func skillsCommand() Definition {
 				ArgsUsage:   "<skill>",
 				Handler: func(_ context.Context, req Request, rt *Runtime) error {
 					return updateSkillsFromCommand(req, rt, false)
+				},
+			},
+			{
+				Name:        "health",
+				Description: "Show skill health and usage",
+				Handler: func(_ context.Context, req Request, rt *Runtime) error {
+					workspace := runtimeWorkspace(rt)
+					if workspace == "" {
+						return req.Reply(unavailableMsg)
+					}
+					data, err := json.MarshalIndent(skills.NewSkillManager(workspace).ListHealth(), "", "  ")
+					if err != nil {
+						return req.Reply(err.Error())
+					}
+					return req.Reply(string(data))
+				},
+			},
+			{
+				Name:        "curate",
+				Description: "Archive unused agent-created skills recoverably",
+				Handler: func(_ context.Context, req Request, rt *Runtime) error {
+					workspace := runtimeWorkspace(rt)
+					if workspace == "" {
+						return req.Reply(unavailableMsg)
+					}
+					items, err := skills.NewSkillManager(workspace).Curate()
+					if err != nil {
+						return req.Reply(err.Error())
+					}
+					return req.Reply(fmt.Sprintf("Curator archived %d recoverable skill(s).", len(items)))
+				},
+			},
+			{
+				Name:        "bundles",
+				Description: "List skill bundles",
+				Handler: func(_ context.Context, req Request, rt *Runtime) error {
+					workspace := runtimeWorkspace(rt)
+					if workspace == "" {
+						return req.Reply(unavailableMsg)
+					}
+					items, err := skills.NewSkillManager(workspace).ListBundles()
+					if err != nil {
+						return req.Reply(err.Error())
+					}
+					data, _ := json.MarshalIndent(items, "", "  ")
+					return req.Reply(string(data))
 				},
 			},
 		},

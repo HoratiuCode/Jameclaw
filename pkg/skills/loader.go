@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/gomarkdown/markdown"
@@ -26,8 +27,11 @@ const (
 )
 
 type SkillMetadata struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Version      string   `json:"version,omitempty"`
+	Platforms    []string `json:"platforms,omitempty"`
+	Environments []string `json:"environments,omitempty"`
 }
 
 type SkillInfo struct {
@@ -105,38 +109,48 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 		if dir == "" {
 			return
 		}
-		dirs, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		for _, d := range dirs {
-			if !d.IsDir() {
-				continue
+		_ = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil || entry == nil {
+				return nil
 			}
-			skillFile := filepath.Join(dir, d.Name(), "SKILL.md")
-			if _, err := os.Stat(skillFile); err != nil {
-				continue
+			if entry.IsDir() {
+				if path != dir && (entry.Name() == ".archive" || entry.Name() == ".bundles") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.Name() != "SKILL.md" {
+				return nil
+			}
+			skillFile := path
+			dirEntry, statErr := os.Stat(filepath.Dir(skillFile))
+			if statErr != nil || !dirEntry.IsDir() {
+				return nil
 			}
 			info := SkillInfo{
-				Name:   d.Name(),
+				Name:   filepath.Base(filepath.Dir(skillFile)),
 				Path:   skillFile,
 				Source: source,
 			}
 			metadata := sl.getSkillMetadata(skillFile)
+			if metadata != nil && !skillMatchesRuntime(metadata.Platforms, metadata.Environments) {
+				return nil
+			}
 			if metadata != nil {
 				info.Description = metadata.Description
 				info.Name = metadata.Name
 			}
 			if err := info.validate(); err != nil {
 				slog.Warn("invalid skill from "+source, "name", info.Name, "error", err)
-				continue
+				return nil
 			}
 			if seen[info.Name] {
-				continue
+				return nil
 			}
 			seen[info.Name] = true
 			skills = append(skills, info)
-		}
+			return nil
+		})
 	}
 
 	// Priority: workspace > global > builtin
@@ -145,6 +159,41 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	addSkills(sl.builtinSkills, "builtin")
 
 	return skills
+}
+
+func skillMatchesRuntime(platforms, environments []string) bool {
+	if len(platforms) > 0 {
+		matched := false
+		for _, platform := range platforms {
+			switch strings.ToLower(strings.TrimSpace(platform)) {
+			case "macos", "darwin":
+				matched = matched || runtime.GOOS == "darwin"
+			case "windows", "win32":
+				matched = matched || runtime.GOOS == "windows"
+			case "linux":
+				matched = matched || runtime.GOOS == "linux"
+			default:
+				matched = true // Unknown tags remain discoverable for compatibility.
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	for _, environment := range environments {
+		name := strings.ToUpper(strings.TrimSpace(environment))
+		if name == "" {
+			continue
+		}
+		active := os.Getenv("JAMECLAW_ENV_" + name)
+		if active == "" {
+			active = os.Getenv("JAMECLAW_" + name)
+		}
+		if active == "" || (active != "1" && !strings.EqualFold(active, "true") && !strings.EqualFold(active, "yes")) {
+			return false
+		}
+	}
+	return true
 }
 
 func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
@@ -245,8 +294,11 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 
 	// Try JSON first (for backward compatibility)
 	var jsonMeta struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name         string   `json:"name"`
+		Description  string   `json:"description"`
+		Version      string   `json:"version"`
+		Platforms    []string `json:"platforms"`
+		Environments []string `json:"environments"`
 	}
 	if err := json.Unmarshal([]byte(frontmatter), &jsonMeta); err == nil {
 		if jsonMeta.Name != "" {
@@ -255,6 +307,9 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 		if jsonMeta.Description != "" {
 			metadata.Description = jsonMeta.Description
 		}
+		metadata.Version = jsonMeta.Version
+		metadata.Platforms = jsonMeta.Platforms
+		metadata.Environments = jsonMeta.Environments
 		return metadata
 	}
 
@@ -265,6 +320,16 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 	}
 	if description := yamlMeta["description"]; description != "" {
 		metadata.Description = description
+	}
+	var extended struct {
+		Version      string   `yaml:"version"`
+		Platforms    []string `yaml:"platforms"`
+		Environments []string `yaml:"environments"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &extended); err == nil {
+		metadata.Version = extended.Version
+		metadata.Platforms = extended.Platforms
+		metadata.Environments = extended.Environments
 	}
 	return metadata
 }
@@ -328,8 +393,11 @@ func (sl *SkillsLoader) parseSimpleYAML(content string) map[string]string {
 	result := make(map[string]string)
 
 	var meta struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
+		Name         string   `yaml:"name"`
+		Description  string   `yaml:"description"`
+		Version      string   `yaml:"version"`
+		Platforms    []string `yaml:"platforms"`
+		Environments []string `yaml:"environments"`
 	}
 	if err := yaml.Unmarshal([]byte(content), &meta); err != nil {
 		return result
@@ -339,6 +407,9 @@ func (sl *SkillsLoader) parseSimpleYAML(content string) map[string]string {
 	}
 	if meta.Description != "" {
 		result["description"] = meta.Description
+	}
+	if meta.Version != "" {
+		result["version"] = meta.Version
 	}
 
 	return result

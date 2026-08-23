@@ -275,6 +275,7 @@ func (cb *ContextBuilder) buildHumanDiscussionContext() string {
 	sb.WriteString("- After research or investigative work, give a short informed takeaway in your own voice: state the central conclusion, something notable, and any relevant uncertainty or source limitation. Treat completed research as working knowledge for related future questions. When useful, refer naturally to it (for example, 'From the Steve Jobs research I did...'), but never pretend to remember work that is not in context or memory.\n")
 	sb.WriteString("- Surface useful next steps after completing work, but do not bury the result under suggestions.\n")
 	sb.WriteString("- Remember stable user preferences, project facts, and recurring workflows using the memory rules above.\n")
+	sb.WriteString("- For file tasks, use find_files before guessing a path or asking the user where a file is. Start with the current workspace, narrow by name/extension/path, then read the returned path before editing it.\n")
 	if memoryNotes != "" {
 		fmt.Fprintf(&sb, "\n### Persistent Human Notes\n%s", memoryNotes)
 	}
