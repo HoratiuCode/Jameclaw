@@ -8,6 +8,7 @@ import WebKit
 
 extension Notification.Name {
     static let jameclawNewChat = Notification.Name("jameclaw.new-chat")
+    static let jameclawNewPersonaProfile = Notification.Name("jameclaw.new-persona-profile")
     static let jameclawResumeSession = Notification.Name("jameclaw.resume-session")
     static let jameclawHomeNavigation = Notification.Name("com.jameclaw.home.navigate")
     static let jameclawCommandPalette = Notification.Name("jameclaw.command-palette")
@@ -641,6 +642,49 @@ private enum DocumentApprovalPolicy: String, CaseIterable, Identifiable {
     }
 }
 
+private let approvedDocumentRootsDefaultsKey = "launcher.safety.approvedDocumentRoots"
+
+private func storedApprovedDocumentRoots() -> [String] {
+    let roots = UserDefaults.standard.stringArray(forKey: approvedDocumentRootsDefaultsKey) ?? []
+    var unique = Set<String>()
+    return roots.compactMap { rawPath in
+        let path = URL(fileURLWithPath: rawPath).standardizedFileURL.resolvingSymlinksInPath().path
+        return unique.insert(path).inserted ? path : nil
+    }
+}
+
+private func documentApprovalRoot(for targetURL: URL) -> URL {
+    let target = targetURL.standardizedFileURL.resolvingSymlinksInPath()
+    var isDirectory: ObjCBool = false
+    if FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+        return target.deletingLastPathComponent()
+    }
+    return target
+}
+
+private func hasApprovedDocumentAccess(to targetURL: URL) -> Bool {
+    let targetPath = targetURL.standardizedFileURL.resolvingSymlinksInPath().path
+    return storedApprovedDocumentRoots().contains { rootPath in
+        targetPath == rootPath || targetPath.hasPrefix(rootPath + "/")
+    }
+}
+
+private func rememberDocumentAccess(to targetURL: URL) {
+    let rootPath = documentApprovalRoot(for: targetURL).path
+    var roots = storedApprovedDocumentRoots()
+    guard !roots.contains(rootPath) else { return }
+    roots.append(rootPath)
+    UserDefaults.standard.set(roots.sorted(), forKey: approvedDocumentRootsDefaultsKey)
+}
+
+private func forgetDocumentAccess(at rootPath: String) {
+    let normalized = URL(fileURLWithPath: rootPath).standardizedFileURL.resolvingSymlinksInPath().path
+    UserDefaults.standard.set(
+        storedApprovedDocumentRoots().filter { $0 != normalized },
+        forKey: approvedDocumentRootsDefaultsKey
+    )
+}
+
 @MainActor
 private func approveDocumentAccess(to targetURL: URL, action: String) -> Bool {
     let rawPolicy = UserDefaults.standard.string(forKey: "launcher.safety.documentApprovalPolicy")
@@ -660,15 +704,19 @@ private func approveDocumentAccess(to targetURL: URL, action: String) -> Bool {
         return false
     }
 
-    let shouldAsk = policy == .alwaysAsk || (policy == .outsideWorkspace && !isInsideWorkspace)
+    let shouldAsk = policy == .alwaysAsk || (policy == .outsideWorkspace && !isInsideWorkspace && !hasApprovedDocumentAccess(to: target))
     guard shouldAsk else { return true }
     let alert = NSAlert()
     alert.alertStyle = .informational
     alert.messageText = "Allow JameClaw document access?"
-    alert.informativeText = "Jame wants to \(action):\n\n\(target.path)\n\nApproving sets the containing folder as the restricted agent workspace."
-    alert.addButton(withTitle: "Allow")
+    alert.informativeText = "Jame wants to \(action):\n\n\(target.path)\n\nAllowing remembers the containing folder, so JameClaw will not ask again for files inside it. You can revoke it in Settings > Safety."
+    alert.addButton(withTitle: "Allow & remember")
     alert.addButton(withTitle: "Cancel")
-    return alert.runModal() == .alertFirstButtonReturn
+    let allowed = alert.runModal() == .alertFirstButtonReturn
+    if allowed && policy != .alwaysAsk {
+        rememberDocumentAccess(to: target)
+    }
+    return allowed
 }
 
 private enum ChatDensity: String, CaseIterable, Identifiable {
@@ -1068,6 +1116,8 @@ struct JameRootView: View {
             AgentMemoryView(port: Int(settings.port) ?? 18800)
         case .agent:
             AgentManagerView(port: Int(settings.port) ?? 18800)
+        case .profile:
+            AgentProfileView(port: Int(settings.port) ?? 18800)
         case .sessions:
             SessionsView(port: Int(settings.port) ?? 18800, resumeSession: openSessionInChat)
         case .archivedChats:
@@ -1274,23 +1324,54 @@ private struct DesktopSidebar: View {
             .background(background.opacity(0.97))
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button {
-                selectedSection = .settings
-            } label: {
-                HStack(spacing: 7) {
-                    Circle().fill(accent).frame(width: 7, height: 7)
-                    Text(messagingPlatformLabel)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.tertiary)
+            HStack(spacing: 6) {
+                Button {
+                    selectedSection = .settings
+                } label: {
+                    HStack(spacing: 7) {
+                        Circle().fill(accent).frame(width: 7, height: 7)
+                        Text(messagingPlatformLabel)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
                 }
+                .buttonStyle(.plain)
+                .help("Open Settings to manage connected platforms")
+                Menu {
+                    Button { selectedSection = .profile } label: {
+                        Label("Open Jame Profile", systemImage: "person.crop.circle.fill")
+                    }
+                    Button {
+                        selectedSection = .profile
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            NotificationCenter.default.post(name: .jameclawNewPersonaProfile, object: nil)
+                        }
+                    } label: {
+                        Label("Create New Profile", systemImage: "plus.circle.fill")
+                    }
+                    Text("Each new profile has its own SOUL.md and talking style.")
+                        .font(.caption)
+                        .disabled(true)
+                    Divider()
+                    Button { selectedSection = .agent } label: {
+                        Label("Manage Agent Team & Profiles", systemImage: "person.3.fill")
+                    }
+                } label: {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(selectedSection == .profile ? JameBrand.ink : accent)
+                        .frame(width: 34, height: 34)
+                        .background(selectedSection == .profile ? accent : panel, in: Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 34, height: 34)
+                .background(selectedSection == .profile ? accent : panel, in: Rectangle())
+                .overlay(Rectangle().stroke(selectedSection == .profile ? accent : rule))
+                .help("Choose a profile destination")
             }
-            .buttonStyle(.plain)
-            .help("Open Settings to manage connected platforms")
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .background(background.opacity(0.97))
@@ -1482,6 +1563,7 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     case sessions
     case archivedChats
     case agent
+    case profile
     case artifacts
     case capabilities
     case automations
@@ -1496,6 +1578,7 @@ enum DesktopSection: String, CaseIterable, Identifiable {
         case .sessions: return "Sessions"
         case .archivedChats: return "Archived Chats"
         case .agent: return "Agent"
+        case .profile: return "Jame Profile"
         case .artifacts: return "Artifacts"
         case .capabilities: return "Capabilities"
         case .automations: return "Automations"
@@ -1515,6 +1598,7 @@ enum DesktopSection: String, CaseIterable, Identifiable {
         case .fixedChats: return "pin.fill"
         case .memory: return "brain.head.profile"
         case .agent: return "sparkles"
+        case .profile: return "person.crop.circle.fill"
         case .sessions: return "clock.arrow.circlepath"
         case .archivedChats: return "archivebox.fill"
         case .automations: return "calendar.badge.clock"
@@ -1530,6 +1614,7 @@ enum DesktopSection: String, CaseIterable, Identifiable {
         case .fixedChats: return "2"
         case .memory: return "3"
         case .agent: return "2"
+        case .profile: return "0"
         case .artifacts: return "3"
         case .capabilities: return "4"
         case .sessions: return "5"
@@ -4022,6 +4107,123 @@ private func replacingMemorySection(_ title: String, with value: String, in text
         .trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
 }
 
+private struct AgentProfileView: View {
+    @StateObject private var store: NativeMemoryStore
+    @StateObject private var profileStore: NativeAgentStore
+    @State private var showingNewProfile = false
+
+    init(port: Int) {
+        _store = StateObject(wrappedValue: NativeMemoryStore(port: port))
+        _profileStore = StateObject(wrappedValue: NativeAgentStore(port: port))
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("JAME PROFILE").font(.caption.weight(.bold)).foregroundStyle(JameBrand.orange)
+                        Text(store.agentName.isEmpty ? "Jame" : store.agentName).font(.system(size: 30, weight: .semibold, design: .rounded))
+                        Text("A dedicated profile, separate from your agent team and Team Grid.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { showingNewProfile = true } label: { Label("New profile", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                    Button { Task { await store.load() } } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                }
+                GroupBox("Identity & operating style") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextField("Identity name", text: $store.agentName)
+                        TextField("Role & personality", text: $store.persona)
+                        TextField("Tone", text: $store.tone)
+                        TextField("Autonomy & discussion mode", text: $store.discussionMode)
+                        TextField("Status updates", text: $store.statusStyle)
+                        TextEditor(text: $store.configuredMemoryNotes).frame(minHeight: 96)
+                        Text("Ownership & durable context — responsibilities, stable preferences, and non-negotiable rules.").font(.caption).foregroundStyle(.secondary)
+                        Button("Save live profile") { Task { await store.saveIdentity() } }.buttonStyle(.borderedProminent)
+                    }
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.vertical, 4)
+                }
+                GroupBox("User context") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("What Jame should remember about you, kept separately from the agent's identity.").font(.caption).foregroundStyle(.secondary)
+                        TextEditor(text: $store.userProfile).frame(minHeight: 110)
+                        Button("Save user context") { Task { await store.saveUserContext() } }.buttonStyle(.bordered)
+                    }
+                }
+                GroupBox("Long-term memory") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(store.path.isEmpty ? "memory/MEMORY.md" : store.path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        TextEditor(text: $store.text).frame(minHeight: 160)
+                        Button("Save memory") { Task { await store.save() } }.buttonStyle(.bordered)
+                    }
+                }
+                if !store.status.isEmpty { Text(store.status).font(.caption).foregroundStyle(.secondary) }
+            }
+            .padding(24)
+        }
+        .task { await store.load() }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawNewPersonaProfile)) { _ in
+            showingNewProfile = true
+        }
+        .sheet(isPresented: $showingNewProfile) {
+            CreatePersonaProfileView(store: profileStore) { showingNewProfile = false }
+        }
+    }
+}
+
+private struct CreatePersonaProfileView: View {
+    @ObservedObject var store: NativeAgentStore
+    let finished: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var id = ""
+    @State private var talkingStyle = ""
+    @State private var soul = ""
+
+    private var resolvedID: String {
+        let source = id.isEmpty ? name : id
+        return source.lowercased().replacingOccurrences(of: "[^a-z0-9_-]+", with: "-", options: .regularExpression).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New persona profile").font(.title2.weight(.semibold))
+            Text("This creates an isolated workspace with its own SOUL.md and STYLE.md. It never changes Jame's default soul or talking style.")
+                .font(.subheadline).foregroundStyle(.secondary)
+            TextField("Profile name", text: $name)
+            TextField("Profile ID (optional)", text: $id)
+            TextField("Talking style", text: $talkingStyle, axis: .vertical).lineLimit(2...4)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("SOUL.md").font(.caption.weight(.semibold))
+                TextEditor(text: $soul).font(.system(.body, design: .monospaced)).frame(minHeight: 180)
+                    .overlay(Rectangle().stroke(JameBrand.rule))
+            }
+            if !store.error.isEmpty { Text(store.error).font(.caption).foregroundStyle(.red) }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(store.isCreating ? "Creating…" : "Create profile") {
+                    Task {
+                        let didCreate = await store.createAgent(
+                            id: resolvedID, name: name, workspace: "", persona: soul,
+                            memoryNotes: "Isolated persona profile.", parentID: nil, managedByMain: false,
+                            profile: true, soul: soul, tone: talkingStyle
+                        )
+                        if didCreate { finished(); dismiss() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.isCreating || resolvedID.isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || soul.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || talkingStyle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+        .padding(24)
+        .frame(width: 560, height: 470)
+    }
+}
+
 private struct AgentMemoryView: View {
     @StateObject private var store: NativeMemoryStore
     @State private var selectedTab = "memory"
@@ -4304,7 +4506,7 @@ private struct AgentMemoryView: View {
 private struct NativeAgentHuman: Codable {
     let agentName: String?
     let persona: String?
-    let tone: String?
+    let tone: String? = nil
     let discussionMode: String?
     let memoryNotes: String?
     let statusStyle: String?
@@ -4320,6 +4522,7 @@ private struct NativeAgentHuman: Codable {
 
 private struct NativeAgentSummary: Codable, Identifiable {
     let id: String
+    let profile: Bool?
     let name: String
     let isDefault: Bool
     let workspace: String
@@ -4332,7 +4535,7 @@ private struct NativeAgentSummary: Codable, Identifiable {
     let toolCalls: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, workspace, model, skills, subagents, human
+        case id, profile, name, workspace, model, skills, subagents, human
         case isDefault = "default"
         case sessionCount = "session_count"
         case messageCount = "message_count"
@@ -4346,6 +4549,8 @@ private struct NativeAgentsResponse: Codable {
 
 private struct NativeCreateAgentRequest: Encodable {
     let id: String
+    let profile: Bool?
+    let soul: String?
     let name: String
     let workspace: String
     let managedByMain: Bool
@@ -4353,7 +4558,7 @@ private struct NativeCreateAgentRequest: Encodable {
     let human: NativeCreateAgentHuman
 
     enum CodingKeys: String, CodingKey {
-        case id, name, workspace, human
+        case id, profile, soul, name, workspace, human
         case managedByMain = "managed_by_main"
         case parentID = "parent_id"
     }
@@ -4362,11 +4567,12 @@ private struct NativeCreateAgentRequest: Encodable {
 private struct NativeCreateAgentHuman: Encodable {
     let agentName: String
     let persona: String
+    let tone: String?
     let memoryNotes: String
 
     enum CodingKeys: String, CodingKey {
         case agentName = "agent_name"
-        case persona
+        case persona, tone
         case memoryNotes = "memory_notes"
     }
 }
@@ -4600,7 +4806,7 @@ private final class NativeAgentStore: ObservableObject {
         }
     }
 
-    func createAgent(id: String, name: String, workspace: String, persona: String, memoryNotes: String, parentID: String?, managedByMain: Bool) async -> Bool {
+    func createAgent(id: String, name: String, workspace: String, persona: String, memoryNotes: String, parentID: String?, managedByMain: Bool, profile: Bool = false, soul: String = "", tone: String = "") async -> Bool {
         let cleanID = id.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanID.isEmpty else {
@@ -4616,6 +4822,8 @@ private final class NativeAgentStore: ObservableObject {
             request.httpBody = try JSONEncoder().encode(
                 NativeCreateAgentRequest(
                     id: cleanID,
+                    profile: profile,
+                    soul: soul.trimmingCharacters(in: .whitespacesAndNewlines),
                     name: cleanName.isEmpty ? cleanID : cleanName,
                     workspace: workspace.trimmingCharacters(in: .whitespacesAndNewlines),
                     managedByMain: managedByMain,
@@ -4623,6 +4831,7 @@ private final class NativeAgentStore: ObservableObject {
                     human: NativeCreateAgentHuman(
                         agentName: cleanName.isEmpty ? cleanID : cleanName,
                         persona: persona.trimmingCharacters(in: .whitespacesAndNewlines),
+                        tone: tone.trimmingCharacters(in: .whitespacesAndNewlines),
                         memoryNotes: memoryNotes.trimmingCharacters(in: .whitespacesAndNewlines)
                     )
                 )
@@ -4641,6 +4850,10 @@ private final class NativeAgentStore: ObservableObject {
     }
 
     func rename(_ agent: NativeAgentSummary, to name: String) async -> Bool {
+        await updateProfile(agent, name: name, persona: agent.human?.persona ?? "", tone: agent.human?.tone ?? "", discussionMode: agent.human?.discussionMode ?? "", memoryNotes: agent.human?.memoryNotes ?? "", statusStyle: agent.human?.statusStyle ?? "")
+    }
+
+    func updateProfile(_ agent: NativeAgentSummary, name: String, persona: String, tone: String, discussionMode: String, memoryNotes: String, statusStyle: String) async -> Bool {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanName.isEmpty else {
             error = "Enter an agent name."
@@ -4658,11 +4871,11 @@ private final class NativeAgentStore: ObservableObject {
                 NativeUpdateAgentRequest(
                     human: NativeUpdateAgentHuman(
                         agentName: cleanName,
-                        persona: agent.human?.persona ?? "",
-                        tone: agent.human?.tone ?? "",
-                        discussionMode: agent.human?.discussionMode ?? "",
-                        memoryNotes: agent.human?.memoryNotes ?? "",
-                        statusStyle: agent.human?.statusStyle ?? ""
+                        persona: persona.trimmingCharacters(in: .whitespacesAndNewlines),
+                        tone: tone.trimmingCharacters(in: .whitespacesAndNewlines),
+                        discussionMode: discussionMode.trimmingCharacters(in: .whitespacesAndNewlines),
+                        memoryNotes: memoryNotes.trimmingCharacters(in: .whitespacesAndNewlines),
+                        statusStyle: statusStyle.trimmingCharacters(in: .whitespacesAndNewlines)
                     )
                 )
             )
@@ -4738,6 +4951,9 @@ private struct AgentManagerView: View {
                     AgentDetailView(
                         agent: agent,
                         rename: { name in Task { _ = await store.rename(agent, to: name) } },
+                        updateProfile: { name, persona, tone, discussionMode, memoryNotes, statusStyle in
+                            Task { _ = await store.updateProfile(agent, name: name, persona: persona, tone: tone, discussionMode: discussionMode, memoryNotes: memoryNotes, statusStyle: statusStyle) }
+                        },
                         addTeamAgent: {
                             creationMode = .team
                             showingCreate = true
@@ -4767,7 +4983,7 @@ private struct AgentManagerView: View {
         }
         .task {
             await store.load()
-            if selectedID.isEmpty { selectedID = store.agents.first?.id ?? "" }
+            if selectedID.isEmpty { selectedID = store.agents.first(where: { $0.id == "main" })?.id ?? store.agents.first?.id ?? "" }
         }
         .onReceive(NotificationCenter.default.publisher(for: .jameclawTeamGrid)) { _ in
             showingTeamGrid = true
@@ -4787,18 +5003,30 @@ private struct AgentManagerView: View {
 private struct AgentDetailView: View {
     let agent: NativeAgentSummary
     let rename: (String) -> Void
+    let updateProfile: (String, String, String, String, String, String) -> Void
     let addTeamAgent: () -> Void
     let spawnSubagent: () -> Void
     let showTeamGrid: () -> Void
     @State private var displayName: String
+    @State private var persona: String
+    @State private var tone: String
+    @State private var discussionMode: String
+    @State private var memoryNotes: String
+    @State private var statusStyle: String
 
-    init(agent: NativeAgentSummary, rename: @escaping (String) -> Void, addTeamAgent: @escaping () -> Void, spawnSubagent: @escaping () -> Void, showTeamGrid: @escaping () -> Void) {
+    init(agent: NativeAgentSummary, rename: @escaping (String) -> Void, updateProfile: @escaping (String, String, String, String, String, String) -> Void, addTeamAgent: @escaping () -> Void, spawnSubagent: @escaping () -> Void, showTeamGrid: @escaping () -> Void) {
         self.agent = agent
         self.rename = rename
+        self.updateProfile = updateProfile
         self.addTeamAgent = addTeamAgent
         self.spawnSubagent = spawnSubagent
         self.showTeamGrid = showTeamGrid
         _displayName = State(initialValue: agent.name.isEmpty ? agent.id : agent.name)
+        _persona = State(initialValue: agent.human?.persona ?? "")
+        _tone = State(initialValue: agent.human?.tone ?? "")
+        _discussionMode = State(initialValue: agent.human?.discussionMode ?? "")
+        _memoryNotes = State(initialValue: agent.human?.memoryNotes ?? "")
+        _statusStyle = State(initialValue: agent.human?.statusStyle ?? "")
     }
 
     var body: some View {
@@ -4840,6 +5068,29 @@ private struct AgentDetailView: View {
                         AgentField("Persona", agent.human?.persona?.isEmpty == false ? agent.human!.persona! : "Not set")
                         AgentField("Tone", agent.human?.tone?.isEmpty == false ? agent.human!.tone! : "Not set")
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Agent Profile") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("This profile controls how this agent presents itself and works in every new conversation.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        TextField("Role & personality", text: $persona)
+                        TextField("Tone", text: $tone)
+                        TextField("Autonomy & discussion mode", text: $discussionMode)
+                        TextField("Status updates", text: $statusStyle)
+                        TextEditor(text: $memoryNotes)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minHeight: 100)
+                            .overlay(Rectangle().stroke(JameBrand.rule))
+                        Text("Ownership & durable context — what this agent manages, stable preferences, and non-negotiable rules.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Save agent profile") {
+                            updateProfile(displayName, persona, tone, discussionMode, memoryNotes, statusStyle)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
@@ -7441,6 +7692,7 @@ struct QuickSettingsView: View {
     @State private var allowMusicPlaylists = false
     @State private var musicPlaylistStatus = ""
     @State private var documentSafetyStatus = ""
+    @State private var approvedDocumentRoots = storedApprovedDocumentRoots()
     @State private var researchAPIKey = ""
     @State private var personalityPreset: AgentPersonalityPreset = .custom
     @State private var personalityInstructions = ""
@@ -7567,6 +7819,31 @@ struct QuickSettingsView: View {
                         .buttonStyle(.borderedProminent)
                     if !documentSafetyStatus.isEmpty {
                         Text(documentSafetyStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if !approvedDocumentRoots.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Remembered document access")
+                            .font(.caption.weight(.semibold))
+                        ForEach(approvedDocumentRoots, id: \.self) { path in
+                            HStack(spacing: 8) {
+                                Text(path)
+                                    .font(.caption.monospaced())
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer()
+                                Button("Revoke") {
+                                    forgetDocumentAccess(at: path)
+                                    approvedDocumentRoots = storedApprovedDocumentRoots()
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+                        Button("Revoke all remembered folders") {
+                            UserDefaults.standard.removeObject(forKey: approvedDocumentRootsDefaultsKey)
+                            approvedDocumentRoots = []
+                        }
+                        .controlSize(.small)
                     }
                 }
             }

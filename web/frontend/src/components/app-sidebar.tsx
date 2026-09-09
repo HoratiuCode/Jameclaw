@@ -196,7 +196,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             translateTitle: false,
           },
           {
-            title: "Profiles",
+            title: "Jame Profile",
             url: "/profiles",
             icon: IconUserCircle,
             translateTitle: false,

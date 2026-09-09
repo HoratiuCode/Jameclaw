@@ -131,6 +131,14 @@ codesign --force --deep --sign - "$APP_PATH"
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
+# The bundle in build/ is a developer artifact, not a second installed app.
+# Keeping it out of Launch Services prevents macOS from showing two identical
+# JameClaw Desktop entries when the installed copy lives in /Applications.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ]; then
+    "$LSREGISTER" -u "$APP_PATH" || true
+fi
+
 echo ""
 echo "=========================================="
 echo "Successfully created: ${APP_PATH}"

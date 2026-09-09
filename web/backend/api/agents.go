@@ -23,6 +23,7 @@ import (
 
 type agentSummary struct {
 	ID             string   `json:"id"`
+	Profile        bool     `json:"profile,omitempty"`
 	Name           string   `json:"name"`
 	Default        bool     `json:"default"`
 	Workspace      string   `json:"workspace"`
@@ -459,6 +460,7 @@ func (h *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		agents = append(agents, agentSummary{
 			ID:             agent.ID,
+			Profile:        agent.Profile,
 			Name:           name,
 			Default:        agent.ID == listDefaultID,
 			Workspace:      workspace,
@@ -665,6 +667,8 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Name          string `json:"name"`
 		Model         string `json:"model"`
 		Workspace     string `json:"workspace"`
+		Profile       bool   `json:"profile"`
+		Soul          string `json:"soul"`
 		ParentID      string `json:"parent_id"`
 		ManagedByMain *bool  `json:"managed_by_main"`
 		Human         *human `json:"human"`
@@ -708,8 +712,30 @@ func (h *Handler) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	agent := config.AgentConfig{
 		ID:        req.ID,
+		Profile:   req.Profile,
 		Name:      req.Name,
 		Workspace: req.Workspace,
+	}
+	if req.Profile {
+		if agent.Workspace == "" {
+			agent.Workspace = filepath.Join(cfg.WorkspacePath(), "profiles", req.ID)
+		}
+		agent.Workspace = expandAgentWorkspace(agent.Workspace)
+		if err := os.MkdirAll(agent.Workspace, 0o700); err != nil {
+			http.Error(w, "could not create profile workspace", http.StatusInternalServerError)
+			return
+		}
+		soul := strings.TrimSpace(req.Soul)
+		if soul == "" && req.Human != nil {
+			soul = "# Soul\n\n" + strings.TrimSpace(req.Human.Persona)
+		}
+		if err := fileutil.WriteFileAtomic(filepath.Join(agent.Workspace, "SOUL.md"), []byte(soul+"\n"), 0o600); err != nil {
+			http.Error(w, "could not save profile SOUL.md", http.StatusInternalServerError)
+			return
+		}
+		if req.Human != nil && strings.TrimSpace(req.Human.Tone) != "" {
+			_ = fileutil.WriteFileAtomic(filepath.Join(agent.Workspace, "STYLE.md"), []byte("# Current Style Snapshot\n\n"+strings.TrimSpace(req.Human.Tone)+"\n"), 0o600)
+		}
 	}
 	if req.Model != "" {
 		agent.Model = &config.AgentModelConfig{Primary: req.Model}

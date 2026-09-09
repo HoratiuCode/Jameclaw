@@ -31,7 +31,7 @@ function formatNumber(value: number) {
 
 const EMPTY_STRING_LIST: string[] = []
 
-export function AgentsPage() {
+export function AgentsPage({ profileMode = false }: { profileMode?: boolean }) {
   const [selectedID, setSelectedID] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const { data, error, isLoading, refetch } = useQuery({
@@ -63,13 +63,18 @@ export function AgentsPage() {
 
   const agents = useMemo(() => data?.agents ?? [], [data?.agents])
   const selected = useMemo(
-    () => agents.find((agent) => agent.id === selectedID) ?? agents[0] ?? null,
-    [agents, selectedID],
+    () => {
+      if (profileMode) {
+        return agents.find((agent) => agent.id === "main") ?? agents.find((agent) => agent.default) ?? agents[0] ?? null
+      }
+      return agents.find((agent) => agent.id === selectedID) ?? agents[0] ?? null
+    },
+    [agents, profileMode, selectedID],
   )
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="Agents">
+      <PageHeader title={profileMode ? "Jame Profile" : "Agents"}>
         <Button variant="outline" size="sm" onClick={() => void refetch()}>
           <IconRefresh className="size-4" />
           Refresh
@@ -87,16 +92,17 @@ export function AgentsPage() {
             {error instanceof Error ? error.message : "Agents failed to load"}
           </div>
         ) : (
-          <div className="grid gap-4 py-4 lg:grid-cols-[18rem_1fr]">
-            <AgentList agents={agents} selectedID={selected?.id ?? null} onSelect={setSelectedID} />
+          <div className={`grid gap-4 py-4 ${profileMode ? "" : "lg:grid-cols-[18rem_1fr]"}`}>
+            {!profileMode && <AgentList agents={agents} selectedID={selected?.id ?? null} onSelect={setSelectedID} />}
             <div className="space-y-4">
-              <AgentOverview data={data} selected={selected} />
+              {profileMode ? <ProfileIntro selected={selected} /> : <AgentOverview data={data} selected={selected} />}
               <AgentPanels
                 key={selected?.id ?? "none"}
                 selected={selected}
                 isSaving={mutation.isPending}
                 isCreating={createMutation.isPending}
                 defaultModel={data?.default_model ?? ""}
+                profileMode={profileMode}
                 onSave={(agent, body) => mutation.mutate({ id: agent.id, body })}
                 onCreateSubagent={(body) => createMutation.mutate(body)}
               />
@@ -105,6 +111,21 @@ export function AgentsPage() {
         )}
       </div>
     </div>
+  )
+}
+
+function ProfileIntro({ selected }: { selected: AgentSummary | null }) {
+  return (
+    <Card className="border-primary/25 bg-primary/5">
+      <CardContent className="py-4 text-sm">
+        <div className="font-medium">This is Jame’s live profile.</div>
+        <p className="text-muted-foreground mt-1 max-w-3xl">
+          Identity, personality, working style, durable context, model, skills, and memory are applied to new agent work.
+          Keep the ownership boundary specific so Jame knows what it manages.
+        </p>
+        {selected?.workspace ? <div className="text-muted-foreground mt-2 font-mono text-xs">{selected.workspace}</div> : null}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -177,6 +198,7 @@ function AgentPanels({
   isSaving,
   isCreating,
   defaultModel,
+  profileMode,
   onSave,
   onCreateSubagent,
 }: {
@@ -184,6 +206,7 @@ function AgentPanels({
   isSaving: boolean
   isCreating: boolean
   defaultModel: string
+  profileMode: boolean
   onSave: (agent: AgentSummary, body: Parameters<typeof updateAgent>[1]) => void
   onCreateSubagent: (body: Parameters<typeof createAgent>[0]) => void
 }) {
@@ -312,11 +335,11 @@ function AgentPanels({
 
       <Card>
         <CardHeader>
-          <CardTitle>Human Discussion</CardTitle>
+          <CardTitle>{profileMode ? "Identity & Operating Style" : "Human Discussion"}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div>
-            <div className="text-muted-foreground mb-1 text-xs">Agent name</div>
+            <div className="text-muted-foreground mb-1 text-xs">Identity name</div>
             <Input
               value={humanAgentName}
               onChange={(event) => setHumanAgentName(event.target.value)}
@@ -325,11 +348,11 @@ function AgentPanels({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <div className="text-muted-foreground mb-1 text-xs">Persona</div>
+              <div className="text-muted-foreground mb-1 text-xs">Role & personality</div>
               <Input
                 value={humanPersona}
                 onChange={(event) => setHumanPersona(event.target.value)}
-                placeholder="Senior engineer, research partner, coach"
+                placeholder="Founder copilot, senior engineer, research partner"
               />
             </div>
             <div>
@@ -343,7 +366,7 @@ function AgentPanels({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <div className="text-muted-foreground mb-1 text-xs">Discussion mode</div>
+              <div className="text-muted-foreground mb-1 text-xs">Autonomy & discussion mode</div>
               <Input
                 value={humanMode}
                 onChange={(event) => setHumanMode(event.target.value)}
@@ -360,12 +383,12 @@ function AgentPanels({
             </div>
           </div>
           <div>
-            <div className="text-muted-foreground mb-1 text-xs">Memory notes</div>
+            <div className="text-muted-foreground mb-1 text-xs">Ownership & durable context</div>
             <textarea
               className="border-input bg-background min-h-24 w-full rounded-md border px-2.5 py-2 text-sm"
               value={humanNotes}
               onChange={(event) => setHumanNotes(event.target.value)}
-              placeholder="Stable preferences, recurring context, or conversation rules"
+              placeholder="What Jame manages, stable preferences, recurring context, and non-negotiable conversation rules"
             />
           </div>
           <Button
@@ -384,7 +407,7 @@ function AgentPanels({
               })
             }
           >
-            Save agent name & discussion style
+            {profileMode ? "Save live profile" : "Save agent name & discussion style"}
           </Button>
         </CardContent>
       </Card>
@@ -398,7 +421,7 @@ function AgentPanels({
         </CardContent>
       </Card>
 
-      <Card>
+      {!profileMode && <Card>
         <CardHeader>
           <CardTitle>Subagents</CardTitle>
         </CardHeader>
@@ -411,7 +434,7 @@ function AgentPanels({
             onCreate={onCreateSubagent}
           />
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }

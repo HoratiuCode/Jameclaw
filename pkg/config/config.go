@@ -280,6 +280,7 @@ func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
 
 type AgentConfig struct {
 	ID        string            `json:"id"`
+	Profile   bool              `json:"profile,omitempty"`
 	Default   bool              `json:"default,omitempty"`
 	Name      string            `json:"name,omitempty"`
 	Workspace string            `json:"workspace,omitempty"`
