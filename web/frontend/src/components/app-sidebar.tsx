@@ -278,9 +278,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           aria-label="JameClaw home"
         >
           <img
-            src="/favicon-96x96.png"
+            src="/roman-navbar-mark.png"
             alt=""
-            className="size-8 shrink-0 rounded-md"
+            className="size-8 shrink-0 object-contain"
           />
           <div className="min-w-0 group-data-[collapsible=icon]:hidden">
             <div className="text-sidebar-foreground truncate text-sm font-semibold">

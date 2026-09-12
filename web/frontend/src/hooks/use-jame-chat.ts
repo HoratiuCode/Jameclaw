@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai"
 
 import {
   newChatSession,
+  retryChatConnection,
   sendChatFile,
   sendChatMessage,
   sendChatVoice,
@@ -71,5 +72,6 @@ export function useJameChat() {
     sendFile: sendChatFile,
     switchSession: switchChatSession,
     newChat: newChatSession,
+    retryConnection: retryChatConnection,
   }
 }

@@ -38,11 +38,11 @@ mkdir -p "$APP_RESOURCES"
 
 # Copy executable
 echo "Copying executable..."
-if [ -f "./web/build/${LAUNCHER_EXECUTABLE}" ]; then
-    cp "./web/build/${LAUNCHER_EXECUTABLE}" "${APP_MACOS}/"
+if [ -f "./build/${LAUNCHER_EXECUTABLE}" ]; then
+    cp "./build/${LAUNCHER_EXECUTABLE}" "${APP_MACOS}/"
 else
-    echo "Error: ./web/build/${APP_EXECUTABLE} not found. Please build the web backend first."
-    echo "Run: make build in web dir"
+    echo "Error: ./build/${LAUNCHER_EXECUTABLE} not found. Please build the web launcher first."
+    echo "Run: make build-launcher"
     exit 1
 fi
 echo "Building native desktop executable..."

@@ -355,6 +355,18 @@ export function disconnectChat() {
   disconnectChatInternal({ clearDesiredConnection: true })
 }
 
+/**
+ * Give recovery controls one explicit path to start a fresh websocket setup.
+ * This is intentionally separate from disconnectChat(): the user is asking to
+ * reconnect, not to turn chat off.
+ */
+export function retryChatConnection() {
+  disconnectChatInternal({ clearDesiredConnection: false })
+  shouldMaintainConnection = true
+  reconnectAttempts = 0
+  void connectChat()
+}
+
 export async function hydrateActiveSession() {
   if (hydratePromise) {
     return hydratePromise

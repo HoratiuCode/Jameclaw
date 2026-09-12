@@ -1628,6 +1628,7 @@ func (al *AgentLoop) agentForMessageModel(base *AgentInstance, modelName string)
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
 	registry := al.GetRegistry()
 	route := registry.ResolveRoute(routing.RouteInput{
+		AgentID:    inboundMetadata(msg, "agent_id"),
 		Channel:    msg.Channel,
 		AccountID:  inboundMetadata(msg, metadataKeyAccountID),
 		Peer:       extractPeer(msg),

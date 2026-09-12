@@ -630,6 +630,9 @@ func (c *JameChannel) handleMessageSend(pc *jameConn, msg JameMessage) {
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
+	if agentID, ok := msg.Payload["agent_id"].(string); ok && strings.TrimSpace(agentID) != "" {
+		metadata["agent_id"] = strings.TrimSpace(agentID)
+	}
 	// A native or Web client can request a configured model for this message.
 	// The agent loop validates the name and applies it to this turn only, so it
 	// never changes the global default model or another conversation.
@@ -758,6 +761,9 @@ func (c *JameChannel) handleMediaSend(pc *jameConn, msg JameMessage) {
 		"session_id":   sessionID,
 		"conn_id":      pc.id,
 		"content_type": contentType,
+	}
+	if agentID, ok := payload["agent_id"].(string); ok && strings.TrimSpace(agentID) != "" {
+		metadata["agent_id"] = strings.TrimSpace(agentID)
 	}
 	if model, ok := payload["model"].(string); ok && strings.TrimSpace(model) != "" {
 		metadata["model_override"] = strings.TrimSpace(model)

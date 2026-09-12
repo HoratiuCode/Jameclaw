@@ -8,6 +8,9 @@ import (
 
 // RouteInput contains the routing context from an inbound message.
 type RouteInput struct {
+	// AgentID is an explicit selection from an authenticated first-party
+	// client. It allows Desktop profiles to own their conversations.
+	AgentID    string
 	Channel    string
 	AccountID  string
 	Peer       *RoutePeer
@@ -71,6 +74,13 @@ func (r *RouteResolver) ResolveRoute(input RouteInput) ResolvedRoute {
 			MainSessionKey: mainSessionKey,
 			MatchedBy:      matchedBy,
 		}
+	}
+
+	// An explicit Desktop profile selection takes precedence over configured
+	// channel bindings so its prompt, workspace, and session history remain
+	// isolated from main and every other profile.
+	if selected := strings.TrimSpace(input.AgentID); selected != "" {
+		return choose(selected, "client.selection")
 	}
 
 	// Priority 1: Peer binding

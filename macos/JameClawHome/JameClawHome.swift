@@ -203,8 +203,8 @@ private struct SquareTextFieldStyle: TextFieldStyle {
         configuration
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .background(colorScheme == .light ? Color.white : JameBrand.elevated)
-            .overlay(Rectangle().stroke(colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule, lineWidth: 1))
+            .background(colorScheme == .light ? Color.white : JameBrand.elevated, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule, lineWidth: 1))
     }
 }
 
@@ -1154,7 +1154,9 @@ struct JameRootView: View {
             }
         }
         .tint(chromeAccent)
-        .buttonBorderShape(.roundedRectangle(radius: 0))
+        // A small shared radius keeps controls native-feeling and removes the
+        // hard, dashboard-like grid that square borders created.
+        .buttonBorderShape(.roundedRectangle(radius: 8))
         .textFieldStyle(SquareTextFieldStyle())
         .preferredColorScheme(launcherThemePreference(from: savedTheme).preferredColorScheme)
         .background {
@@ -1236,7 +1238,6 @@ private struct DesktopSidebar: View {
     private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
     private var theme: LauncherTheme { launcherThemePreference(from: savedTheme).resolved(for: colorScheme) }
     private var accent: Color { launcherAccentPreference(from: savedAccent, theme: theme) }
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
@@ -1263,9 +1264,9 @@ private struct DesktopSidebar: View {
                             Text("JameClaw").foregroundStyle(primary)
                             Text(".").foregroundStyle(accent)
                         }
-                        .font(.system(.headline, design: .rounded).weight(.semibold))
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
                         Label("Local agent", systemImage: "checkmark.circle.fill")
-                            .font(.caption)
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(muted)
                             .symbolRenderingMode(.hierarchical)
                     }
@@ -1274,8 +1275,8 @@ private struct DesktopSidebar: View {
                         Image(systemName: "terminal")
                             .frame(width: 28, height: 24)
                             .foregroundStyle(primary)
-                            .background(panel)
-                            .overlay(Rectangle().stroke(rule))
+                            .background(panel, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(rule))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1286,8 +1287,8 @@ private struct DesktopSidebar: View {
                         Image(systemName: selectedSection == .settings ? "gearshape.fill" : "gearshape")
                             .frame(width: 28, height: 24)
                             .foregroundStyle(selectedSection == .settings ? JameBrand.ink : primary)
-                            .background(selectedSection == .settings ? accent : panel)
-                            .overlay(Rectangle().stroke(rule))
+                            .background(selectedSection == .settings ? accent : panel, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(rule))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1302,11 +1303,11 @@ private struct DesktopSidebar: View {
                         Spacer()
                         Text("⌘K").font(.caption.monospaced()).foregroundStyle(.tertiary)
                     }
-                    .font(.caption.weight(.medium))
+                    .font(.system(size: 11, weight: .medium))
                     .padding(.horizontal, 9).padding(.vertical, 7)
                     .foregroundStyle(primary)
-                    .background(panel, in: Rectangle())
-                    .overlay(Rectangle().stroke(rule))
+                    .background(panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(rule))
                 }
                 .buttonStyle(.plain)
                 .popover(
@@ -1363,13 +1364,13 @@ private struct DesktopSidebar: View {
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(selectedSection == .profile ? JameBrand.ink : accent)
                         .frame(width: 34, height: 34)
-                        .background(selectedSection == .profile ? accent : panel, in: Rectangle())
+                        .background(selectedSection == .profile ? accent : panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .frame(width: 34, height: 34)
-                .background(selectedSection == .profile ? accent : panel, in: Rectangle())
-                .overlay(Rectangle().stroke(selectedSection == .profile ? accent : rule))
+                .background(selectedSection == .profile ? accent : panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(selectedSection == .profile ? accent : rule))
                 .help("Choose a profile destination")
             }
             .padding(.horizontal, 16)
@@ -1390,14 +1391,15 @@ private struct DesktopSidebar: View {
         } label: {
             DesktopNavigationRow(section: section, accent: accent, isWorking: showWorkingGlow)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 6)
+                .padding(.vertical, 5)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .foregroundStyle(primary)
                 .background(
                     selectedSection == section
                         ? panel
-                        : showWorkingGlow ? accent.opacity(sessionsGlow ? 0.22 : 0.08) : Color.clear
+                        : showWorkingGlow ? accent.opacity(sessionsGlow ? 0.22 : 0.08) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                 )
                 .overlay(alignment: .leading) {
                     if selectedSection == section {
@@ -8595,6 +8597,12 @@ private enum SkillUploadError: LocalizedError {
     }
 }
 
+private struct NativeProfileChatSnapshot {
+    let sessionID: String
+    let messages: [NativeChatMessage]
+    let activity: [String]
+}
+
 @MainActor
 final class NativeChatStore: ObservableObject {
 	@Published var messages: [NativeChatMessage] = []
@@ -8609,6 +8617,8 @@ final class NativeChatStore: ObservableObject {
     @Published var workspaceName = "Choose workspace"
     @Published var workspacePath = ""
     @Published var showsTaskFiles = false
+    @Published fileprivate var profiles: [NativeAgentSummary] = []
+    @Published private(set) var activeProfileID = "main"
 
     private let port: Int
     private var sessionID: String
@@ -8620,6 +8630,7 @@ final class NativeChatStore: ObservableObject {
     private var lastSentTextRequest: (content: String, modelOverride: String)?
     private var reconnectAttempt = 0
     private var connectionEpoch = 0
+    private var profileSnapshots: [String: NativeProfileChatSnapshot] = [:]
 
     var isResponseInProgress: Bool {
         isThinking || isExecutingPlan
@@ -8630,13 +8641,60 @@ final class NativeChatStore: ObservableObject {
         let workspaceURL = jameTaskFolderURL().standardizedFileURL
         workspaceName = workspaceURL.lastPathComponent
         workspacePath = workspaceURL.path
-        let key = "jameclaw.native-chat.session-id"
-        // The native window does not restore the old message transcript on
-        // launch, so reusing its old gateway session would silently inject
-        // invisible history into the first new message.
-        let newID = UUID().uuidString
+        let savedProfile = UserDefaults.standard.string(forKey: "jameclaw.native-chat.profile-id") ?? "main"
+        let initialProfileID = savedProfile.isEmpty ? "main" : savedProfile
+        activeProfileID = initialProfileID
+        let key = "jameclaw.native-chat.session-id.\(initialProfileID)"
+        let storedID = UserDefaults.standard.string(forKey: key) ?? ""
+        let newID = storedID.isEmpty ? UUID().uuidString : storedID
         UserDefaults.standard.set(newID, forKey: key)
         sessionID = newID
+    }
+
+    private func sessionDefaultsKey(for profileID: String) -> String {
+        "jameclaw.native-chat.session-id.\(profileID)"
+    }
+
+    var activeProfileName: String {
+        profiles.first(where: { $0.id == activeProfileID })?.name ?? (activeProfileID == "main" ? "Jame" : activeProfileID)
+    }
+
+    fileprivate var availableProfiles: [NativeAgentSummary] {
+        profiles.filter { $0.id == "main" || $0.profile == true }
+    }
+
+    func loadProfiles() {
+        Task {
+            guard let data = try? await URLSession.shared.data(
+                from: authenticatedConsoleURL(port: port, path: "/api/agents")
+            ).0,
+            let agents = try? JSONDecoder().decode(NativeAgentsResponse.self, from: data).agents else { return }
+            profiles = agents
+            if !availableProfiles.contains(where: { $0.id == activeProfileID }) {
+                selectProfile("main")
+            }
+            loadDisplayName()
+        }
+    }
+
+    func selectProfile(_ profileID: String) {
+        let cleanID = profileID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty, cleanID != activeProfileID else { return }
+        profileSnapshots[activeProfileID] = NativeProfileChatSnapshot(
+            sessionID: sessionID, messages: messages, activity: activity
+        )
+        activeProfileID = cleanID
+        UserDefaults.standard.set(cleanID, forKey: "jameclaw.native-chat.profile-id")
+        let snapshot = profileSnapshots[cleanID]
+        let restoredID = snapshot?.sessionID
+            ?? UserDefaults.standard.string(forKey: sessionDefaultsKey(for: cleanID))
+            ?? UUID().uuidString
+        switchConversation(
+            to: restoredID,
+            messages: snapshot?.messages ?? [],
+            activity: snapshot?.activity ?? [],
+            statusText: "Switching to \(activeProfileName)…"
+        )
     }
 
     func startGatewayAndConnect() {
@@ -8789,9 +8847,9 @@ final class NativeChatStore: ObservableObject {
                 from: authenticatedConsoleURL(port: port, path: "/api/agents")
             ).0,
             let agents = try? JSONDecoder().decode(NativeAgentsResponse.self, from: data).agents,
-            let main = agents.first(where: { $0.id == "main" }),
-            !main.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            agentName = main.name
+            let selected = agents.first(where: { $0.id == activeProfileID }),
+            !selected.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            agentName = selected.name
         }
     }
 
@@ -8819,6 +8877,7 @@ final class NativeChatStore: ObservableObject {
     private func switchConversation(
         to newSessionID: String,
         messages restoredMessages: [NativeChatMessage],
+        activity restoredActivity: [String] = [],
         statusText: String
     ) {
         connectionEpoch += 1
@@ -8829,9 +8888,9 @@ final class NativeChatStore: ObservableObject {
         socket = nil
         previousSocket?.cancel(with: .goingAway, reason: nil)
         sessionID = newSessionID
-        UserDefaults.standard.set(newSessionID, forKey: "jameclaw.native-chat.session-id")
+        UserDefaults.standard.set(newSessionID, forKey: sessionDefaultsKey(for: activeProfileID))
 		messages = restoredMessages
-		activity.removeAll()
+		activity = restoredActivity
         pendingMessages.removeAll()
         pendingMemorySummary = nil
         lastSentTextRequest = nil
@@ -9009,7 +9068,7 @@ final class NativeChatStore: ObservableObject {
             "type": "message.send",
             "id": id,
             "session_id": sessionID,
-            "payload": payload,
+            "payload": payload.merging(["agent_id": activeProfileID]) { _, latest in latest },
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: envelope),
               let text = String(data: data, encoding: .utf8) else {
@@ -9435,6 +9494,21 @@ private struct NativeAgentControlBar: View {
 			Text("· \(chat.messages.count) messages")
 				.font(.system(size: 10 * fontScale, design: .monospaced))
 				.foregroundStyle(.secondary)
+			Menu {
+				ForEach(chat.availableProfiles) { profile in
+					Button {
+						chat.selectProfile(profile.id)
+					} label: {
+						Label(
+							profile.name.isEmpty ? profile.id : profile.name,
+							systemImage: profile.id == chat.activeProfileID ? "checkmark" : "person.crop.circle"
+						)
+					}
+				}
+			} label: {
+				Label(chat.activeProfileName, systemImage: "person.crop.circle")
+			}
+			.help("Choose the profile that owns this chat and its history")
 			if !modelName.isEmpty {
 				Text("· \(providerName.isEmpty ? "Auto" : providerName) / \(modelName)")
 					.font(.system(size: 10 * fontScale, design: .monospaced))
@@ -9463,6 +9537,7 @@ private struct NativeAgentControlBar: View {
 		.padding(.horizontal, 14)
 		.padding(.vertical, 8)
 		.background(accent.opacity(0.045))
+		.onAppear { chat.loadProfiles() }
 	}
 }
 
@@ -10136,6 +10211,9 @@ struct ChatView: View {
     private var composerBorder: Color {
         theme == .light ? JameBrand.ink.opacity(0.24) : Color.white.opacity(0.18)
     }
+    // The previous 14pt mono base felt oversized for a desktop chat surface.
+    // Keep the user's size preference, but make the everyday default calmer.
+    private var displayFontScale: CGFloat { max(0.82, CGFloat(fontScale * 0.9)) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -10175,11 +10253,11 @@ struct ChatView: View {
 			NativeAgentControlBar(
 				chat: chat,
 				accent: accent,
-				fontScale: fontScale,
+				fontScale: displayFontScale,
 				modelName: discussionProviders.selectedModel,
 				providerName: discussionProviders.providerNames[discussionProviders.selectedModel] ?? ""
 			)
-			NativeActivityRail(activity: chat.activity, accent: accent, fontScale: fontScale)
+			NativeActivityRail(activity: chat.activity, accent: accent, fontScale: displayFontScale)
 			if let error = chat.lastError {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -10233,20 +10311,20 @@ struct ChatView: View {
                                     NativeMemoryChangedCard(
                                         summary: message.content,
                                         accent: accent,
-                                        fontScale: fontScale
+                                        fontScale: displayFontScale
                                     )
                                 } else {
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(message.role == "user" ? "you >" : message.role == "error" ? "error >" : "jame >")
-                                            .font(.system(size: 10 * fontScale, weight: .semibold, design: .monospaced))
+                                            .font(.system(size: 10 * displayFontScale, weight: .semibold, design: .monospaced))
                                             .foregroundStyle(message.role == "user" ? accent : message.role == "error" ? .red : JameBrand.orangeSoft)
                                         if let planSteps = nativePlanSteps(from: message.content), message.role == "assistant" {
-                                            NativePlanCard(steps: planSteps, accent: accent, fontScale: fontScale)
+                                            NativePlanCard(steps: planSteps, accent: accent, fontScale: displayFontScale)
                                         } else {
                                             Text(message.content).textSelection(.enabled)
                                         }
                                     }
-                                    .font(.system(size: 14 * fontScale, design: .monospaced))
+                                    .font(.system(size: 14 * displayFontScale, design: .monospaced))
                                     .foregroundStyle(theme.text)
                                     .padding(density.messagePadding)
                                     .frame(maxWidth: message.role == "user" ? 520 : .infinity, alignment: .leading)
@@ -10259,7 +10337,7 @@ struct ChatView: View {
                         }
                         if chat.isResponseInProgress {
                             Text("Thinking... 💭")
-                                .font(.system(size: 12 * fontScale, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 12 * displayFontScale, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(JameBrand.orange)
                         }
                         }.padding(density.contentPadding)
@@ -10360,7 +10438,7 @@ struct ChatView: View {
                     .disabled((chat.isResponseInProgress || isTranscribingVoice) && !isRecording)
 
                     TextField("type a message…", text: $chat.draft, axis: .vertical)
-                        .font(.system(size: 14 * fontScale, design: .monospaced))
+                        .font(.system(size: 14 * displayFontScale, design: .monospaced))
                         .lineLimit(1...5)
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 11)
@@ -10525,15 +10603,15 @@ struct ChatView: View {
                     Text(".")
                         .foregroundStyle(Color.orange)
                 }
-                .font(.system(size: 34 * fontScale, weight: .semibold, design: .rounded))
+                .font(.system(size: 34 * displayFontScale, weight: .semibold, design: .rounded))
                 ProgressView()
                     .controlSize(.large)
                     .tint(accent)
                 Text(chat.status)
-                    .font(.system(size: 14 * fontScale, weight: .medium, design: .rounded))
+                    .font(.system(size: 14 * displayFontScale, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.9))
                 Text("Starting your private local gateway on localhost…")
-                    .font(.system(size: 13 * fontScale, design: .monospaced))
+                    .font(.system(size: 13 * displayFontScale, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
             .padding(42)

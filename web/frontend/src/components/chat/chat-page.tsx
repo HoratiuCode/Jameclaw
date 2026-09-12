@@ -47,6 +47,7 @@ export function ChatPage() {
     sendVoice,
     switchSession,
     newChat,
+    retryConnection,
   } = useJameChat()
 
   const { state: gwState, canStart, startReason, pid, owned } = useGateway()
@@ -87,6 +88,20 @@ export function ChatPage() {
           : null
   const hasActiveAssistantPlaceholder =
     isTyping && messages[messages.length - 1]?.role === "assistant"
+  const lastUserMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "user")
+  const recoveryMessage = errorMessage ?? connectionNotice
+  const canRetryMessage =
+    Boolean(lastUserMessage) && isGatewayRunning && !isTyping
+
+  const handleRetryMessage = () => {
+    if (!lastUserMessage) return
+    if (sendMessage(lastUserMessage.content)) return
+    toast.error(
+      "JameClaw could not retry the message yet. Reconnect the chat and try again.",
+    )
+  }
 
   useEffect(() => {
     if (!prompt && !newChatRequested) {
@@ -332,8 +347,38 @@ export function ChatPage() {
       </PageHeader>
 
       {connectionNotice && (
-        <div className="border-border/70 bg-muted/70 text-muted-foreground mx-4 mt-2 rounded-lg border px-3 py-2 text-sm md:mx-8 lg:mx-24 xl:mx-48">
-          {connectionNotice}
+        <div className="border-border/70 bg-muted/70 text-muted-foreground mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm md:mx-8 lg:mx-24 xl:mx-48">
+          <span className="min-w-0 flex-1">{connectionNotice}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            onClick={retryConnection}
+          >
+            Retry now
+          </Button>
+        </div>
+      )}
+
+      {errorMessage && !connectionNotice && (
+        <div
+          className="border-destructive/35 bg-destructive/8 mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm md:mx-8 lg:mx-24 xl:mx-48"
+          role="alert"
+        >
+          <span className="min-w-0 flex-1 text-destructive">{recoveryMessage}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            onClick={retryConnection}
+          >
+            Retry connection
+          </Button>
+          {canRetryMessage && (
+            <Button size="sm" className="h-7" onClick={handleRetryMessage}>
+              Retry message
+            </Button>
+          )}
         </div>
       )}
 

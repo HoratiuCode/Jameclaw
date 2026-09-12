@@ -70,7 +70,6 @@ export function AppHeader() {
       : startReason
 
   const [showStopDialog, setShowStopDialog] = React.useState(false)
-  const headerLogoSrc = theme === "dark" ? "/logo_dark.jpeg" : "/logo_with_text.png"
 
   const handleGatewayToggle = () => {
     if (gwLoading || isRestarting || isStopping || (!isRunning && !canStart)) {
@@ -103,9 +102,16 @@ export function AppHeader() {
           <Link
             to="/"
             search={{ prompt: undefined, newChat: false }}
-            className="flex items-center"
+            className="group flex items-center gap-2 rounded-md pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <img className="h-11 w-auto object-contain" src={headerLogoSrc} alt="JameClaw" />
+            <img
+              className="size-9 object-contain transition-transform group-hover:scale-105"
+              src="/roman-navbar-mark.png"
+              alt="JameClaw"
+            />
+            <span className="hidden text-base font-semibold tracking-tight text-foreground sm:inline">
+              JameClaw
+            </span>
           </Link>
         </div>
       </div>
