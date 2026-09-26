@@ -24,10 +24,17 @@ NATIVE_SOURCES=(
     "./macos/JameClawHome/NativeAppInfrastructure.swift"
 )
 ICON_SOURCE="./scripts/icon.icns"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 # Clean up existing .app
 if [ -d "$APP_PATH" ]; then
     echo "Removing existing ${APP_PATH}"
+    # The development bundle shares its identifier with the installed app.
+    # Unregister it before replacing it so Launch Services cannot retain an
+    # obsolete entry that creates a second JameClaw Desktop in Dock/Launchpad.
+    if [ -x "$LSREGISTER" ]; then
+        "$LSREGISTER" -u "$APP_PATH" || true
+    fi
     rm -rf "$APP_PATH"
 fi
 
@@ -46,7 +53,7 @@ else
     exit 1
 fi
 echo "Building native desktop executable..."
-swiftc -parse-as-library "${NATIVE_SOURCES[@]}" -o "${APP_MACOS}/${NATIVE_EXECUTABLE}" -framework SwiftUI -framework AppKit -framework UserNotifications
+swiftc -parse-as-library "${NATIVE_SOURCES[@]}" -o "${APP_MACOS}/${NATIVE_EXECUTABLE}" -framework SwiftUI -framework AppKit -framework UserNotifications -framework PDFKit
 if [ -f "./build/jameclaw" ]; then
     cp "./build/jameclaw" "${APP_MACOS}/"
 else
@@ -134,7 +141,6 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 # The bundle in build/ is a developer artifact, not a second installed app.
 # Keeping it out of Launch Services prevents macOS from showing two identical
 # JameClaw Desktop entries when the installed copy lives in /Applications.
-LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [ -x "$LSREGISTER" ]; then
     "$LSREGISTER" -u "$APP_PATH" || true
 fi

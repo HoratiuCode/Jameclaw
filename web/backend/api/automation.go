@@ -33,37 +33,87 @@ type automationBlueprintInstantiateResponse struct {
 }
 
 type automationItem struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Enabled           bool   `json:"enabled"`
-	Status            string `json:"status"`
-	Schedule          string `json:"schedule"`
-	Prompt            string `json:"prompt"`
-	Delivery          string `json:"delivery"`
-	DeliveryApproved  bool   `json:"delivery_approved"`
-	NextRunAtMS       *int64 `json:"next_run_at_ms,omitempty"`
-	LastRunAtMS       *int64 `json:"last_run_at_ms,omitempty"`
-	LastStatus        string `json:"last_status,omitempty"`
-	LastError         string `json:"last_error,omitempty"`
-	Running           bool   `json:"running"`
-	CreatedAtMS       int64  `json:"created_at_ms"`
-	UpdatedAtMS       int64  `json:"updated_at_ms"`
-	DeleteAfterRun    bool   `json:"delete_after_run"`
-	Timezone          string `json:"timezone,omitempty"`
-	RetryAttempts     int    `json:"retry_attempts,omitempty"`
-	RetryDelaySeconds int    `json:"retry_delay_seconds,omitempty"`
-	QuietHoursStart   string `json:"quiet_hours_start,omitempty"`
-	QuietHoursEnd     string `json:"quiet_hours_end,omitempty"`
-	MaxRunsPerDay     int    `json:"max_runs_per_day,omitempty"`
-	RunsToday         int    `json:"runs_today,omitempty"`
+	ID                string               `json:"id"`
+	Name              string               `json:"name"`
+	Enabled           bool                 `json:"enabled"`
+	Status            string               `json:"status"`
+	Schedule          string               `json:"schedule"`
+	Prompt            string               `json:"prompt"`
+	Delivery          string               `json:"delivery"`
+	DeliveryApproved  bool                 `json:"delivery_approved"`
+	NextRunAtMS       *int64               `json:"next_run_at_ms,omitempty"`
+	LastRunAtMS       *int64               `json:"last_run_at_ms,omitempty"`
+	LastStatus        string               `json:"last_status,omitempty"`
+	LastError         string               `json:"last_error,omitempty"`
+	Running           bool                 `json:"running"`
+	CreatedAtMS       int64                `json:"created_at_ms"`
+	UpdatedAtMS       int64                `json:"updated_at_ms"`
+	DeleteAfterRun    bool                 `json:"delete_after_run"`
+	Timezone          string               `json:"timezone,omitempty"`
+	RetryAttempts     int                  `json:"retry_attempts,omitempty"`
+	RetryDelaySeconds int                  `json:"retry_delay_seconds,omitempty"`
+	QuietHoursStart   string               `json:"quiet_hours_start,omitempty"`
+	QuietHoursEnd     string               `json:"quiet_hours_end,omitempty"`
+	MaxRunsPerDay     int                  `json:"max_runs_per_day,omitempty"`
+	RunsToday         int                  `json:"runs_today,omitempty"`
+	AgentID           string               `json:"agent_id,omitempty"`
+	RunAgent          bool                 `json:"run_agent"`
+	LastDurationMS    int64                `json:"last_duration_ms,omitempty"`
+	RetryCount        int                  `json:"retry_count,omitempty"`
+	Runs              []cron.AutomationRun `json:"runs,omitempty"`
 }
 
 func (h *Handler) registerAutomationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/automation", h.handleAutomationList)
 	mux.HandleFunc("GET /api/automation/{id}/output", h.handleAutomationOutput)
 	mux.HandleFunc("POST /api/automation/{id}/run", h.handleAutomationRun)
+	mux.HandleFunc("POST /api/automation/{id}/pause", h.handleAutomationPause)
+	mux.HandleFunc("POST /api/automation/{id}/resume", h.handleAutomationResume)
+	mux.HandleFunc("DELETE /api/automation/{id}", h.handleAutomationDelete)
 	mux.HandleFunc("GET /api/automation/blueprints", h.handleAutomationBlueprintList)
 	mux.HandleFunc("POST /api/automation/blueprints/instantiate", h.handleAutomationBlueprintInstantiate)
+}
+
+func (h *Handler) automationService() (*cron.CronService, error) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return nil, err
+	}
+	return cron.NewCronService(filepath.Join(cfg.WorkspacePath(), "cron", "jobs.json"), nil), nil
+}
+
+func (h *Handler) handleAutomationPause(w http.ResponseWriter, r *http.Request) {
+	h.handleAutomationEnabled(w, r, false)
+}
+func (h *Handler) handleAutomationResume(w http.ResponseWriter, r *http.Request) {
+	h.handleAutomationEnabled(w, r, true)
+}
+
+func (h *Handler) handleAutomationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	service, err := h.automationService()
+	if err != nil {
+		http.Error(w, "failed to load automations", http.StatusInternalServerError)
+		return
+	}
+	if service.EnableJob(strings.TrimSpace(r.PathValue("id")), enabled) == nil {
+		http.Error(w, "automation not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"enabled": enabled})
+}
+
+func (h *Handler) handleAutomationDelete(w http.ResponseWriter, r *http.Request) {
+	service, err := h.automationService()
+	if err != nil {
+		http.Error(w, "failed to load automations", http.StatusInternalServerError)
+		return
+	}
+	if !service.RemoveJob(strings.TrimSpace(r.PathValue("id"))) {
+		http.Error(w, "automation not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleAutomationRun(w http.ResponseWriter, r *http.Request) {
@@ -249,6 +299,11 @@ func automationFromCronJob(job cron.CronJob) automationItem {
 		QuietHoursEnd:     job.Policy.QuietHoursEnd,
 		MaxRunsPerDay:     job.Policy.MaxRunsPerDay,
 		RunsToday:         job.State.RunsToday,
+		AgentID:           job.Payload.AgentID,
+		RunAgent:          job.Payload.RunAgent,
+		LastDurationMS:    job.State.LastDurationMS,
+		RetryCount:        job.State.RetryCount,
+		Runs:              job.State.Runs,
 	}
 }
 

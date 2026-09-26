@@ -17,6 +17,7 @@ const (
 	fileSearchDefaultLimit = 12
 	fileSearchMaxLimit     = 25
 	fileSearchMaxVisited   = 8000
+	fileSearchCacheTTL     = 30 * time.Second
 )
 
 type fileSearchResponse struct {
@@ -26,6 +27,7 @@ type fileSearchResponse struct {
 type fileSearchCache struct {
 	RootsKey string
 	Items    []fileSearchItem
+	BuiltAt  time.Time
 }
 
 type fileSearchItem struct {
@@ -61,7 +63,7 @@ func (h *Handler) cachedLocalFileIndex(roots []string) []fileSearchItem {
 	h.fileSearchMu.Lock()
 	defer h.fileSearchMu.Unlock()
 
-	if h.fileSearchCache.RootsKey == rootsKey && h.fileSearchCache.Items != nil {
+	if h.fileSearchCache.RootsKey == rootsKey && h.fileSearchCache.Items != nil && time.Since(h.fileSearchCache.BuiltAt) < fileSearchCacheTTL {
 		return append([]fileSearchItem(nil), h.fileSearchCache.Items...)
 	}
 
@@ -69,6 +71,7 @@ func (h *Handler) cachedLocalFileIndex(roots []string) []fileSearchItem {
 	h.fileSearchCache = fileSearchCache{
 		RootsKey: rootsKey,
 		Items:    append([]fileSearchItem(nil), items...),
+		BuiltAt:  time.Now(),
 	}
 	return items
 }
@@ -99,11 +102,12 @@ func (h *Handler) fileSearchRoots() []string {
 
 	if cfg, err := config.LoadConfig(h.configPath); err == nil {
 		addRoot(cfg.WorkspacePath())
-	}
-
-	if home, err := os.UserHomeDir(); err == nil {
-		for _, name := range []string{"Desktop", "Documents", "Downloads"} {
-			addRoot(filepath.Join(home, name))
+		// Search only locations already approved for file tools. The desktop app
+		// adds a selected task folder to these paths after an explicit macOS
+		// approval; silently indexing Desktop/Documents/Downloads would expose
+		// names from folders Jame was never allowed to use.
+		for _, path := range cfg.Tools.AllowReadPaths {
+			addRoot(path)
 		}
 	}
 

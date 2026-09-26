@@ -284,7 +284,7 @@ func buildSessionListItem(sessionID string, sess sessionFile) sessionListItem {
 	}
 	title := strings.TrimSpace(sess.Summary)
 	if title == "" {
-		title = preview
+		title = automaticSessionTitle(preview)
 	}
 
 	title = truncateRunes(title, maxSessionTitleRunes)
@@ -317,6 +317,16 @@ func buildSessionListItem(sessionID string, sess sessionFile) sessionListItem {
 		Created:      sess.Created.Format(time.RFC3339),
 		Updated:      sess.Updated.Format(time.RFC3339),
 	}
+}
+
+// automaticSessionTitle makes an untitled Desktop conversation recognizable
+// without inventing meaning outside the user's first request.
+func automaticSessionTitle(preview string) string {
+	preview = strings.Join(strings.Fields(preview), " ")
+	if sentenceEnd := strings.IndexAny(preview, ".?!\n"); sentenceEnd > 12 {
+		preview = preview[:sentenceEnd]
+	}
+	return truncateRunes(preview, 64)
 }
 
 func isEmptySession(sess sessionFile) bool {

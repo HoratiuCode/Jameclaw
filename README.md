@@ -134,6 +134,10 @@ make build
 # Build Web UI Launcher (required for WebUI mode)
 make build-launcher
 
+# Build and install the macOS desktop app. This keeps only the /Applications
+# copy registered, so the development build does not appear as a second app.
+make install-macos-app
+
 # Optional: build the TUI launcher
 go build -o build/jameclaw-launcher-tui ./cmd/jameclaw-launcher-tui
 

@@ -20,6 +20,7 @@ import { useJameChat } from "@/hooks/use-jame-chat"
 import { useSessionHistory } from "@/hooks/use-session-history"
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+const MAX_VOICE_RECORDING_MS = 5 * 60 * 1000
 
 export function ChatPage() {
   const { t } = useTranslation()
@@ -29,6 +30,7 @@ export function ChatPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
+  const voiceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [hasScrolled, setHasScrolled] = useState(false)
   const [input, setInput] = useState("")
@@ -176,11 +178,22 @@ export function ChatPage() {
   }
 
   const stopRecording = () => {
+    if (voiceTimeoutRef.current) {
+      clearTimeout(voiceTimeoutRef.current)
+      voiceTimeoutRef.current = null
+    }
     const recorder = mediaRecorderRef.current
     if (recorder && recorder.state !== "inactive") {
       recorder.stop()
     }
   }
+
+  useEffect(() => () => {
+    if (voiceTimeoutRef.current) clearTimeout(voiceTimeoutRef.current)
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== "inactive") recorder.stop()
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+  }, [])
 
   const handleVoiceToggle = async () => {
     if (isRecording) {
@@ -223,6 +236,10 @@ export function ChatPage() {
         }
       }
       recorder.onstop = () => {
+        if (voiceTimeoutRef.current) {
+          clearTimeout(voiceTimeoutRef.current)
+          voiceTimeoutRef.current = null
+        }
         const chunks = recordedChunksRef.current
         const type = recorder.mimeType || preferredType || "audio/webm"
         recordedChunksRef.current = []
@@ -247,10 +264,16 @@ export function ChatPage() {
 
       recorder.start()
       setIsRecording(true)
+      voiceTimeoutRef.current = setTimeout(() => {
+        toast.message("Voice recording stopped after five minutes.")
+        stopRecording()
+      }, MAX_VOICE_RECORDING_MS)
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
+        error instanceof DOMException && error.name === "NotAllowedError"
+          ? "Microphone access was denied. Enable it in your browser settings and try again."
+          : error instanceof Error
+            ? error.message
           : "Could not start voice recording."
       toast.error(message)
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop())

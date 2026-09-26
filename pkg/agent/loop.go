@@ -1272,8 +1272,10 @@ func (al *AgentLoop) transcribeAudioInMessage(ctx context.Context, msg bus.Inbou
 		}
 		result, err := al.transcriber.Transcribe(ctx, path)
 		if err != nil {
-			logger.WarnCF("voice", "Transcription failed", map[string]any{"ref": ref, "error": err})
-			transcriptions = append(transcriptions, "")
+			// Do not silently turn a failed voice command into an empty prompt. The
+			// agent needs a safe, actionable instruction to ask the user to retry.
+			logger.WarnCF("voice", "Transcription failed", map[string]any{"ref": ref, "provider": al.transcriber.Name(), "error": err})
+			transcriptions = append(transcriptions, "[transcription unavailable — ask the user to retry the voice message]")
 			continue
 		}
 		transcriptions = append(transcriptions, result.Text)

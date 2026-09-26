@@ -111,8 +111,8 @@ export function ModelCard({
               variant="ghost"
               size="icon-sm"
               onClick={() => onSetDefault(model, role)}
-              disabled={settingDefaultRole !== null || !canSetDefault || active}
-              title={title}
+              disabled={settingDefaultRole !== null || !canSetDefault || active || (role === "voice" && !model.voice_capable)}
+              title={role === "voice" && !model.voice_capable ? "This model does not accept audio transcription" : title}
               className={active ? "text-primary" : undefined}
             >
               {settingDefaultRole === role ? (

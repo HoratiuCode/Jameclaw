@@ -43,7 +43,7 @@ func createAutomationRegistrar(cfg *config.Config, service *cron.CronService) fu
 			if !authorized(w, r) {
 				return
 			}
-			count := service.TriggerEvent(r.PathValue("event"))
+			count := service.TriggerEventOnce(r.PathValue("event"), r.Header.Get("Idempotency-Key"))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted", "matched_jobs": count})
 		})

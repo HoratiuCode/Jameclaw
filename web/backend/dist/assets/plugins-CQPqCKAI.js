@@ -1,1 +1,0 @@
-import{j as o}from"./index-bO1vD40O.js";import{D as t}from"./dashboard-page-McV0RUvT.js";import"./page-header-DbzoI7e0.js";const p=()=>o.jsx(t,{title:"Plugins",kind:"plugins",empty:"No plugin surfaces are available."});export{p as component};

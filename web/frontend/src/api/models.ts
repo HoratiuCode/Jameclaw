@@ -23,6 +23,7 @@ export interface ModelInfo {
   is_default: boolean
   is_image_default: boolean
   is_voice_default: boolean
+  voice_capable: boolean
 }
 
 export interface ModelMutationPayload extends Partial<ModelInfo> {
@@ -65,6 +66,7 @@ export interface ProviderCatalogEntry {
   configured: boolean
   default: boolean
   configured_models?: string[]
+  supports_custom_model_id?: boolean
 }
 
 interface ModelsListResponse {
@@ -93,6 +95,7 @@ export interface AddModelFromCatalogPayload {
   provider_id: string
   preset_id: string
   remote_model_id?: string
+  custom_model_id?: string
   model_name?: string
   api_key?: string
   set_default?: boolean
@@ -111,7 +114,19 @@ const BASE_URL = ""
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, options)
   if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`)
+    const body = (await res.text()).trim()
+    let detail = body
+    if (body.startsWith("{")) {
+      try {
+        const payload = JSON.parse(body) as { error?: unknown; message?: unknown; detail?: unknown }
+        detail = [payload.error, payload.message, payload.detail]
+          .find((value): value is string => typeof value === "string" && value.trim().length > 0)
+          ?.trim() ?? body
+      } catch {
+        // A non-JSON error response is still useful to show verbatim below.
+      }
+    }
+    throw new Error(detail || `Model request failed (${res.status} ${res.statusText}).`)
   }
   return res.json() as Promise<T>
 }

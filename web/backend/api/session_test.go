@@ -30,6 +30,13 @@ func sessionsTestDir(t *testing.T, configPath string) string {
 	return dir
 }
 
+func TestAutomaticSessionTitle(t *testing.T) {
+	got := automaticSessionTitle("  Build a native file browser for JameClaw. Include safe folder approvals. ")
+	if got != "Build a native file browser for JameClaw" {
+		t.Fatalf("automaticSessionTitle() = %q", got)
+	}
+}
+
 func TestHandleArchiveSessionPersistsAndListsState(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

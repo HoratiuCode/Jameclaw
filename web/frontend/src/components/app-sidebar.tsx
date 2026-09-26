@@ -23,6 +23,7 @@ import { Link, useRouterState } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
+import { getAspirineSummary } from "@/api/aspirine"
 import { getAppStatus } from "@/api/status"
 import {
   Collapsible,
@@ -102,6 +103,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     queryFn: getAppStatus,
     staleTime: 60_000,
   })
+  const { data: aspirineSummary } = useQuery({
+    queryKey: ["aspirine"],
+    queryFn: getAspirineSummary,
+    refetchInterval: 20_000,
+  })
+  const hasAspirineIssues = (aspirineSummary?.issue_count ?? 0) > 0
   const displayedVersion = appStatus?.version || fallbackVersion
   const currentVersion = extractVersionNumber(displayedVersion)
   const latestVersion = extractVersionNumber(appStatus?.version)
@@ -151,12 +158,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             icon: IconCalendarTime,
             translateTitle: false,
           },
-          {
-            title: "Aspirine",
-            url: "/aspirine",
-            icon: IconFirstAidKit,
-            translateTitle: false,
-          },
+          ...(hasAspirineIssues
+            ? [
+                {
+                  title: "Aspirine",
+                  url: "/aspirine",
+                  icon: IconFirstAidKit,
+                  translateTitle: false,
+                },
+              ]
+            : []),
         ],
       },
       {
@@ -263,7 +274,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ],
       },
     ]
-  }, [channelItems])
+  }, [channelItems, hasAspirineIssues])
 
   return (
     <Sidebar

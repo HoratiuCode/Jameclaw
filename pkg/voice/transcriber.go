@@ -19,7 +19,10 @@ type TranscriptionResponse struct {
 	Duration float64 `json:"duration,omitempty"`
 }
 
-func supportsAudioTranscription(model string) bool {
+// SupportsAudioTranscription is the single capability check used by setup UI
+// and runtime selection. It intentionally answers only whether the transport
+// can carry audio; a provider may still reject a particular model ID.
+func SupportsAudioTranscription(model string) bool {
 	protocol, _ := providers.ExtractProtocol(model)
 
 	switch protocol {
@@ -87,7 +90,7 @@ func detectAudioModelTranscriber(cfg *config.Config, modelName string) Transcrib
 	if err == nil {
 		return newSupportedAudioModelTranscriber(modelCfg)
 	}
-	if supportsAudioTranscription(modelName) {
+	if SupportsAudioTranscription(modelName) {
 		return newSupportedAudioModelTranscriber(&config.ModelConfig{
 			ModelName: modelName,
 			Model:     modelName,
@@ -97,7 +100,7 @@ func detectAudioModelTranscriber(cfg *config.Config, modelName string) Transcrib
 }
 
 func newSupportedAudioModelTranscriber(modelCfg *config.ModelConfig) Transcriber {
-	if modelCfg == nil || !supportsAudioTranscription(modelCfg.Model) {
+	if modelCfg == nil || !SupportsAudioTranscription(modelCfg.Model) {
 		return nil
 	}
 	transcriber := NewAudioModelTranscriber(modelCfg)

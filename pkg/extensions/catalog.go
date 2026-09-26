@@ -57,6 +57,9 @@ type ProviderDescriptor struct {
 	Configured        bool                 `json:"configured"`
 	Default           bool                 `json:"default"`
 	ConfiguredModels  []string             `json:"configured_models,omitempty"`
+	// SupportsCustomModelID lets local runtimes accept a user-selected model
+	// identifier when their available models cannot be discovered over HTTP.
+	SupportsCustomModelID bool `json:"supports_custom_model_id,omitempty"`
 }
 
 type Catalog struct {
@@ -208,7 +211,23 @@ func providerDescriptors() []ProviderDescriptor {
 		localProvider("ollama", "Ollama", "http://localhost:11434/v1", "llama3", "ollama/llama3", "Install Ollama locally and pull the model before using it."),
 		localProvider("vllm", "vLLM", "http://localhost:8000/v1", "local-model", "vllm/local-model", "Start a vLLM OpenAI-compatible server on localhost:8000."),
 		localProviderWithProtocols("claude-cli", "Claude CLI", []string{"claude-cli", "claudecli"}, "", "claude-cli", "claude-cli/sonnet", "Install and authenticate the Claude CLI."),
-		localProviderWithProtocols("codex-cli", "Codex CLI", []string{"codex-cli", "codexcli"}, "", "codex-cli", "codex-cli/gpt-5.4", "Install and authenticate the Codex CLI."),
+		{
+			ID:                    "codex-cli",
+			Name:                  "Codex CLI",
+			Category:              "local",
+			Description:           "Codex models through the locally authenticated Codex CLI.",
+			Protocols:             []string{"codex-cli", "codexcli"},
+			RequiresAPIKey:        false,
+			AuthMethods:           []ProviderAuthMethod{{ID: "local", Label: "Local runtime"}},
+			LocalRuntimeHint:      "Install and authenticate the Codex CLI. Choose a model available to your Codex account.",
+			SupportsCustomModelID: true,
+			RecommendedModels: []ModelPreset{{
+				ID:        "codex-cli",
+				Name:      "Codex default",
+				ModelName: "codex-cli",
+				Model:     "codex-cli/gpt-5.4",
+			}},
+		},
 		localProviderWithProtocols("grok-build", "Grok Build", []string{"grok-cli", "grokcli", "grok-build"}, "", "grok-build", "grok-build/default", "Use the signed-in Grok Build CLI installed on this Mac."),
 		localProvider("antigravity", "Google Code Assist", "", "antigravity", "antigravity/default", "Authenticate Google Code Assist / Antigravity locally."),
 		{

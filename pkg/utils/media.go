@@ -16,7 +16,9 @@ import (
 	"github.com/sipeed/jameclaw/pkg/media"
 )
 
-var audioExtensions = []string{".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac", ".wma"}
+// Keep this aligned with the browser recorder: Chromium records WebM/Opus by
+// default, while Safari commonly produces MP4/AAC.
+var audioExtensions = []string{".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac", ".wma", ".webm", ".mp4"}
 
 func AudioFormat(path string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(path))

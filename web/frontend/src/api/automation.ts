@@ -22,6 +22,11 @@ export interface AutomationItem {
   quiet_hours_end?: string
   max_runs_per_day?: number
   runs_today?: number
+	agent_id?: string
+	run_agent: boolean
+	last_duration_ms?: number
+	retry_count?: number
+	runs?: Array<{ startedAtMs: number; durationMs: number; status: string; error?: string }>
 }
 
 export interface AutomationBlueprintField {
@@ -90,6 +95,15 @@ export async function runAutomation(id: string): Promise<void> {
     throw new Error(message.trim() || `Failed to run automation: ${res.status}`)
   }
 }
+
+async function mutateAutomation(id: string, action: "pause" | "resume" | "delete") {
+	const res = await fetch(`/api/automation/${encodeURIComponent(id)}${action === "delete" ? "" : `/${action}`}`, { method: action === "delete" ? "DELETE" : "POST" })
+	if (!res.ok) throw new Error((await res.text()).trim() || `Could not ${action} automation`)
+}
+
+export const pauseAutomation = (id: string) => mutateAutomation(id, "pause")
+export const resumeAutomation = (id: string) => mutateAutomation(id, "resume")
+export const deleteAutomation = (id: string) => mutateAutomation(id, "delete")
 
 export async function getAutomationOutput(id: string): Promise<AutomationOutput> {
   const res = await fetch(`/api/automation/${encodeURIComponent(id)}/output`)

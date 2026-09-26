@@ -53,6 +53,7 @@ export function AddProviderModelSheet({
   const [modelName, setModelName] = useState("")
   const [apiKey, setAPIKey] = useState("")
   const [remoteModelID, setRemoteModelID] = useState("")
+  const [customModelID, setCustomModelID] = useState("")
   const [discoveredModels, setDiscoveredModels] = useState<
     { id: string; name: string; owned_by?: string }[]
   >([])
@@ -68,6 +69,7 @@ export function AddProviderModelSheet({
   const selectedRemoteModel = discoveredModels.find(
     (item) => item.id === remoteModelID,
   )
+  const isCustomModel = presetID === "custom"
 
   useEffect(() => {
     if (!open) return
@@ -78,6 +80,7 @@ export function AddProviderModelSheet({
     setModelName(firstPreset?.model_name ?? "")
     setAPIKey("")
     setRemoteModelID("")
+    setCustomModelID("")
     setDiscoveredModels([])
     setSetAsDefault(false)
     setError("")
@@ -85,17 +88,23 @@ export function AddProviderModelSheet({
 
   useEffect(() => {
     if (!provider) return
+    if (presetID === "custom" && provider.supports_custom_model_id) {
+      setRemoteModelID("")
+      return
+    }
     const nextPreset =
       provider.recommended_models.find((item) => item.id === presetID) ??
       provider.recommended_models[0]
     setPresetID(nextPreset?.id ?? "")
     setModelName(nextPreset?.model_name ?? "")
     setRemoteModelID("")
+    setCustomModelID("")
     setDiscoveredModels([])
   }, [provider, presetID])
 
   const handlePresetChange = (value: string) => {
     setRemoteModelID("")
+    setCustomModelID("")
     setPresetID(value)
     const nextPreset = provider?.recommended_models.find(
       (item) => item.id === value,
@@ -104,9 +113,17 @@ export function AddProviderModelSheet({
   }
 
   const handleRemoteModelChange = (value: string) => {
+    setCustomModelID("")
     setRemoteModelID(value)
     const nextModel = discoveredModels.find((item) => item.id === value)
     setModelName(nextModel?.id ?? "")
+  }
+
+  const handleCustomModelChange = (value: string) => {
+    setPresetID("custom")
+    setRemoteModelID("")
+    setCustomModelID(value)
+    setModelName(value.trim())
   }
 
   const fetchAvailableModels = async () => {
@@ -132,7 +149,9 @@ export function AddProviderModelSheet({
 
   const validate = (selectedPreset: ModelPreset | undefined): string => {
     if (!provider) return "Select a provider."
-    if (!selectedPreset && !selectedRemoteModel) return "Select a model."
+    if (isCustomModel && !customModelID.trim()) return "Enter a Codex model ID."
+    if (!selectedPreset && !selectedRemoteModel && !isCustomModel) return "Select a model."
+    if (customModelID.includes("/")) return "Use the Codex model ID only, without the provider prefix."
     if (!modelName.trim()) return "Model name is required."
     if (existingModelNames.some((name) => name.trim() === modelName.trim())) {
       return "That model name already exists. Choose another name or edit the existing model."
@@ -156,6 +175,7 @@ export function AddProviderModelSheet({
         provider_id: providerID,
         preset_id: presetID,
         remote_model_id: remoteModelID || undefined,
+        custom_model_id: isCustomModel ? customModelID.trim() : undefined,
         model_name: modelName.trim(),
         api_key: apiKey.trim() || undefined,
         set_default: setAsDefault,
@@ -205,11 +225,16 @@ export function AddProviderModelSheet({
             <Field label="Model" hint={selectedRemoteModel?.owned_by || preset?.description || preset?.model}>
               <select
                 className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
-                value={remoteModelID ? `remote:${remoteModelID}` : presetID}
+                value={isCustomModel ? "custom" : remoteModelID ? `remote:${remoteModelID}` : presetID}
                 onChange={(event) => {
                   const value = event.target.value
                   if (value.startsWith("remote:")) {
                     handleRemoteModelChange(value.slice("remote:".length))
+                  } else if (value === "custom") {
+                    setPresetID("custom")
+                    setRemoteModelID("")
+                    setCustomModelID("")
+                    setModelName("")
                   } else {
                     handlePresetChange(value)
                   }
@@ -229,8 +254,22 @@ export function AddProviderModelSheet({
                     ))}
                   </optgroup>
                 )}
+                {provider?.supports_custom_model_id && (
+                  <option value="custom">Choose a Codex model…</option>
+                )}
               </select>
             </Field>
+
+            {isCustomModel && (
+              <Field label="Codex model ID" hint="Use a model available to the signed-in Codex CLI account.">
+                <Input
+                  autoFocus
+                  value={customModelID.trimStart()}
+                  onChange={(event) => handleCustomModelChange(event.target.value)}
+                  placeholder="gpt-5.6-terra"
+                />
+              </Field>
+            )}
 
             <Field label="Model name" hint="Local alias stored in model_list.">
               <Input
@@ -251,16 +290,18 @@ export function AddProviderModelSheet({
               </Field>
             )}
 
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={fetchAvailableModels}
-              disabled={discovering || !provider || (provider.requires_api_key && !apiKey.trim())}
-            >
-              {discovering ? <IconLoader2 className="size-4 animate-spin" /> : <IconDownload className="size-4" />}
-              Fetch available models from API
-            </Button>
+            {!provider?.supports_custom_model_id && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={fetchAvailableModels}
+                disabled={discovering || !provider || (provider.requires_api_key && !apiKey.trim())}
+              >
+                {discovering ? <IconLoader2 className="size-4 animate-spin" /> : <IconDownload className="size-4" />}
+                Fetch available models from API
+              </Button>
+            )}
 
             <SwitchCardField
               label="Set as default"

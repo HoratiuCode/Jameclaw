@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/sipeed/jameclaw/pkg/utils"
 	"github.com/sipeed/jameclaw/pkg/voice"
 )
 
@@ -25,14 +27,25 @@ func (h *Handler) handleVoiceTranscription(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	file, _, err := r.FormFile("audio")
+	file, header, err := r.FormFile("audio")
 	if err != nil {
 		http.Error(w, "The request does not include an audio recording.", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
 
-	temporary, err := os.CreateTemp("", "jameclaw-voice-*.m4a")
+	// Do not force every multipart recording to .m4a. The web console sends
+	// WebM/Opus in Chromium and the extension is how the provider serializer
+	// determines its audio format.
+	ext := strings.ToLower(filepath.Ext(utils.SanitizeFilename(header.Filename)))
+	if !utils.IsAudioFile(header.Filename, header.Header.Get("Content-Type")) {
+		http.Error(w, "The recording must be a supported audio format.", http.StatusUnsupportedMediaType)
+		return
+	}
+	if ext == "" {
+		ext = ".m4a"
+	}
+	temporary, err := os.CreateTemp("", "jameclaw-voice-*"+ext)
 	if err != nil {
 		http.Error(w, "Could not prepare the recording for transcription.", http.StatusInternalServerError)
 		return
@@ -40,9 +53,15 @@ func (h *Handler) handleVoiceTranscription(w http.ResponseWriter, r *http.Reques
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 
-	if _, err := io.Copy(temporary, io.LimitReader(file, maxVoiceRecordingBytes+1)); err != nil {
+	written, err := io.Copy(temporary, io.LimitReader(file, maxVoiceRecordingBytes+1))
+	if err != nil {
 		temporary.Close()
 		http.Error(w, "Could not read the recording.", http.StatusBadRequest)
+		return
+	}
+	if written > maxVoiceRecordingBytes {
+		temporary.Close()
+		http.Error(w, "The recording is larger than 25 MB.", http.StatusRequestEntityTooLarge)
 		return
 	}
 	if err := temporary.Close(); err != nil {

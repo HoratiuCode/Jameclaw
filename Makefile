@@ -1,4 +1,4 @@
-.PHONY: all build build-launcher launcher run-launcher install install-startup uninstall clean help test
+.PHONY: all build build-launcher launcher run-launcher install install-startup uninstall clean help test build-macos-app install-macos-app
 
 # Build variables
 BINARY_NAME=jameclaw
@@ -328,6 +328,10 @@ build-macos-app:
 	@cd web && $(MAKE) build && cd ..
 	@./scripts/build-macos-app.sh $(BINARY_NAME)-$(PLATFORM)-$(ARCH)
 	@echo "macOS .app bundle created: $(BUILD_DIR)/JameClaw Desktop.app"
+
+## install-macos-app: Install the packaged macOS app without a duplicate Launch Services entry
+install-macos-app: build-macos-app
+	@./scripts/install-macos-app.sh
 
 ## help: Show this help message
 help:

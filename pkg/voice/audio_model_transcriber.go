@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/logger"
@@ -48,6 +49,7 @@ func NewAudioModelTranscriber(modelCfg *config.ModelConfig) *AudioModelTranscrib
 }
 
 func (t *AudioModelTranscriber) Transcribe(ctx context.Context, audioFilePath string) (*TranscriptionResponse, error) {
+	startedAt := time.Now()
 	logger.InfoCF("voice", "Starting audio model transcription", map[string]any{
 		"audio_file": audioFilePath,
 		"model":      t.modelID,
@@ -58,6 +60,9 @@ func (t *AudioModelTranscriber) Transcribe(ctx context.Context, audioFilePath st
 		logger.ErrorCF("voice", "Failed to read audio file", map[string]any{"path": audioFilePath, "error": err})
 		return nil, fmt.Errorf("failed to read audio file: %w", err)
 	}
+	logger.InfoCF("voice", "Voice transcription input accepted", map[string]any{
+		"provider": t.Name(), "model": t.modelID, "bytes": len(audioBytes),
+	})
 
 	format, err := utils.AudioFormat(audioFilePath)
 	if err != nil {
@@ -83,8 +88,8 @@ func (t *AudioModelTranscriber) Transcribe(ctx context.Context, audioFilePath st
 
 	text := strings.TrimSpace(resp.Content)
 	logger.InfoCF("voice", "Audio model transcription completed successfully", map[string]any{
-		"text_length":           len(text),
-		"transcription_preview": utils.Truncate(text, 50),
+		"provider": t.Name(), "model": t.modelID, "text_length": len(text),
+		"latency_ms": time.Since(startedAt).Milliseconds(),
 	})
 
 	return &TranscriptionResponse{Text: text}, nil

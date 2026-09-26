@@ -29,6 +29,8 @@ type CronPayload struct {
 	Kind             string `json:"kind"`
 	Message          string `json:"message"`
 	Command          string `json:"command,omitempty"`
+	RunAgent         bool   `json:"run_agent,omitempty"`
+	AgentID          string `json:"agent_id,omitempty"`
 	Deliver          bool   `json:"deliver"`
 	DeliveryApproved bool   `json:"delivery_approved,omitempty"`
 	Channel          string `json:"channel,omitempty"`
@@ -46,17 +48,26 @@ type AutomationPolicy struct {
 }
 
 type CronJobState struct {
-	NextRunAtMS         *int64 `json:"nextRunAtMs,omitempty"`
-	LastRunAtMS         *int64 `json:"lastRunAtMs,omitempty"`
-	RunningAtMS         *int64 `json:"runningAtMs,omitempty"`
-	RunClaimExpiresAtMS *int64 `json:"runClaimExpiresAtMs,omitempty"`
-	LastStatus          string `json:"lastStatus,omitempty"`
-	LastError           string `json:"lastError,omitempty"`
-	LastOutputPath      string `json:"lastOutputPath,omitempty"`
-	LastDurationMS      int64  `json:"lastDurationMs,omitempty"`
-	RetryCount          int    `json:"retryCount,omitempty"`
-	RunsToday           int    `json:"runsToday,omitempty"`
-	RunsDate            string `json:"runsDate,omitempty"`
+	NextRunAtMS         *int64          `json:"nextRunAtMs,omitempty"`
+	LastRunAtMS         *int64          `json:"lastRunAtMs,omitempty"`
+	RunningAtMS         *int64          `json:"runningAtMs,omitempty"`
+	RunClaimExpiresAtMS *int64          `json:"runClaimExpiresAtMs,omitempty"`
+	LastStatus          string          `json:"lastStatus,omitempty"`
+	LastError           string          `json:"lastError,omitempty"`
+	LastOutputPath      string          `json:"lastOutputPath,omitempty"`
+	LastDurationMS      int64           `json:"lastDurationMs,omitempty"`
+	RetryCount          int             `json:"retryCount,omitempty"`
+	RunsToday           int             `json:"runsToday,omitempty"`
+	RunsDate            string          `json:"runsDate,omitempty"`
+	Runs                []AutomationRun `json:"runs,omitempty"`
+}
+
+type AutomationRun struct {
+	StartedAtMS int64  `json:"startedAtMs"`
+	DurationMS  int64  `json:"durationMs"`
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+	OutputPath  string `json:"outputPath,omitempty"`
 }
 
 type CronJob struct {
@@ -73,8 +84,9 @@ type CronJob struct {
 }
 
 type CronStore struct {
-	Version int       `json:"version"`
-	Jobs    []CronJob `json:"jobs"`
+	Version   int              `json:"version"`
+	Jobs      []CronJob        `json:"jobs"`
+	EventKeys map[string]int64 `json:"eventKeys,omitempty"`
 }
 
 type JobHandler func(job *CronJob) (string, error)
@@ -340,6 +352,10 @@ func (cs *CronService) executeJobByID(jobID string) {
 	} else {
 		job.State.LastOutputPath = outputPath
 	}
+	job.State.Runs = append(job.State.Runs, AutomationRun{StartedAtMS: startTime, DurationMS: execDuration, Status: job.State.LastStatus, Error: job.State.LastError, OutputPath: job.State.LastOutputPath})
+	if len(job.State.Runs) > 20 {
+		job.State.Runs = append([]AutomationRun(nil), job.State.Runs[len(job.State.Runs)-20:]...)
+	}
 
 	// Retry failures before returning to the regular schedule. This makes
 	// transient provider/network errors recover without creating duplicate jobs.
@@ -425,11 +441,27 @@ func (cs *CronService) computeNextRun(schedule *CronSchedule, nowMS int64) *int6
 // named strings (for example "github.ci_failed" or "invoice.received") and
 // are safe to call from webhook/channel integrations.
 func (cs *CronService) TriggerEvent(event string) int {
+	return cs.TriggerEventOnce(event, "")
+}
+
+// TriggerEventOnce deduplicates a connector event key before scheduling jobs.
+// Callers should use the upstream event ID as the key when one exists.
+func (cs *CronService) TriggerEventOnce(event, key string) int {
 	event = strings.TrimSpace(event)
 	if event == "" {
 		return 0
 	}
 	cs.mu.Lock()
+	if key = strings.TrimSpace(key); key != "" {
+		if cs.store.EventKeys == nil {
+			cs.store.EventKeys = map[string]int64{}
+		}
+		if _, exists := cs.store.EventKeys[event+":"+key]; exists {
+			cs.mu.Unlock()
+			return 0
+		}
+		cs.store.EventKeys[event+":"+key] = time.Now().UnixMilli()
+	}
 	now := time.Now().UnixMilli()
 	count := 0
 	for i := range cs.store.Jobs {

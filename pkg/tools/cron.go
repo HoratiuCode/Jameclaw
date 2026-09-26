@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/sipeed/jameclaw/pkg/bus"
 	"github.com/sipeed/jameclaw/pkg/config"
 	"github.com/sipeed/jameclaw/pkg/constants"
@@ -18,6 +16,10 @@ import (
 // JobExecutor is the interface for executing cron jobs through the agent
 type JobExecutor interface {
 	ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error)
+}
+
+type agentJobExecutor interface {
+	ProcessDirectOnAgent(ctx context.Context, agentID, content, sessionKey, channel, chatID string) (string, error)
 }
 
 // CronTool provides scheduling capabilities for the agent
@@ -252,6 +254,11 @@ func (t *CronTool) addBlueprintJob(ctx context.Context, args map[string]any) *To
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Error adding blueprint job: %v", err))
 	}
+	job.Payload.RunAgent = true
+	job.Payload.AgentID = "main"
+	if err := t.cronService.UpdateJob(job); err != nil {
+		return ErrorResult(fmt.Sprintf("Error saving automation ownership: %v", err))
+	}
 	return SilentResult(fmt.Sprintf("Automation blueprint scheduled: %s (id: %s)", job.Name, job.ID))
 }
 
@@ -358,6 +365,10 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 		job.Payload.Command = command
 		// Need to save the updated payload
 		t.cronService.UpdateJob(job)
+	}
+	if command == "" {
+		job.Payload.RunAgent = true
+		job.Payload.AgentID = "main"
 	}
 	job.Policy = automationPolicyFromArgs(args)
 	if err := t.cronService.UpdateJob(job); err != nil {
@@ -505,8 +516,9 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return "ok"
 	}
 
-	// If deliver=true and approved, send message directly without agent processing.
-	if cron.DeliveryAllowed(job) {
+	// Literal reminders can be delivered as-is. Agent-backed jobs must generate
+	// their result before that result is sent to the approved destination.
+	if !job.Payload.RunAgent && cron.DeliveryAllowed(job) {
 		if cron.IsSilentResponse(job.Payload.Message) {
 			return "[SILENT]"
 		}
@@ -523,25 +535,33 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return "Error: proactive delivery was requested but not approved by the user"
 	}
 
-	// Every agent-backed automation run is a new Jame chat. The web console
-	// recognizes this session-key format and keeps each run in chat history.
-	sessionKey := fmt.Sprintf("agent:main:jame:direct:jame:%s", uuid.NewString())
+	agentID := strings.TrimSpace(job.Payload.AgentID)
+	if agentID == "" {
+		agentID = "main"
+	}
+	// A stable scoped history makes each automation stateful without mixing it
+	// into an ordinary user conversation.
+	sessionKey := fmt.Sprintf("agent:%s:automation:%s", agentID, job.ID)
 	channel = "jame"
 	chatID = "direct"
 
-	// Call agent with job's message
-	response, err := t.executor.ProcessDirectWithChannel(
-		ctx,
-		job.Payload.Message,
-		sessionKey,
-		channel,
-		chatID,
-	)
+	var response string
+	var err error
+	if executor, ok := t.executor.(agentJobExecutor); ok {
+		response, err = executor.ProcessDirectOnAgent(ctx, agentID, job.Payload.Message, sessionKey, channel, chatID)
+	} else {
+		response, err = t.executor.ProcessDirectWithChannel(ctx, job.Payload.Message, sessionKey, channel, chatID)
+	}
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err)
 	}
 	if cron.IsSilentResponse(response) {
 		return "[SILENT]"
+	}
+	if cron.DeliveryAllowed(job) {
+		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer pubCancel()
+		t.msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{Channel: job.Payload.Channel, ChatID: job.Payload.To, Content: response})
 	}
 
 	return response

@@ -18,10 +18,13 @@ import {
   type AutomationBlueprintField,
   type AutomationItem,
   type AutomationOutput,
+  deleteAutomation,
   getAutomationBlueprints,
   getAutomations,
   getAutomationOutput,
   instantiateAutomationBlueprint,
+  pauseAutomation,
+  resumeAutomation,
   runAutomation,
 } from "@/api/automation"
 import { PageHeader } from "@/components/page-header"
@@ -320,6 +323,11 @@ function AutomationCard({ automation }: { automation: AutomationItem }) {
       void queryClient.invalidateQueries({ queryKey: ["automation"] })
     },
   })
+	const lifecycleMutation = useMutation({
+		mutationFn: (action: "pause" | "resume" | "delete") =>
+			action === "pause" ? pauseAutomation(automation.id) : action === "resume" ? resumeAutomation(automation.id) : deleteAutomation(automation.id),
+		onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["automation"] }),
+	})
   const outputMutation = useMutation({
     mutationFn: () => getAutomationOutput(automation.id),
     onSuccess: (data) => {
@@ -370,6 +378,12 @@ function AutomationCard({ automation }: { automation: AutomationItem }) {
               status={automation.running ? "running" : automation.status}
               enabled={automation.enabled}
             />
+			<Button type="button" variant="outline" size="sm" disabled={lifecycleMutation.isPending || automation.running} onClick={() => lifecycleMutation.mutate(automation.enabled ? "pause" : "resume")}>
+				{automation.enabled ? "Pause" : "Resume"}
+			</Button>
+			<Button type="button" variant="ghost" size="sm" className="text-destructive" disabled={lifecycleMutation.isPending || automation.running} onClick={() => lifecycleMutation.mutate("delete")}>
+				Delete
+			</Button>
           </div>
         </div>
       </CardHeader>
@@ -403,6 +417,7 @@ function AutomationCard({ automation }: { automation: AutomationItem }) {
             label="Created"
             value={formatDateTime(automation.created_at_ms)}
           />
+		  <Field label="Agent" value={automation.agent_id || "main"} />
         </div>
         {automation.retry_attempts || automation.quiet_hours_start || automation.max_runs_per_day ? (
           <div className="grid gap-3 text-sm md:grid-cols-3">
@@ -420,6 +435,15 @@ function AutomationCard({ automation }: { automation: AutomationItem }) {
             />
           </div>
         ) : null}
+		{automation.last_duration_ms ? (
+		  <Field label="Last duration" value={`${(automation.last_duration_ms / 1000).toFixed(1)}s · ${automation.retry_count ?? 0} retries`} />
+		) : null}
+		{automation.runs && automation.runs.length > 0 ? (
+		  <div className="border-t pt-3 text-sm">
+			<div className="text-muted-foreground mb-2 text-xs">Recent runs</div>
+			<div className="space-y-1">{automation.runs.slice(-5).reverse().map((run) => <div key={run.startedAtMs} className="flex justify-between gap-3"><span className="capitalize">{run.status}{run.error ? ` · ${run.error}` : ""}</span><span className="text-muted-foreground">{formatDateTime(run.startedAtMs)} · {(run.durationMs / 1000).toFixed(1)}s</span></div>)}</div>
+		  </div>
+		) : null}
         {automation.last_error ? (
           <div className="text-destructive flex items-start gap-2 rounded-md border border-destructive/30 px-3 py-2 text-sm">
             <IconAlertCircle className="mt-0.5 h-4 w-4 shrink-0" />

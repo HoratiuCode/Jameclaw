@@ -234,6 +234,55 @@ func TestHandleAddModelFromCatalogCreatesDiscoveredProviderModel(t *testing.T) {
 	}
 }
 
+func TestHandleAddModelFromCatalogCreatesCustomCodexCLIModel(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg := config.DefaultConfig()
+	cfg.ModelList = nil
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/models/from-catalog", strings.NewReader(`{
+		"provider_id":"codex-cli",
+		"preset_id":"custom",
+		"custom_model_id":"gpt-5.6-terra",
+		"set_default":true
+	}`))
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if len(saved.ModelList) != 1 {
+		t.Fatalf("len(ModelList) = %d, want 1", len(saved.ModelList))
+	}
+	if got := saved.ModelList[0].Model; got != "codex-cli/gpt-5.6-terra" {
+		t.Fatalf("Model = %q, want custom Codex CLI model", got)
+	}
+	if got := saved.Agents.Defaults.GetModelName(); got != "gpt-5.6-terra" {
+		t.Fatalf("default model = %q, want custom Codex CLI model", got)
+	}
+}
+
+func TestProviderModelsEndpointErrorIncludesActionableDetails(t *testing.T) {
+	got := providerModelsEndpointError("OpenRouter", "https://openrouter.ai/api/v1/models", "401 Unauthorized", []byte("  Invalid API key\n"))
+	want := "OpenRouter models endpoint at https://openrouter.ai/api/v1/models returned 401 Unauthorized: Invalid API key"
+	if got != want {
+		t.Fatalf("providerModelsEndpointError() = %q, want %q", got, want)
+	}
+}
+
 func TestHandleSetDefaultModelSupportsImageAndVoiceRoles(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

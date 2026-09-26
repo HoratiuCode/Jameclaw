@@ -59,3 +59,13 @@ func TestNousPresetUsesAvailablePortalModel(t *testing.T) {
 		t.Fatalf("nous model label = %q, want Claude Sonnet 4.6", preset.Name)
 	}
 }
+
+func TestCodexCLICatalogSupportsCustomModelSelection(t *testing.T) {
+	provider, ok := FindProvider("codex-cli")
+	if !ok {
+		t.Fatal("Codex CLI provider missing from catalog")
+	}
+	if !provider.SupportsCustomModelID {
+		t.Fatal("Codex CLI provider must support custom model selection")
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/sipeed/jameclaw/pkg/extensions"
 	"github.com/sipeed/jameclaw/pkg/logger"
 	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/sipeed/jameclaw/pkg/voice"
 )
 
 // registerModelRoutes binds model list management endpoints to the ServeMux.
@@ -81,12 +82,17 @@ func (h *Handler) handleDiscoverProviderModels(w http.ResponseWriter, r *http.Re
 
 	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
 	if err != nil {
-		http.Error(w, "could not reach provider models endpoint", http.StatusBadGateway)
+		if r.Context().Err() != nil {
+			http.Error(w, fmt.Sprintf("Model discovery for %s was cancelled", provider.Name), http.StatusGatewayTimeout)
+			return
+		}
+		http.Error(w, fmt.Sprintf("Could not reach %s models endpoint at %s: %v", provider.Name, base.Redacted(), err), http.StatusBadGateway)
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		http.Error(w, fmt.Sprintf("provider models endpoint returned %s", response.Status), http.StatusBadGateway)
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+		http.Error(w, providerModelsEndpointError(provider.Name, base.Redacted(), response.Status, body), http.StatusBadGateway)
 		return
 	}
 
@@ -121,6 +127,19 @@ func (h *Handler) handleDiscoverProviderModels(w http.ResponseWriter, r *http.Re
 	sort.Slice(models, func(i, j int) bool { return models[i]["name"] < models[j]["name"] })
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"models": models})
+}
+
+func providerModelsEndpointError(providerName, endpoint, status string, responseBody []byte) string {
+	detail := strings.Join(strings.Fields(string(responseBody)), " ")
+	const maxDetailLength = 500
+	if len(detail) > maxDetailLength {
+		detail = detail[:maxDetailLength] + "…"
+	}
+	message := fmt.Sprintf("%s models endpoint at %s returned %s", providerName, endpoint, status)
+	if detail != "" {
+		message += ": " + detail
+	}
+	return message
 }
 
 func storedProviderAPIKey(existing []*config.ModelConfig, providerID string) string {
@@ -169,10 +188,11 @@ type modelResponse struct {
 	ThinkingLevel  string         `json:"thinking_level,omitempty"`
 	ExtraBody      map[string]any `json:"extra_body,omitempty"`
 	// Meta
-	Configured bool `json:"configured"`
-	IsDefault  bool `json:"is_default"`
-	IsImage    bool `json:"is_image_default"`
-	IsVoice    bool `json:"is_voice_default"`
+	Configured   bool `json:"configured"`
+	IsDefault    bool `json:"is_default"`
+	IsImage      bool `json:"is_image_default"`
+	IsVoice      bool `json:"is_voice_default"`
+	VoiceCapable bool `json:"voice_capable"`
 }
 
 // handleListModels returns all model_list entries with masked API keys.
@@ -221,6 +241,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			IsDefault:      m.ModelName == defaultModel,
 			IsImage:        m.ModelName == imageModel,
 			IsVoice:        m.ModelName == voiceModel,
+			VoiceCapable:   voice.SupportsAudioTranscription(m.Model),
 		})
 	}
 
@@ -377,6 +398,7 @@ func (h *Handler) handleAddModelFromCatalog(w http.ResponseWriter, r *http.Reque
 		ProviderID    string `json:"provider_id"`
 		PresetID      string `json:"preset_id"`
 		RemoteModelID string `json:"remote_model_id"`
+		CustomModelID string `json:"custom_model_id"`
 		ModelName     string `json:"model_name"`
 		APIKey        string `json:"api_key"`
 		SetDefault    bool   `json:"set_default"`
@@ -388,13 +410,31 @@ func (h *Handler) handleAddModelFromCatalog(w http.ResponseWriter, r *http.Reque
 
 	provider, preset, ok := extensions.FindPreset(req.ProviderID, req.PresetID)
 	remoteModelID := strings.TrimSpace(req.RemoteModelID)
-	if remoteModelID == "" && !ok {
+	customModelID := strings.TrimSpace(req.CustomModelID)
+	if customModelID == "" && remoteModelID == "" && !ok {
 		http.Error(w, "unknown provider or model preset", http.StatusBadRequest)
 		return
 	}
 
 	var modelCfg *config.ModelConfig
-	if remoteModelID != "" {
+	if customModelID != "" {
+		provider, ok = extensions.FindProvider(req.ProviderID)
+		if !ok || !provider.SupportsCustomModelID {
+			http.Error(w, "provider does not support custom model selection", http.StatusBadRequest)
+			return
+		}
+		if strings.ContainsAny(customModelID, "\t\r\n") || strings.Contains(customModelID, "/") {
+			http.Error(w, "custom model identifier is invalid", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.ModelName) == "" {
+			req.ModelName = customModelID
+		}
+		modelCfg = &config.ModelConfig{
+			ModelName: strings.TrimSpace(req.ModelName),
+			Model:     provider.ID + "/" + customModelID,
+		}
+	} else if remoteModelID != "" {
 		provider, ok = extensions.FindProvider(req.ProviderID)
 		if !ok || strings.TrimSpace(provider.DefaultAPIBase) == "" {
 			http.Error(w, "unknown provider", http.StatusBadRequest)
@@ -641,6 +681,17 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 	case "image":
 		cfg.Agents.Defaults.ImageModel = req.ModelName
 	case "voice":
+		var selected *config.ModelConfig
+		for _, model := range cfg.ModelList {
+			if model.ModelName == req.ModelName {
+				selected = model
+				break
+			}
+		}
+		if selected == nil || !voice.SupportsAudioTranscription(selected.Model) {
+			http.Error(w, "That model is not configured for audio transcription. Choose an audio-capable model.", http.StatusUnprocessableEntity)
+			return
+		}
 		cfg.Voice.ModelName = req.ModelName
 	}
 

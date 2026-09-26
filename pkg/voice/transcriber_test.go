@@ -260,3 +260,12 @@ func TestDetectTranscriber(t *testing.T) {
 		})
 	}
 }
+
+func TestSupportsAudioTranscription(t *testing.T) {
+	if !SupportsAudioTranscription("openai/gpt-4o-transcribe") {
+		t.Fatal("openai transport should be audio-capable")
+	}
+	if SupportsAudioTranscription("anthropic/claude-sonnet") {
+		t.Fatal("anthropic transport should not be marked audio-capable")
+	}
+}
