@@ -427,3 +427,77 @@ func TestIsSilentResponse(t *testing.T) {
 		t.Fatal("plain sentence should not be treated as silent marker")
 	}
 }
+
+// The desktop app edits jobs.json through its own CronService while the
+// gateway keeps one in memory; the gateway must not overwrite those edits.
+func TestCronService_KeepsChangesFromAnotherProcess(t *testing.T) {
+	gateway, path := setupService(t, nil)
+	every := int64(time.Hour / time.Millisecond)
+	job, err := gateway.AddJob("daily", CronSchedule{Kind: "every", EveryMS: &every}, "hi", false, false, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond) // ensure a distinct mtime
+
+	dashboard := NewCronService(path, nil)
+	dashboard.EnableJob(job.ID, false)
+	added, _ := dashboard.AddJob("from dashboard", CronSchedule{Kind: "every", EveryMS: &every}, "x", false, false, "", "")
+
+	// Any later save by the gateway must keep the dashboard's edits.
+	gateway.TriggerEventOnce("unrelated", "key-1")
+	gateway.EnableJob(added.ID, true)
+
+	jobs := NewCronService(path, nil).ListJobs(true)
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs on disk, got %d", len(jobs))
+	}
+	for _, j := range jobs {
+		if j.ID == job.ID && j.Enabled {
+			t.Fatal("pause from the dashboard was overwritten by the gateway")
+		}
+	}
+}
+
+func TestCronService_RetryCountResetsAfterRetriesExhausted(t *testing.T) {
+	cs, _ := setupService(t, func(*CronJob) (string, error) { return "", fmt.Errorf("boom") })
+	every := int64(time.Hour / time.Millisecond)
+	job, _ := cs.AddJob("flaky", CronSchedule{Kind: "every", EveryMS: &every}, "hi", false, false, "", "")
+	job.Policy.RetryAttempts = 1
+	if err := cs.UpdateJob(job); err != nil {
+		t.Fatal(err)
+	}
+
+	cs.executeJobByID(job.ID) // first failure schedules a retry
+	cs.executeJobByID(job.ID) // retry fails, back to the regular schedule
+	got := cs.ListJobs(true)[0]
+	if got.State.RetryCount != 0 || got.State.LastStatus != "error" {
+		t.Fatalf("after exhausted retries: retryCount=%d status=%q, want 0 and error", got.State.RetryCount, got.State.LastStatus)
+	}
+}
+
+func TestCronService_StartKeepsScheduleAndCatchesUpMissedRuns(t *testing.T) {
+	cs, path := setupService(t, nil)
+	every := int64(24 * time.Hour / time.Millisecond)
+	daily, _ := cs.AddJob("daily", CronSchedule{Kind: "every", EveryMS: &every}, "hi", false, false, "", "")
+	past := time.Now().Add(-time.Hour).UnixMilli()
+	missed, _ := cs.AddJob("reminder", CronSchedule{Kind: "at", AtMS: &past}, "hi", false, false, "", "")
+	wantDaily := *daily.State.NextRunAtMS
+
+	restarted := NewCronService(path, nil) // no handler: nothing actually runs
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Stop()
+	for _, j := range restarted.ListJobs(true) {
+		switch j.ID {
+		case daily.ID:
+			if j.State.NextRunAtMS == nil || *j.State.NextRunAtMS != wantDaily {
+				t.Fatalf("restart moved the daily job's next run")
+			}
+		case missed.ID:
+			if j.State.NextRunAtMS == nil || *j.State.NextRunAtMS > time.Now().UnixMilli() {
+				t.Fatalf("missed one-time job was not scheduled to catch up")
+			}
+		}
+	}
+}

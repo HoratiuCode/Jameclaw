@@ -668,8 +668,11 @@ func setupCronTool(
 
 	if cronTool != nil {
 		cronService.SetOnJob(func(job *cron.CronJob) (string, error) {
-			result := cronTool.ExecuteJob(context.Background(), job)
-			return result, nil
+			// Finish before the run claim expires so a hung run is recorded
+			// as failed instead of being started a second time.
+			ctx, cancel := context.WithTimeout(context.Background(), cron.JobTimeout)
+			defer cancel()
+			return cronTool.RunJob(ctx, job)
 		})
 	}
 

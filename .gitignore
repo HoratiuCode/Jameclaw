@@ -1,0 +1,4 @@
+# Build output (binaries and macOS app bundles). Committing these bloats the
+# repo and every checkout leaves a second "JameClaw Desktop" app on disk.
+/build/
+.DS_Store

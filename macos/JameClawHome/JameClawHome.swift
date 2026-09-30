@@ -19,6 +19,7 @@ extension Notification.Name {
     static let jameclawFixedChatsChanged = Notification.Name("jameclaw.fixed-chats-changed")
     static let jameclawVoicePromptRequested = Notification.Name("jameclaw.voice-prompt-requested")
     static let jameclawHireAgent = Notification.Name("jameclaw.hire-agent")
+    static let jameclawOpenSection = Notification.Name("jameclaw.open-section")
 }
 
 private func authenticatedConsoleURL(
@@ -635,7 +636,7 @@ private enum DocumentApprovalPolicy: String, CaseIterable, Identifiable {
         case .outsideWorkspace: return "Ask outside workspace"
         case .explicitSelection: return "Selecting an item approves it"
         case .workspaceOnly: return "Current workspace only"
-        case .yolo: return "YOLO — Never ask"
+        case .yolo: return "Allow file access outside the workspace"
         }
     }
     var detail: String {
@@ -929,7 +930,7 @@ struct JameClawHomeApp: App {
                     }
                     .keyboardShortcut("n", modifiers: [.command])
 
-                    Button("Hire Agent…") {
+                    Button("New Teammate…") {
                         selectDesktopSection(.agent, selection: $selectedSection)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             NotificationCenter.default.post(name: .jameclawHireAgent, object: nil)
@@ -955,7 +956,7 @@ struct JameClawHomeApp: App {
                     .keyboardShortcut("g", modifiers: [.command, .option])
 
                     Divider()
-                    ForEach(DesktopSection.allCases) { section in
+                    ForEach(DesktopSection.sidebar) { section in
                         Button(section.title) {
                             selectDesktopSection(section, selection: $selectedSection)
                         }
@@ -1090,6 +1091,7 @@ struct JameRootView: View {
     @StateObject private var navigationContext: NativeDesktopNavigationStore
     @State private var showingCommandPalette = false
     @State private var showingTerminalWorkspace = false
+    @State private var chatListFilter: ChatListFilter = .all
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @AppStorage("launcher.design.windowOpacity") private var windowOpacity = 1.0
@@ -1125,8 +1127,24 @@ struct JameRootView: View {
     private var stableSectionSelection: Binding<DesktopSection?> {
         Binding(
             get: { selectedSection },
-            set: { selectDesktopSection($0, selection: $selectedSection) }
+            set: { openSection($0) }
         )
+    }
+
+    private func openSection(_ section: DesktopSection?) {
+        switch section {
+        case .fixedChats:
+            chatListFilter = .pinned
+            selectDesktopSection(.sessions, selection: $selectedSection)
+        case .archivedChats:
+            chatListFilter = .archived
+            selectDesktopSection(.sessions, selection: $selectedSection)
+        case .sessions:
+            if selectedSection != .sessions { chatListFilter = .all }
+            selectDesktopSection(.sessions, selection: $selectedSection)
+        default:
+            selectDesktopSection(section, selection: $selectedSection)
+        }
     }
 
     @ViewBuilder
@@ -1134,18 +1152,14 @@ struct JameRootView: View {
         switch selectedSection ?? .chat {
         case .chat:
             ChatView(port: Int(settings.port) ?? 18800, chat: chat)
-        case .fixedChats:
-            SessionsView(port: Int(settings.port) ?? 18800, pinnedOnly: true, resumeSession: openSessionInChat)
+        case .fixedChats, .sessions, .archivedChats:
+            SessionsView(port: Int(settings.port) ?? 18800, listFilter: $chatListFilter, resumeSession: openSessionInChat)
         case .memory:
             AgentMemoryView(port: Int(settings.port) ?? 18800)
         case .agent:
             AgentManagerView(port: Int(settings.port) ?? 18800)
         case .profile:
             AgentProfileView(port: Int(settings.port) ?? 18800)
-        case .sessions:
-            SessionsView(port: Int(settings.port) ?? 18800, resumeSession: openSessionInChat)
-        case .archivedChats:
-            SessionsView(port: Int(settings.port) ?? 18800, archivedOnly: true, resumeSession: openSessionInChat)
         case .automations:
             AutomationsView(port: Int(settings.port) ?? 18800)
         case .capabilities:
@@ -1153,9 +1167,7 @@ struct JameRootView: View {
         case .artifacts:
             ArtifactsView()
         case .settings:
-            QuickSettingsView(settings: settings, openArchivedChats: {
-                selectDesktopSection(.archivedChats, selection: $selectedSection)
-            }, listenForPrompt: {
+            QuickSettingsView(settings: settings, listenForPrompt: {
                 NativeLaunchCoordinator.shared.startIfNeeded()
                 selectDesktopSection(.chat, selection: $selectedSection)
                 NotificationCenter.default.post(name: .jameclawVoicePromptRequested, object: nil)
@@ -1168,10 +1180,16 @@ struct JameRootView: View {
             DesktopSidebar(
                 selectedSection: stableSectionSelection,
                 isAgentWorking: chat.isResponseInProgress,
-                hasAutomations: navigationContext.hasAutomations,
-                hasFixedChats: navigationContext.hasFixedChats,
                 messagingPlatformLabel: navigationContext.messagingPlatformLabel,
-                showingCommandPalette: $showingCommandPalette,
+                profileName: chat.activeProfileName,
+                openCommandPalette: { showingCommandPalette = true },
+                openProfile: { openSection(.profile) },
+                createProfile: {
+                    openSection(.profile)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        NotificationCenter.default.post(name: .jameclawNewPersonaProfile, object: nil)
+                    }
+                },
                 openTerminal: { showingTerminalWorkspace = true }
             )
         } detail: {
@@ -1196,6 +1214,24 @@ struct JameRootView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 290)
+        .overlay {
+            if showingCommandPalette {
+                ZStack {
+                    Color.black.opacity(0.28)
+                        .ignoresSafeArea()
+                        .onTapGesture { showingCommandPalette = false }
+                    QuickActionPalette(selectedSection: stableSectionSelection) {
+                        showingCommandPalette = false
+                    } onTerminal: {
+                        showingCommandPalette = false
+                        showingTerminalWorkspace = true
+                    }
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(chromeRule))
+                    .shadow(color: .black.opacity(0.22), radius: 28, y: 12)
+                }
+            }
+        }
         .onReceive(
             DistributedNotificationCenter.default().publisher(for: .jameclawHomeNavigation)
         ) { notification in
@@ -1204,7 +1240,12 @@ struct JameRootView: View {
                 ? DesktopSection.capabilities
                 : DesktopSection(rawValue: sectionName)
             guard let section else { return }
-            selectDesktopSection(section, selection: $selectedSection)
+            openSection(section)
+            if notification.userInfo?["new_profile"] as? Bool == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    NotificationCenter.default.post(name: .jameclawNewPersonaProfile, object: nil)
+                }
+            }
             if notification.userInfo?["new_chat"] as? Bool == true {
                 // Defer until the chat view is mounted when the launcher has
                 // just opened Jame, while immediately clearing an existing chat.
@@ -1216,6 +1257,11 @@ struct JameRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .jameclawCommandPalette)) { _ in
             showingCommandPalette = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .jameclawOpenSection)) { notification in
+            guard let sectionName = notification.object as? String,
+                  let section = DesktopSection(rawValue: sectionName) else { return }
+            openSection(section)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .jameclawAutomationChanged)) { _ in
             Task { await navigationContext.refresh() }
         }
@@ -1223,6 +1269,7 @@ struct JameRootView: View {
             Task { await navigationContext.refresh() }
         }
         .task {
+            chat.loadProfiles()
             await navigationContext.monitor()
         }
         .sheet(isPresented: $showingTerminalWorkspace) {
@@ -1249,35 +1296,26 @@ struct JameRootView: View {
 private struct DesktopSidebar: View {
     @Binding var selectedSection: DesktopSection?
     let isAgentWorking: Bool
-    let hasAutomations: Bool
-    let hasFixedChats: Bool
     let messagingPlatformLabel: String
-    @Binding var showingCommandPalette: Bool
+    let profileName: String
+    let openCommandPalette: () -> Void
+    let openProfile: () -> Void
+    let createProfile: () -> Void
     let openTerminal: () -> Void
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @Environment(\.colorScheme) private var colorScheme
-    @State private var sessionsGlow = false
 
     private var background: Color { colorScheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
     private var panel: Color { colorScheme == .light ? .white : JameBrand.elevated }
     private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
-    private var muted: Color { colorScheme == .light ? JameBrand.ink.opacity(0.58) : JameBrand.muted }
     private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
     private var theme: LauncherTheme { launcherThemePreference(from: savedTheme).resolved(for: colorScheme) }
     private var accent: Color { launcherAccentPreference(from: savedAccent, theme: theme) }
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
-                DesktopNavigationHeader(title: "Workspace")
-                    .padding(.horizontal, 14)
-                ForEach(DesktopSection.workspace.filter { $0 != .fixedChats || hasFixedChats }) { section in
-                    navigationButton(section)
-                }
-                DesktopNavigationHeader(title: "Agent")
-                    .padding(.horizontal, 14)
-                    .padding(.top, 8)
-                ForEach(DesktopSection.agentTools.filter { $0 != .automations || hasAutomations }) { section in
+                ForEach(DesktopSection.sidebar) { section in
                     navigationButton(section)
                 }
             }
@@ -1323,9 +1361,7 @@ private struct DesktopSidebar: View {
                     .buttonStyle(.plain)
                     .help("Open JameClaw Settings")
                 }
-                Button {
-                    showingCommandPalette = true
-                } label: {
+                Button(action: openCommandPalette) {
                     HStack(spacing: 7) {
                         Image(systemName: "magnifyingglass")
                         Text("Quick actions")
@@ -1339,86 +1375,58 @@ private struct DesktopSidebar: View {
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(rule))
                 }
                 .buttonStyle(.plain)
-                .popover(
-                    isPresented: $showingCommandPalette,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .top
-                ) {
-                    QuickActionPalette(selectedSection: $selectedSection) {
-                        showingCommandPalette = false
-                    }
-                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
             .background(background.opacity(0.97))
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 6) {
-                Button {
-                    selectedSection = .settings
-                } label: {
-                    HStack(spacing: 7) {
-                        Circle().fill(accent).frame(width: 7, height: 7)
-                        Text(messagingPlatformLabel)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    Circle().fill(accent).frame(width: 7, height: 7)
+                    Text(messagingPlatformLabel)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    Button(action: openProfile) {
+                        Label(profileName, systemImage: "person.crop.circle")
+                            .font(.caption.weight(.semibold))
                             .lineLimit(1)
-                        Spacer()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                .buttonStyle(.plain)
-                .help("Open Settings to manage connected platforms")
-                Menu {
-                    Button { selectedSection = .profile } label: {
-                        Label("Open Jame Profile", systemImage: "person.crop.circle.fill")
-                    }
-                    Button {
-                        selectedSection = .profile
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            NotificationCenter.default.post(name: .jameclawNewPersonaProfile, object: nil)
-                        }
+                    .buttonStyle(.plain)
+                    .help("Open this profile")
+                    Menu {
+                        Button("Open profile", action: openProfile)
+                        Button("New profile", action: createProfile)
+                        Text("This profile has its own voice and style.")
+                            .font(.caption)
                     } label: {
-                        Label("Create New Profile", systemImage: "plus.circle.fill")
+                        Image(systemName: "ellipsis")
+                            .frame(width: 22, height: 22)
                     }
-                    Text("Each new profile has its own SOUL.md and talking style.")
-                        .font(.caption)
-                        .disabled(true)
-                    Divider()
-                    Button { selectedSection = .agent } label: {
-                        Label("Manage Agent Team & Profiles", systemImage: "person.3.fill")
-                    }
-                } label: {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(selectedSection == .profile ? JameBrand.ink : accent)
-                        .frame(width: 34, height: 34)
-                        .background(selectedSection == .profile ? accent : panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 22, height: 22)
+                    .help("Profile actions")
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: 34, height: 34)
-                .background(selectedSection == .profile ? accent : panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(selectedSection == .profile ? accent : rule))
-                .help("Choose a profile destination")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .background(background.opacity(0.97))
         }
         .navigationTitle("")
-        .onAppear { sessionsGlow = isAgentWorking }
-        .onChange(of: isAgentWorking) { _, working in
-            sessionsGlow = working
-        }
     }
 
     private func navigationButton(_ section: DesktopSection) -> some View {
-        let showWorkingGlow = isAgentWorking && selectedSection != .chat && section == .sessions
+        let showWorking = isAgentWorking && section == .chat
         return Button {
             selectedSection = section
         } label: {
-            DesktopNavigationRow(section: section, accent: accent, isWorking: showWorkingGlow)
+            DesktopNavigationRow(section: section, accent: accent, isWorking: showWorking)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 5)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1427,7 +1435,7 @@ private struct DesktopSidebar: View {
                 .background(
                     selectedSection == section
                         ? panel
-                        : showWorkingGlow ? accent.opacity(sessionsGlow ? 0.22 : 0.08) : Color.clear,
+                        : showWorking ? accent.opacity(0.14) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                 )
                 .overlay(alignment: .leading) {
@@ -1435,37 +1443,17 @@ private struct DesktopSidebar: View {
                         Rectangle().fill(accent).frame(width: 3)
                     }
                 }
-                .overlay {
-                    if showWorkingGlow {
-                        Rectangle()
-                            .stroke(accent.opacity(sessionsGlow ? 0.95 : 0.36), lineWidth: sessionsGlow ? 1.7 : 1)
-                    }
-                }
-                .shadow(
-                    color: showWorkingGlow ? accent.opacity(sessionsGlow ? 0.76 : 0.20) : .clear,
-                    radius: showWorkingGlow ? (sessionsGlow ? 11 : 3) : 0
-                )
-                .scaleEffect(showWorkingGlow && sessionsGlow ? 1.012 : 1)
-                .animation(
-                    showWorkingGlow
-                        ? .easeInOut(duration: 0.72).repeatForever(autoreverses: true)
-                        : .easeOut(duration: 0.18),
-                    value: sessionsGlow
-                )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(
-            showWorkingGlow
-                ? "Sessions — Jame is still working in Chat"
-                : section.title
-        )
-        .help(showWorkingGlow ? "Jame is still working. Open Sessions or return to Chat." : section.title)
+        .accessibilityLabel(showWorking ? "Chat, Jame is working" : section.title)
+        .help(showWorking ? "Jame is working in this chat." : section.title)
     }
 }
 
 private struct QuickActionPalette: View {
     @Binding var selectedSection: DesktopSection?
     let dismiss: () -> Void
+    let onTerminal: () -> Void
     @State private var search = ""
     @FocusState private var isSearchFocused: Bool
 
@@ -1474,27 +1462,37 @@ private struct QuickActionPalette: View {
         let title: String
         let detail: String
         let symbol: String
+        let keywords: String
         let section: DesktopSection
         let createsChat: Bool
         let opensHiring: Bool
+        let opensTerminal: Bool
     }
 
     private let actions: [Action] = [
-        Action(id: "hire", title: "Hire an agent", detail: "Create a permanent specialist or task-scoped worker", symbol: "person.badge.plus", section: .agent, createsChat: false, opensHiring: true),
-        Action(id: "new-chat", title: "Start a new chat", detail: "Ask JameClaw for help", symbol: "square.and.pencil", section: .chat, createsChat: true, opensHiring: false),
-        Action(id: "chat", title: "Open chat", detail: "Continue a conversation", symbol: "message.fill", section: .chat, createsChat: false, opensHiring: false),
-        Action(id: "agents", title: "Manage agents", detail: "Team agents and subagents", symbol: "sparkles", section: .agent, createsChat: false, opensHiring: false),
-        Action(id: "mcp", title: "Open capabilities", detail: "Manage skills and MCP servers", symbol: "wand.and.stars.inverse", section: .capabilities, createsChat: false, opensHiring: false),
-        Action(id: "memory", title: "Review memory", detail: "See and edit what JameClaw remembers", symbol: "brain.head.profile", section: .memory, createsChat: false, opensHiring: false),
-        Action(id: "automation", title: "Open automations", detail: "Create and manage scheduled work", symbol: "calendar.badge.clock", section: .automations, createsChat: false, opensHiring: false),
-        Action(id: "sessions", title: "Browse sessions", detail: "Find a past conversation", symbol: "clock.arrow.circlepath", section: .sessions, createsChat: false, opensHiring: false),
-        Action(id: "settings", title: "Open settings", detail: "Configure JameClaw Desktop", symbol: "gearshape", section: .settings, createsChat: false, opensHiring: false),
+        Action(id: "new-chat", title: "Start a new chat", detail: "Ask Jame for help", symbol: "square.and.pencil", keywords: "new message", section: .chat, createsChat: true, opensHiring: false, opensTerminal: false),
+        Action(id: "chat", title: "Open chat", detail: "Return to the current conversation", symbol: "message.fill", keywords: "talk message", section: .chat, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "chats", title: "Browse chats", detail: "Find a past conversation", symbol: "clock.arrow.circlepath", keywords: "sessions history conversations", section: .sessions, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "pinned", title: "Pinned chats", detail: "Conversations you kept close", symbol: "pin.fill", keywords: "pin fixed chats", section: .fixedChats, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "archived", title: "Archived chats", detail: "Chats removed from the active list", symbol: "archivebox.fill", keywords: "archive hidden", section: .archivedChats, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "files", title: "Open files", detail: "Projects and images Jame made", symbol: "folder.fill", keywords: "artifacts files projects images", section: .artifacts, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "team", title: "Open team", detail: "Teammates and the work map", symbol: "person.3.fill", keywords: "agents team grid", section: .agent, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "hire", title: "New teammate", detail: "Someone who keeps working, or help for one task", symbol: "person.badge.plus", keywords: "hire agent spawn subagent", section: .agent, createsChat: false, opensHiring: true, opensTerminal: false),
+        Action(id: "memory", title: "Review memory", detail: "See and edit what Jame remembers", symbol: "brain.head.profile", keywords: "remember notes", section: .memory, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "skills", title: "Skills and connections", detail: "Skills and connected tools", symbol: "wand.and.stars.inverse", keywords: "capabilities skills mcp connectors tools", section: .capabilities, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "automation", title: "Open automations", detail: "Work Jame runs on a schedule", symbol: "calendar.badge.clock", keywords: "schedule cron", section: .automations, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "profile", title: "Open profile", detail: "Voice, style, and what Jame knows about you", symbol: "person.crop.circle", keywords: "persona soul profile", section: .profile, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "settings", title: "Open settings", detail: "Model, voice, safety, and appearance", symbol: "gearshape", keywords: "preferences config", section: .settings, createsChat: false, opensHiring: false, opensTerminal: false),
+        Action(id: "terminal", title: "Open terminal", detail: "Choose where Jame works", symbol: "terminal", keywords: "shell workspace", section: .chat, createsChat: false, opensHiring: false, opensTerminal: true),
     ]
 
     private var filteredActions: [Action] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return actions }
-        return actions.filter { $0.title.lowercased().contains(query) || $0.detail.lowercased().contains(query) }
+        return actions.filter { action in
+            let haystack = "\(action.title) \(action.detail) \(action.keywords)".lowercased()
+            return query.split(separator: " ").allSatisfy { haystack.contains($0) }
+        }
     }
 
     var body: some View {
@@ -1537,11 +1535,20 @@ private struct QuickActionPalette: View {
                 Text("No matching actions").font(.caption).foregroundStyle(.secondary).padding(.bottom, 18)
             }
         }
-        .frame(width: 500)
+        .frame(width: 560)
         .onAppear { isSearchFocused = true }
+        .background {
+            Button("") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+                .hidden()
+        }
     }
 
     private func perform(_ action: Action) {
+        if action.opensTerminal {
+            onTerminal()
+            return
+        }
         selectedSection = action.section
         if action.createsChat {
             DispatchQueue.main.async { NotificationCenter.default.post(name: .jameclawNewChat, object: nil) }
@@ -1582,8 +1589,8 @@ private struct DesktopNavigationRow: View {
             }
             Spacer(minLength: 4)
             if isWorking {
-                Text("...")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                Text("Working")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(accent)
                     .accessibilityHidden(true)
             }
@@ -1609,20 +1616,21 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .chat: return "Chat"
-        case .fixedChats: return "Fixed Chats"
+        case .fixedChats: return "Pinned chats"
         case .memory: return "Memory"
-        case .sessions: return "Sessions"
-        case .archivedChats: return "Archived Chats"
-        case .agent: return "Agent"
-        case .profile: return "Jame Profile"
-        case .artifacts: return "Artifacts"
-        case .capabilities: return "Capabilities"
+        case .sessions: return "Chats"
+        case .archivedChats: return "Archived chats"
+        case .agent: return "Team"
+        case .profile: return "Profile"
+        case .artifacts: return "Files"
+        case .capabilities: return "Skills & connections"
         case .automations: return "Automations"
         case .settings: return "Settings"
         }
     }
 
-    static let workspace: [DesktopSection] = [.chat, .fixedChats, .sessions, .artifacts]
+    static let sidebar: [DesktopSection] = [.chat, .sessions, .artifacts, .agent, .memory, .capabilities, .automations, .settings]
+    static let workspace: [DesktopSection] = sidebar
     static let agentTools: [DesktopSection] = [.agent, .memory, .capabilities, .automations]
 
     var tint: Color {
@@ -1647,16 +1655,16 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     var menuShortcut: KeyEquivalent {
         switch self {
         case .chat: return "1"
-        case .fixedChats: return "2"
-        case .memory: return "3"
-        case .agent: return "2"
-        case .profile: return "0"
+        case .sessions: return "2"
         case .artifacts: return "3"
-        case .capabilities: return "4"
-        case .sessions: return "5"
-        case .archivedChats: return "8"
-        case .automations: return "6"
+        case .agent: return "4"
+        case .memory: return "5"
+        case .capabilities: return "6"
+        case .automations: return "7"
         case .settings: return ","
+        case .fixedChats: return "8"
+        case .archivedChats: return "9"
+        case .profile: return "0"
         }
     }
 }
@@ -1837,6 +1845,31 @@ private final class NativeAutomationStore: ObservableObject {
         }
     }
 
+    func setEnabled(_ automation: NativeAutomation, _ enabled: Bool) async {
+        await send(automation, suffix: enabled ? "/resume" : "/pause", method: "POST",
+                   failure: "Could not \(enabled ? "resume" : "pause") \(automation.name).")
+    }
+
+    func delete(_ automation: NativeAutomation) async {
+        await send(automation, suffix: "", method: "DELETE", failure: "Could not delete \(automation.name).")
+    }
+
+    private func send(_ automation: NativeAutomation, suffix: String, method: String, failure: String) async {
+        do {
+            let id = automation.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? automation.id
+            let (_, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/automation/\(id)\(suffix)", method: method)
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            await load()
+            NotificationCenter.default.post(name: .jameclawAutomationChanged, object: nil)
+        } catch {
+            self.error = failure
+        }
+    }
+
     func loadOutput(for automation: NativeAutomation) async {
         outputID = automation.id
         output = nil
@@ -1871,7 +1904,7 @@ private struct AutomationsView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Automations").font(.title2.weight(.semibold))
-                    Text("Scheduled work shared with the JameClaw Web Console")
+                    Text("Jame runs this on a schedule.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1896,8 +1929,16 @@ private struct AutomationsView: View {
                 List {
                     Section {
                         if store.automations.isEmpty {
-                            Text("No automations have been scheduled yet.")
-                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("No automations yet.")
+                                    .foregroundStyle(.secondary)
+                                Text("Create one and Jame will run it on a schedule.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button("New automation") { showingTemplateGallery = true }
+                                    .buttonStyle(.borderedProminent)
+                            }
+                            .padding(.vertical, 8)
                         } else {
                             ForEach(store.automations) { automation in
                                 AutomationRow(automation: automation, store: store)
@@ -2054,11 +2095,31 @@ private struct AutomationTemplateSetupView: View {
     }
 }
 
+private func nativeAutomationStatusLabel(_ status: String) -> String {
+    switch status {
+    case "ok": return "Succeeded"
+    case "error": return "Failed"
+    case "retrying": return "Retrying"
+    case "quiet_hours": return "Waiting for quiet hours to end"
+    case "budget_limited": return "Daily run limit reached"
+    case "stale_recovered": return "Interrupted"
+    case "waiting": return "Waiting"
+    case "scheduled": return "Scheduled"
+    default: return status.capitalized
+    }
+}
+
 private struct AutomationRow: View {
     let automation: NativeAutomation
     @ObservedObject var store: NativeAutomationStore
 
-    private var status: String { automation.running ? "Running" : (automation.enabled ? automation.status.capitalized : "Disabled") }
+    @State private var confirmingDelete = false
+
+    private var status: String {
+        if automation.running { return "Running" }
+        if !automation.enabled { return "Paused" }
+        return nativeAutomationStatusLabel(automation.status)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2071,7 +2132,7 @@ private struct AutomationRow: View {
                 Text(status)
                     .font(.caption.weight(.medium))
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(status == "Error" ? Color.red.opacity(0.15) : Color.secondary.opacity(0.12), in: Rectangle())
+                    .background(status == "Failed" ? Color.red.opacity(0.15) : Color.secondary.opacity(0.12), in: Rectangle())
                 Button(store.runningID == automation.id || automation.running ? "Running…" : "Run now") {
                     Task { await store.run(automation) }
                 }
@@ -2095,7 +2156,7 @@ private struct AutomationRow: View {
                 }
                 GridRow {
                     Text("Last result").foregroundStyle(.secondary)
-                    Text(automation.lastStatus?.isEmpty == false ? automation.lastStatus! : "No result yet")
+                    Text(automation.lastStatus?.isEmpty == false ? nativeAutomationStatusLabel(automation.lastStatus!) : "No result yet")
                 }
             }
             .font(.caption)
@@ -2115,10 +2176,23 @@ private struct AutomationRow: View {
                 if store.outputID == automation.id && store.output == nil && store.outputError.isEmpty {
                     ProgressView().controlSize(.small)
                 }
+                Button(automation.enabled ? "Pause" : "Resume") {
+                    Task { await store.setEnabled(automation, !automation.enabled) }
+                }
+                .controlSize(.small)
+                .disabled(automation.running)
+                Button("Delete", role: .destructive) { confirmingDelete = true }
+                    .controlSize(.small)
+                    .disabled(automation.running)
                 Spacer()
                 if let lastRun = automation.lastRunAtMS {
                     Text("Last run \(nativeAutomationDate(lastRun))").font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            .confirmationDialog("Delete \(automation.name)?", isPresented: $confirmingDelete) {
+                Button("Delete", role: .destructive) { Task { await store.delete(automation) } }
+            } message: {
+                Text("This automation will stop running. Its saved outputs stay on disk.")
             }
 
             if store.outputID == automation.id {
@@ -2279,7 +2353,7 @@ private final class NativeSessionStore: ObservableObject {
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
             await load()
             NotificationCenter.default.post(name: .jameclawFixedChatsChanged, object: nil)
-        } catch { self.error = "Could not update fixed chat." }
+        } catch { self.error = "Could not update the pin." }
     }
 
     func setArchived(_ session: NativeSessionSummary, archived: Bool) async {
@@ -2307,7 +2381,7 @@ private final class NativeSessionStore: ObservableObject {
     func rename(_ session: NativeSessionSummary, title: String) async -> Bool {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else {
-            self.error = "Enter a session name."
+            self.error = "Enter a chat name."
             return false
         }
         do {
@@ -2325,7 +2399,7 @@ private final class NativeSessionStore: ObservableObject {
             self.error = ""
             return true
         } catch {
-            self.error = "Could not rename this session."
+            self.error = "Could not rename this chat."
             return false
         }
     }
@@ -2369,14 +2443,24 @@ private func sessionRelativeDate(_ raw: String) -> String {
     return relative.localizedString(for: date, relativeTo: Date())
 }
 
+private enum ChatListFilter: String, CaseIterable, Identifiable {
+    case all, pinned, archived
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: return "All"
+        case .pinned: return "Pinned"
+        case .archived: return "Archived"
+        }
+    }
+}
+
 private struct SessionsView: View {
     @StateObject private var store: NativeSessionStore
-    let pinnedOnly: Bool
-    let archivedOnly: Bool
+    @Binding var listFilter: ChatListFilter
     let resumeSession: (NativeSessionResumeRequest) -> Void
     @State private var sessionToRename: NativeSessionSummary?
     @State private var renameTitle = ""
-    @State private var sessionScrollIndex = 0
     @Environment(\.colorScheme) private var colorScheme
 
     private var pageBackground: Color { colorScheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
@@ -2388,21 +2472,27 @@ private struct SessionsView: View {
 
     init(
         port: Int,
-        pinnedOnly: Bool = false,
-        archivedOnly: Bool = false,
+        listFilter: Binding<ChatListFilter>,
         resumeSession: @escaping (NativeSessionResumeRequest) -> Void
     ) {
         _store = StateObject(wrappedValue: NativeSessionStore(port: port))
-        self.pinnedOnly = pinnedOnly
-        self.archivedOnly = archivedOnly
+        _listFilter = listFilter
         self.resumeSession = resumeSession
     }
 
     private var displayedSessions: [NativeSessionSummary] {
         store.visibleSessions.filter { session in
-            if archivedOnly { return session.archived }
-            return !session.archived && (!pinnedOnly || session.pinned)
+            switch listFilter {
+            case .all: return !session.archived
+            case .pinned: return session.pinned && !session.archived
+            case .archived: return session.archived
+            }
         }
+    }
+
+    private var selectedSummary: NativeSessionSummary? {
+        displayedSessions.first { $0.id == store.selectedSessionID }
+            ?? store.sessions.first { $0.id == store.selectedSessionID }
     }
 
     var body: some View {
@@ -2411,22 +2501,20 @@ private struct SessionsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(archivedOnly ? "Archived Chats" : pinnedOnly ? "Fixed Chats" : "Sessions")
+                            Text("Chats")
                                 .font(.system(size: 25, weight: .semibold, design: .rounded))
-                            Text(archivedOnly ? "Chats kept out of the active timeline." : pinnedOnly ? "The conversations worth keeping close." : "Every conversation, one searchable timeline.")
+                            Text(listFilter == .archived ? "Chats kept out of the active list." : "Pick a conversation to read it, then continue in Chat.")
                                 .font(.caption)
-                                .foregroundStyle(muted)
-                            Text("Double-click a session to continue it in Chat")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(JameBrand.orange)
-                            Text("All \(displayedSessions.count) matching sessions are loaded — scroll to see the complete list.")
-                                .font(.system(size: 9, weight: .medium, design: .rounded))
                                 .foregroundStyle(muted)
                         }
                         Spacer()
-                        Text("\(displayedSessions.count)")
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
-                            .foregroundStyle(JameBrand.orange)
+                        Picker("Chat list", selection: $listFilter) {
+                            ForEach(ChatListFilter.allCases) { filter in
+                                Text(filter.title).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 220)
                     }
 
                     VStack(alignment: .leading, spacing: 9) {
@@ -2458,9 +2546,8 @@ private struct SessionsView: View {
 
                 Rectangle().fill(rule).frame(height: 1)
 
-                ScrollViewReader { proxy in
-                    VStack(spacing: 0) {
-                        ScrollView {
+                VStack(spacing: 0) {
+                    ScrollView {
                             LazyVStack(spacing: 0) {
                                 ForEach(displayedSessions) { session in
                             HStack(alignment: .top, spacing: 11) {
@@ -2475,11 +2562,11 @@ private struct SessionsView: View {
                                             .foregroundStyle(store.selectedSessionID == session.id ? JameBrand.ink : primary)
                                             .lineLimit(2)
                                         HStack(spacing: 6) {
-                                            Text(sessionSourceName(session).uppercased())
-                                            Text("•")
-                                            Text("\(session.messageCount) MSG")
-                                            Spacer()
+                                            if session.pinned {
+                                                Image(systemName: "pin.fill")
+                                            }
                                             Text(sessionRelativeDate(session.updated))
+                                            Spacer()
                                         }
                                         .font(.system(size: 9, weight: .semibold, design: .rounded))
                                         .foregroundStyle(store.selectedSessionID == session.id ? JameBrand.ink.opacity(0.65) : muted)
@@ -2487,34 +2574,22 @@ private struct SessionsView: View {
                                     Spacer(minLength: 0)
                                 }
                                 .contentShape(Rectangle())
-                                .gesture(
-                                    TapGesture(count: 2)
-                                        .exclusively(before: TapGesture(count: 1))
-                                        .onEnded { gesture in
-                                            switch gesture {
-                                            case .first:
-                                                Task {
-                                                    guard let request = await store.resume(session) else { return }
-                                                    resumeSession(request)
-                                                }
-                                            case .second:
-                                                Task { await store.select(session.id) }
-                                            }
-                                        }
-                                )
+                                .onTapGesture {
+                                    Task { await store.select(session.id) }
+                                }
                                 Menu {
                                     Button {
                                         renameTitle = session.title.isEmpty ? session.preview : session.title
                                         sessionToRename = session
                                     } label: {
-                                        Label("Rename Session", systemImage: "pencil")
+                                        Label("Rename chat", systemImage: "pencil")
                                     }
                                     Divider()
                                     Button {
                                         Task { await store.setPinned(session, pinned: !session.pinned) }
                                     } label: {
                                         Label(
-                                            session.pinned ? "Unfix Chat" : "Fix Chat",
+                                            session.pinned ? "Unpin" : "Pin",
                                             systemImage: session.pinned ? "pin.slash" : "pin"
                                         )
                                     }
@@ -2523,7 +2598,7 @@ private struct SessionsView: View {
                                         Task { await store.setArchived(session, archived: !session.archived) }
                                     } label: {
                                         Label(
-                                            session.archived ? "Restore to Sessions" : "Archive Chat",
+                                            session.archived ? "Restore" : "Archive",
                                             systemImage: session.archived ? "arrow.uturn.backward" : "archivebox"
                                         )
                                     }
@@ -2556,38 +2631,13 @@ private struct SessionsView: View {
                             if store.isLoading { ProgressView().tint(JameBrand.orange) }
                             else if displayedSessions.isEmpty {
                                 ContentUnavailableView(
-                                    archivedOnly ? "No archived chats" : "No conversations",
-                                    systemImage: archivedOnly ? "archivebox" : "clock",
-                                    description: Text(store.error.isEmpty ? "Try another search or source." : store.error)
+                                    listFilter == .archived ? "No archived chats" : listFilter == .pinned ? "No pinned chats" : "No chats yet",
+                                    systemImage: listFilter == .archived ? "archivebox" : "bubble.left.and.bubble.right",
+                                    description: Text(emptyListMessage)
                                 )
                             }
                         }
                         .frame(maxHeight: .infinity)
-
-                        HStack(spacing: 10) {
-                            Button {
-                                jumpSessions(by: -10, proxy: proxy)
-                            } label: {
-                                Label("Newer 10", systemImage: "arrow.up")
-                            }
-                            .disabled(sessionScrollIndex == 0 || displayedSessions.isEmpty)
-                            Spacer()
-                            Text("\(displayedSessions.count) sessions loaded")
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(muted)
-                            Spacer()
-                            Button {
-                                jumpSessions(by: 10, proxy: proxy)
-                            } label: {
-                                Label("Older 10", systemImage: "arrow.down")
-                            }
-                            .disabled(sessionScrollIndex + 10 >= displayedSessions.count)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(panel)
-                    }
                 }
             }
             .frame(minWidth: 280, idealWidth: 400, maxWidth: 520, maxHeight: .infinity)
@@ -2600,13 +2650,21 @@ private struct SessionsView: View {
                     VStack(spacing: 0) {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("CONVERSATION")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                    .tracking(1.2).foregroundStyle(JameBrand.orange)
+                                Text(selectedSummary?.title.isEmpty == false ? selectedSummary!.title : "Conversation")
+                                    .font(.headline)
                                 Text("\(session.messages.count) saved messages")
                                     .font(.caption).foregroundStyle(muted)
                             }
                             Spacer()
+                            if let summary = selectedSummary {
+                                Button("Continue in Chat") {
+                                    Task {
+                                        guard let request = await store.resume(summary) else { return }
+                                        resumeSession(request)
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
                         }
                         .padding(20)
                         Rectangle().fill(rule).frame(height: 1)
@@ -2634,9 +2692,9 @@ private struct SessionsView: View {
                     }
                 } else {
                     ContentUnavailableView(
-                        "Select a session",
+                        "Choose a chat",
                         systemImage: "bubble.left.and.bubble.right",
-                        description: Text("Choose a conversation to read its full history.")
+                        description: Text("Select a conversation to read it.")
                     )
                 }
             }
@@ -2648,11 +2706,11 @@ private struct SessionsView: View {
         .task { await store.load() }
         .sheet(item: $sessionToRename) { session in
             VStack(alignment: .leading, spacing: 16) {
-                Text("Rename Session").font(.title2.weight(.semibold))
+                Text("Rename chat").font(.title2.weight(.semibold))
                 Text("Give this conversation a clear name. The original messages are not changed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("Session name", text: $renameTitle)
+                TextField("Chat name", text: $renameTitle)
                     .onSubmit { submitRename(session) }
                 HStack {
                     Spacer()
@@ -2675,11 +2733,12 @@ private struct SessionsView: View {
         }
     }
 
-    private func jumpSessions(by amount: Int, proxy: ScrollViewProxy) {
-        guard !displayedSessions.isEmpty else { return }
-        sessionScrollIndex = min(max(sessionScrollIndex + amount, 0), displayedSessions.count - 1)
-        withAnimation(.easeOut(duration: 0.2)) {
-            proxy.scrollTo(displayedSessions[sessionScrollIndex].id, anchor: .top)
+    private var emptyListMessage: String {
+        if !store.error.isEmpty && store.sessions.isEmpty { return store.error }
+        switch listFilter {
+        case .pinned: return "Pin a chat from the menu on any conversation."
+        case .archived: return "Archive a chat when you want it out of the active list."
+        case .all: return "Start a chat and it will show up here."
         }
     }
 
@@ -2804,11 +2863,44 @@ private final class ConnectorsStore: ObservableObject {
             return false
         }
     }
+
+    func setEnabled(_ server: MCPServer, enabled: Bool) async {
+        do {
+            var request = authenticatedConsoleRequest(port: port, path: "/api/tools/mcp/servers", method: "POST")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "name": server.name,
+                "enabled": enabled,
+                "transport": server.transport,
+                "command": server.command ?? "",
+                "args": server.args ?? [],
+                "url": server.url ?? "",
+            ])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            await load()
+        } catch {
+            self.error = "Could not update \(server.name)."
+        }
+    }
+
+    func remove(_ server: MCPServer) async {
+        let escaped = server.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? server.name
+        do {
+            let (_, response) = try await URLSession.shared.data(
+                for: authenticatedConsoleRequest(port: port, path: "/api/tools/mcp/servers/\(escaped)", method: "DELETE")
+            )
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+            await load()
+        } catch {
+            self.error = "Could not remove \(server.name)."
+        }
+    }
 }
 
 private enum CapabilitiesPage: String, CaseIterable, Identifiable {
     case skills = "Skills"
-    case mcp = "MCP"
+    case mcp = "Connections"
 
     var id: Self { self }
 }
@@ -2821,9 +2913,9 @@ private struct CapabilitiesView: View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 18) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Capabilities")
+                    Text("Skills & connections")
                         .font(.system(size: 25, weight: .semibold, design: .rounded))
-                    Text("Teach Jame new workflows and connect external tools.")
+                    Text("Teach Jame a workflow, or connect a tool.")
                         .font(.caption)
                         .foregroundStyle(JameBrand.muted)
                 }
@@ -2864,8 +2956,8 @@ private struct ConnectorsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("MCP").font(.title2.weight(.semibold))
-                        Text("MCP servers and CLI providers available to this agent.")
+                        Text("Connected tools").font(.title2.weight(.semibold))
+                        Text("Tools Jame can call, including remote connections and local command-line models.")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -2875,19 +2967,25 @@ private struct ConnectorsView: View {
                         .help("Refresh connectors")
                 }
 
-                ConnectorSection(title: "MCP servers", icon: "point.3.connected.trianglepath.dotted", empty: "No MCP servers are configured.") {
+                ConnectorSection(title: "Remote tools", icon: "point.3.connected.trianglepath.dotted", empty: "No tools connected yet.") {
                     if store.mcpServers.isEmpty {
-                        Text("No MCP servers are configured.").foregroundStyle(.secondary)
+                        Text("No tools connected yet. Add one and Jame can use it.").foregroundStyle(.secondary)
                     } else {
                         ForEach(store.mcpServers) { server in
-                            ConnectorRow(name: server.name, detail: "\(server.transport.uppercased()) · \(server.endpoint)", connected: store.mcpEnabled && server.enabled)
+                            ConnectorRow(
+                                name: server.name,
+                                detail: "\(server.transport.uppercased()) · \(server.endpoint)",
+                                connected: store.mcpEnabled && server.enabled,
+                                onToggle: { enabled in Task { await store.setEnabled(server, enabled: enabled) } },
+                                onRemove: { Task { await store.remove(server) } }
+                            )
                         }
                     }
                 }
 
-                ConnectorSection(title: "CLI providers", icon: "terminal", empty: "No CLI-backed models are configured.") {
+                ConnectorSection(title: "Command-line models", icon: "terminal", empty: "No command-line models are configured.") {
                     if store.cliModels.isEmpty {
-                        Text("No CLI-backed models are configured.").foregroundStyle(.secondary)
+                        Text("No command-line models are configured.").foregroundStyle(.secondary)
                     } else {
                         ForEach(store.cliModels) { model in
                             ConnectorRow(name: model.modelName, detail: [model.model, model.connectMode, model.workspace].compactMap { $0 }.joined(separator: " · "), connected: model.configured)
@@ -2971,6 +3069,8 @@ private struct ConnectorRow: View {
     let name: String
     let detail: String
     let connected: Bool
+    var onToggle: ((Bool) -> Void)? = nil
+    var onRemove: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -2980,7 +3080,19 @@ private struct ConnectorRow: View {
                 Text(detail.isEmpty ? "No connection details" : detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
-            Text(connected ? "Connected" : "Not connected").font(.caption.weight(.medium)).foregroundStyle(connected ? .green : .secondary)
+            Text(connected ? "Connected" : "Not connected")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(connected ? .green : .secondary)
+            if let onToggle {
+                Toggle("Connected", isOn: Binding(get: { connected }, set: onToggle))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .help(connected ? "Turn off \(name)" : "Turn on \(name)")
+            }
+            if let onRemove {
+                Button("Remove", action: onRemove)
+                    .controlSize(.small)
+            }
         }
     }
 }
@@ -3152,7 +3264,7 @@ struct ArtifactsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Text("Artifacts").font(.title3.weight(.semibold))
+                Text("Files").font(.title3.weight(.semibold))
                 Picker("Artifact view", selection: $selectedPage) {
                     ForEach(ArtifactsPage.allCases) { page in
                         Text(page.title).tag(page)
@@ -3176,11 +3288,17 @@ struct ArtifactsView: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         if projects.isEmpty {
-                            ContentUnavailableView(
-                                "No artifacts yet",
-                                systemImage: "shippingbox",
-                                description: Text("Save a website artifact from the Web Console and it will appear here.")
-                            )
+                            VStack(spacing: 12) {
+                                ContentUnavailableView(
+                                    "No files yet",
+                                    systemImage: "folder",
+                                    description: Text("Ask Jame to create a page or a project and it will show up here.")
+                                )
+                                Button("Create a file with Jame") {
+                                    NotificationCenter.default.post(name: .jameclawOpenSection, object: DesktopSection.chat.rawValue)
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
                         } else {
                             List(projects) { project in
                                 Button {
@@ -3203,9 +3321,9 @@ struct ArtifactsView: View {
                             .id(project.id)
                     } else {
                         ContentUnavailableView(
-                            "Choose an artifact",
+                            "Choose a project",
                             systemImage: "folder",
-                            description: Text("Select an artifact folder to view its files or start its website."))
+                            description: Text("Select a project to view its files or open its page."))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -3759,11 +3877,20 @@ struct SkillsView: View {
             .padding(18)
             Divider()
             if browser.entries.isEmpty && healthItems.isEmpty {
-                ContentUnavailableView(
-                    "No workspace skills yet",
-                    systemImage: "wand.and.stars",
-                    description: Text("Add a skill here, or use the Web Console to manage skills.")
-                )
+                VStack(spacing: 12) {
+                    ContentUnavailableView(
+                        "No skills yet",
+                        systemImage: "wand.and.stars",
+                        description: Text("Add a skill Jame can follow.")
+                    )
+                    Button("Add a skill") {
+                        skillName = ""
+                        skillDescription = ""
+                        addError = ""
+                        showingAddSkill = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             } else {
                 List {
                     if !healthItems.isEmpty {
@@ -4193,6 +4320,20 @@ private struct AgentProfileView: View {
                 }
                 GroupBox("Identity & operating style") {
                     VStack(alignment: .leading, spacing: 10) {
+                        Picker("Voice", selection: Binding(
+                            get: {
+                                AgentPersonalityPreset.allCases.first {
+                                    $0 != .custom && $0.instructions == store.persona
+                                } ?? .custom
+                            },
+                            set: { preset in
+                                if preset != .custom { store.persona = preset.instructions }
+                            }
+                        )) {
+                            ForEach(AgentPersonalityPreset.allCases) { preset in
+                                Text(preset.label).tag(preset)
+                            }
+                        }
                         TextField("Identity name", text: $store.agentName)
                         TextField("Role & personality", text: $store.persona)
                         TextField("Tone", text: $store.tone)
@@ -4250,13 +4391,13 @@ private struct CreatePersonaProfileView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New persona profile").font(.title2.weight(.semibold))
-            Text("This creates an isolated workspace with its own SOUL.md and STYLE.md. It never changes Jame's default soul or talking style.")
+            Text("This profile has its own voice and style. It does not change Jame's default voice.")
                 .font(.subheadline).foregroundStyle(.secondary)
             TextField("Profile name", text: $name)
             TextField("Profile ID (optional)", text: $id)
             TextField("Talking style", text: $talkingStyle, axis: .vertical).lineLimit(2...4)
             VStack(alignment: .leading, spacing: 5) {
-                Text("SOUL.md").font(.caption.weight(.semibold))
+                Text("Voice and rules").font(.caption.weight(.semibold))
                 TextEditor(text: $soul).font(.system(.body, design: .monospaced)).frame(minHeight: 180)
                     .overlay(Rectangle().stroke(JameBrand.rule))
             }
@@ -4960,7 +5101,7 @@ private struct AgentManagerView: View {
     private let port: Int
     @State private var selectedID = ""
     @State private var showingCreate = false
-    @State private var showingTeamGrid = false
+    @State private var teamPage = "directory"
     @State private var creationMode: AgentCreationMode = .team
 
     init(port: Int) {
@@ -4973,16 +5114,31 @@ private struct AgentManagerView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Team").font(.title3.weight(.semibold))
+                Picker("Team page", selection: $teamPage) {
+                    Text("Directory").tag("directory")
+                    Text("Map").tag("map")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                Spacer()
+                Button("New teammate") {
+                    creationMode = .team
+                    showingCreate = true
+                }
+                .buttonStyle(.borderedProminent)
+                Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
+                    .help("Refresh teammates")
+            }
+            .padding(16)
+            Divider()
+            if teamPage == "map" {
+                TeamGridView(store: store, port: port, embedded: true)
+            } else {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("Agents").font(.title3.weight(.semibold))
-                    Spacer()
-                    Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
-                        .help("Refresh agents")
-                }
-                .padding(16)
-                Divider()
 
                 if store.isLoading && store.agents.isEmpty {
                     ProgressView("Loading agents…").padding()
@@ -5015,17 +5171,6 @@ private struct AgentManagerView: View {
                         rename: { name in Task { _ = await store.rename(agent, to: name) } },
                         updateProfile: { name, persona, tone, discussionMode, memoryNotes, statusStyle in
                             Task { _ = await store.updateProfile(agent, name: name, persona: persona, tone: tone, discussionMode: discussionMode, memoryNotes: memoryNotes, statusStyle: statusStyle) }
-                        },
-                        addTeamAgent: {
-                            creationMode = .team
-                            showingCreate = true
-                        },
-                        spawnSubagent: {
-                            creationMode = .subagent
-                            showingCreate = true
-                        },
-                        showTeamGrid: {
-                            showingTeamGrid = true
                         }
                     )
                     .id(agent.id)
@@ -5034,6 +5179,8 @@ private struct AgentManagerView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+            }
         }
         .overlay(alignment: .bottomLeading) {
             if !store.error.isEmpty {
@@ -5048,7 +5195,7 @@ private struct AgentManagerView: View {
             if selectedID.isEmpty { selectedID = store.agents.first(where: { $0.id == "main" })?.id ?? store.agents.first?.id ?? "" }
         }
         .onReceive(NotificationCenter.default.publisher(for: .jameclawTeamGrid)) { _ in
-            showingTeamGrid = true
+            teamPage = "map"
         }
         .onReceive(NotificationCenter.default.publisher(for: .jameclawHireAgent)) { _ in
             creationMode = UserDefaults.standard.string(forKey: "jame.team.defaultHireType") == "subagent" ? .subagent : .team
@@ -5060,9 +5207,6 @@ private struct AgentManagerView: View {
                 showingCreate = false
             }
         }
-        .sheet(isPresented: $showingTeamGrid) {
-            TeamGridView(store: store, port: port)
-        }
     }
 }
 
@@ -5070,9 +5214,6 @@ private struct AgentDetailView: View {
     let agent: NativeAgentSummary
     let rename: (String) -> Void
     let updateProfile: (String, String, String, String, String, String) -> Void
-    let addTeamAgent: () -> Void
-    let spawnSubagent: () -> Void
-    let showTeamGrid: () -> Void
     @State private var displayName: String
     @State private var persona: String
     @State private var tone: String
@@ -5080,13 +5221,10 @@ private struct AgentDetailView: View {
     @State private var memoryNotes: String
     @State private var statusStyle: String
 
-    init(agent: NativeAgentSummary, rename: @escaping (String) -> Void, updateProfile: @escaping (String, String, String, String, String, String) -> Void, addTeamAgent: @escaping () -> Void, spawnSubagent: @escaping () -> Void, showTeamGrid: @escaping () -> Void) {
+    init(agent: NativeAgentSummary, rename: @escaping (String) -> Void, updateProfile: @escaping (String, String, String, String, String, String) -> Void) {
         self.agent = agent
         self.rename = rename
         self.updateProfile = updateProfile
-        self.addTeamAgent = addTeamAgent
-        self.spawnSubagent = spawnSubagent
-        self.showTeamGrid = showTeamGrid
         _displayName = State(initialValue: agent.name.isEmpty ? agent.id : agent.name)
         _persona = State(initialValue: agent.human?.persona ?? "")
         _tone = State(initialValue: agent.human?.tone ?? "")
@@ -5097,82 +5235,61 @@ private struct AgentDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 8) {
-                            TextField("Agent name", text: $displayName)
-                                .font(.title2.weight(.semibold))
-                                .textFieldStyle(.plain)
-                            if agent.isDefault { Text("Default").font(.caption.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 3).background(.yellow.opacity(0.2)).clipShape(Rectangle()) }
-                        }
-                        HStack(spacing: 8) {
-                            Text(agent.id).font(.subheadline.monospaced()).foregroundStyle(.secondary)
-                            Button("Save name") { rename(displayName) }
-                                .controlSize(.small)
-                                .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName == agent.name)
-                        }
-                    }
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 8) {
-                            Button("Add team agent", action: addTeamAgent)
-                                .buttonStyle(.bordered)
-                            Button("Spawn subagent", action: spawnSubagent)
-                                .buttonStyle(.borderedProminent)
-                            Button("Team grid", systemImage: "point.3.connected.trianglepath.dotted", action: showTeamGrid)
-                                .buttonStyle(.bordered)
-                                .help("See how team and spawned agents are connected")
-                        }
-                    }
-                    .scrollIndicators(.hidden)
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Name", text: $displayName)
+                        .font(.title2.weight(.semibold))
+                        .textFieldStyle(.plain)
+                    Text(agent.model.isEmpty ? "Uses the primary model" : agent.model)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(persona.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No role yet" : persona)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
                 }
-
-                GroupBox("Configuration") {
-                    Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
-                        AgentField("Model", agent.model.isEmpty ? "Inherited default" : agent.model)
-                        AgentField("Workspace", agent.workspace.isEmpty ? "Default workspace" : agent.workspace)
-                        AgentField("Persona", agent.human?.persona?.isEmpty == false ? agent.human!.persona! : "Not set")
-                        AgentField("Tone", agent.human?.tone?.isEmpty == false ? agent.human!.tone! : "Not set")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 28) {
+                    AgentMetric("Chats", agent.sessionCount ?? 0)
+                    AgentMetric("Messages", agent.messageCount ?? 0)
+                    AgentMetric("Tool calls", agent.toolCalls ?? 0)
                 }
-
-                GroupBox("Agent Profile") {
+                GroupBox("Voice and rules") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("This profile controls how this agent presents itself and works in every new conversation.")
+                        Text("Saved together for every new conversation with this teammate.")
                             .font(.caption).foregroundStyle(.secondary)
-                        TextField("Role & personality", text: $persona)
+                        TextField("Role", text: $persona)
                         TextField("Tone", text: $tone)
-                        TextField("Autonomy & discussion mode", text: $discussionMode)
+                        TextField("How it decides", text: $discussionMode)
                         TextField("Status updates", text: $statusStyle)
                         TextEditor(text: $memoryNotes)
-                            .font(.system(.body, design: .monospaced))
+                            .font(.body)
                             .frame(minHeight: 100)
-                            .overlay(Rectangle().stroke(JameBrand.rule))
-                        Text("Ownership & durable context — what this agent manages, stable preferences, and non-negotiable rules.")
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(JameBrand.rule))
+                        Text("What this teammate owns, and the rules that do not change.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Button("Save agent profile") {
+                        Button("Save") {
+                            rename(displayName)
                             updateProfile(displayName, persona, tone, discussionMode, memoryNotes, statusStyle)
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-
-                GroupBox("Capabilities") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Skills: \((agent.skills ?? []).isEmpty ? "None configured" : (agent.skills ?? []).joined(separator: ", "))")
-                        Text("Delegated agents: \((agent.subagents ?? []).isEmpty ? "None configured" : (agent.subagents ?? []).joined(separator: ", "))")
+                if !(agent.skills ?? []).isEmpty || !(agent.subagents ?? []).isEmpty {
+                    GroupBox("Also connected") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let skills = agent.skills, !skills.isEmpty {
+                                Text("Skills: \(skills.joined(separator: ", "))")
+                            }
+                            if let delegated = agent.subagents, !delegated.isEmpty {
+                                Text("Helps from: \(delegated.joined(separator: ", "))")
+                            }
+                        }
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .font(.subheadline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                HStack(spacing: 28) {
-                    AgentMetric("Sessions", agent.sessionCount ?? 0)
-                    AgentMetric("Messages", agent.messageCount ?? 0)
-                    AgentMetric("Tool calls", agent.toolCalls ?? 0)
                 }
             }
             .padding(24)
@@ -5353,6 +5470,18 @@ private func teamRule(_ scheme: ColorScheme) -> Color {
     scheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule
 }
 
+private func teamTaskStateLabel(_ status: String) -> String {
+    switch status {
+    case "unassigned", "planned": return "Waiting"
+    case "working": return "Working"
+    case "review": return "In review"
+    case "blocked": return "Blocked"
+    case "paused": return "Paused"
+    case "done": return "Done"
+    default: return status.capitalized
+    }
+}
+
 @MainActor
 private final class TeamGridActivityStore: ObservableObject {
     @Published var servers: [MCPServer] = []
@@ -5527,6 +5656,7 @@ private final class TeamGridActivityStore: ObservableObject {
 private struct TeamGridView: View {
     @ObservedObject var store: NativeAgentStore
     let port: Int
+    var embedded = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var activity = TeamGridActivityStore()
@@ -5540,7 +5670,6 @@ private struct TeamGridView: View {
     @State private var preferredTaskOwnerID = ""
     @State private var preferredNodeKind = "task"
     @State private var taskActionRequest: TeamTaskActionRequest?
-    @AppStorage("launcher.teamGrid.zoom") private var gridZoom = 1.0
 
     private var agents: [NativeAgentSummary] { store.agents }
 
@@ -5612,180 +5741,186 @@ private struct TeamGridView: View {
         }
     }
 
-    private func createTask(for agent: NativeAgentSummary) {
-        selectedAgentID = agent.id
-        preferredTaskOwnerID = agent.id
+    private func openTasks(for agent: NativeAgentSummary) -> [TeamOperationsTask] {
+        activity.operations.tasks.filter { $0.ownerAgentID == agent.id && $0.status != "done" }
+    }
+
+    private func beginNewTask(ownerID: String) {
+        if !ownerID.isEmpty { selectedAgentID = ownerID }
+        guard activity.operations.goal != nil else {
+            showingGoalEditor = true
+            return
+        }
+        preferredTaskOwnerID = ownerID
         preferredNodeKind = "task"
         editingTask = nil
         showingTaskEditor = true
     }
 
-    private func createLoop(for agent: NativeAgentSummary? = nil) {
-        if let agent { selectedAgentID = agent.id }
-        preferredTaskOwnerID = agent?.id ?? ""
-        preferredNodeKind = "loop"
-        editingTask = nil
+    @ViewBuilder
+    private var teamPicture: some View {
+        if let mainAgent {
+            VStack(alignment: .leading, spacing: 18) {
+                TeamGridNode(
+                    agent: mainAgent,
+                    kind: .main,
+                    isSelected: selectedAgentID == mainAgent.id,
+                    openTasks: openTasks(for: mainAgent),
+                    delegatableTasks: delegatableTasks,
+                    delegateTask: { delegate($0, to: mainAgent) },
+                    createTask: { beginNewTask(ownerID: mainAgent.id) },
+                    select: { selectedAgentID = mainAgent.id }
+                )
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 28) {
+                        taskOnlyGroup(under: mainAgent)
+                        standingGroup
+                    }
+                    VStack(alignment: .leading, spacing: 22) {
+                        taskOnlyGroup(under: mainAgent)
+                        standingGroup
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            ContentUnavailableView("No main agent", systemImage: "person.3")
+        }
+    }
+
+    private func taskOnlyGroup(under agent: NativeAgentSummary) -> some View {
+        let children = (agent.subagents ?? []).compactMap { agentsByID[$0] }
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("This task only")
+                .font(.subheadline.weight(.semibold))
+            if children.isEmpty {
+                Text("No one hired for one task yet.")
+                    .font(.caption)
+                    .foregroundStyle(teamMuted(colorScheme))
+            } else {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(children) { child in
+                        AgentTreeBranch(
+                            agent: child,
+                            agentsByID: agentsByID,
+                            visited: [agent.id],
+                            selectedAgentID: selectedAgentID,
+                            openTasks: openTasks(for:),
+                            delegatableTasks: delegatableTasks,
+                            delegateTask: delegate,
+                            createTask: { beginNewTask(ownerID: $0.id) },
+                            select: { selectedAgentID = $0 }
+                        )
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var standingGroup: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Keeps working")
+                .font(.subheadline.weight(.semibold))
+            if independentTeam.isEmpty {
+                Text("No one staying on the team yet.")
+                    .font(.caption)
+                    .foregroundStyle(teamMuted(colorScheme))
+            } else {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(independentTeam) { agent in
+                        VStack(alignment: .leading, spacing: 10) {
+                            TeamGridNode(
+                                agent: agent,
+                                kind: .team,
+                                isSelected: selectedAgentID == agent.id,
+                                openTasks: openTasks(for: agent),
+                                delegatableTasks: delegatableTasks,
+                                delegateTask: { delegate($0, to: agent) },
+                                createTask: { beginNewTask(ownerID: agent.id) },
+                                select: { selectedAgentID = agent.id }
+                            )
+                            let helpers = (agent.subagents ?? []).compactMap { agentsByID[$0] }
+                            if !helpers.isEmpty {
+                                HStack(alignment: .top, spacing: 12) {
+                                    ForEach(helpers) { helper in
+                                        AgentTreeBranch(
+                                            agent: helper,
+                                            agentsByID: agentsByID,
+                                            visited: [agent.id],
+                                            selectedAgentID: selectedAgentID,
+                                            openTasks: openTasks(for:),
+                                            delegatableTasks: delegatableTasks,
+                                            delegateTask: delegate,
+                                            createTask: { beginNewTask(ownerID: $0.id) },
+                                            select: { selectedAgentID = $0 }
+                                        )
+                                    }
+                                }
+                                .padding(.leading, 16)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func editTask(_ task: TeamOperationsTask) {
+        editingTask = task
+        preferredNodeKind = task.nodeKind
         showingTaskEditor = true
+    }
+
+    private func perform(_ task: TeamOperationsTask, action: String) {
+        if action == "start" || action == "pause" || action == "reopen" {
+            Task { _ = await activity.taskAction(port: port, task: task, action: action) }
+        } else {
+            taskActionRequest = TeamTaskActionRequest(task: task, action: action)
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("TEAM OPERATIONS")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .tracking(1.4).foregroundStyle(JameBrand.orange)
-                    Text("Team grid").font(.system(size: 27, weight: .semibold, design: .rounded))
-                    Text("Inspect activity, move through the hierarchy, and create agents without leaving the map.")
-                        .font(.caption)
-                        .foregroundStyle(teamMuted(colorScheme))
+            HStack(spacing: 8) {
+                Button { Task { await refreshGrid() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.bordered)
+                    .help("Refresh the team")
+                Spacer()
+                Button(activity.operations.goal == nil ? "Set a goal" : "Edit goal") {
+                    showingGoalEditor = true
                 }
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        Button { Task { await refreshGrid() } } label: { Image(systemName: "arrow.clockwise") }
-                            .buttonStyle(.bordered).help("Refresh agents and activity")
-                        HStack(spacing: 4) {
-                            Button {
-                                gridZoom = max(0.6, ((gridZoom - 0.1) * 10).rounded() / 10)
-                            } label: {
-                                Image(systemName: "minus")
-                            }
-                            .disabled(gridZoom <= 0.6)
-                            .help("Minimize Team Grid")
-                            Text("\(Int((gridZoom * 100).rounded()))%")
-                                .font(.caption.monospaced().weight(.semibold))
-                                .frame(width: 42)
-                            Button {
-                                gridZoom = min(1.4, ((gridZoom + 0.1) * 10).rounded() / 10)
-                            } label: {
-                                Image(systemName: "plus")
-                            }
-                            .disabled(gridZoom >= 1.4)
-                            .help("Enlarge Team Grid")
-                        }
-                        .buttonStyle(.bordered)
-                        Button(activity.operations.goal == nil ? "Set team goal" : "Edit goal") {
-                            showingGoalEditor = true
-                        }
-                        .buttonStyle(.bordered)
-                        Button("Add task") {
-                            preferredTaskOwnerID = ""
-                            preferredNodeKind = "task"
-                            editingTask = nil
-                            showingTaskEditor = true
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(activity.operations.goal == nil)
-                        Button("Add loop", systemImage: "repeat") {
-                            createLoop()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(activity.operations.goal == nil)
-                        Button("Add team agent") {
-                            creationMode = .team
-                            showingCreate = true
-                        }
-                        .buttonStyle(.bordered)
-                        Button("Spawn subagent") {
-                            creationMode = .subagent
-                            showingCreate = true
-                        }
-                        .buttonStyle(.borderedProminent).tint(JameBrand.orange)
-                        Button("Done") { dismiss() }.buttonStyle(.bordered)
+                .buttonStyle(.bordered)
+                Button("New task") { beginNewTask(ownerID: "") }
+                    .buttonStyle(.borderedProminent)
+                    .help(activity.operations.goal == nil ? "Set a goal to start assigning work." : "Add a task for the team")
+                if !embedded {
+                    Button("New teammate") {
+                        creationMode = .team
+                        showingCreate = true
                     }
+                    .buttonStyle(.bordered)
+                    Button("Done") { dismiss() }.buttonStyle(.bordered)
                 }
-                .scrollIndicators(.hidden)
             }
-            .padding(22)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
             Rectangle().fill(teamRule(colorScheme)).frame(height: 1)
 
             HStack(spacing: 0) {
-                // Keep the axes independent so a trackpad or mouse wheel can
-                // move vertically without accidentally locking onto the wide
-                // team map. The inner horizontal scroller handles zoomed maps.
-                ScrollView(.vertical) {
-                    ScrollView(.horizontal) {
-                        TeamGridZoomContainer(scale: gridZoom) {
-                        VStack(spacing: 28) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
                         TeamOperationsBoard(
                             snapshot: activity.operations,
                             agents: agents,
-                            editTask: { task in
-                                editingTask = task
-                                preferredNodeKind = task.nodeKind
-                                showingTaskEditor = true
-                            },
-                            act: { task, action in
-                                if action == "start" || action == "pause" || action == "reopen" {
-                                    Task { _ = await activity.taskAction(port: port, task: task, action: action) }
-                                } else {
-                                    taskActionRequest = TeamTaskActionRequest(task: task, action: action)
-                                }
-                            }
+                            selectedAgentID: selectedAgentID,
+                            editTask: editTask,
+                            act: perform,
+                            assign: delegate
                         )
-                        TeamGridFlowLine(length: 24)
-                        if let initiative = activity.initiative {
-                            TeamGridInitiativeSection(initiative: initiative)
-                            TeamGridFlowLine(length: 24)
-                        }
-                        if let mainAgent {
-                            if !activity.sources.isEmpty {
-                                TeamGridInformationSources(sources: activity.sources)
-                                TeamGridFlowLine(length: 30)
-                            }
-                            AgentTreeBranch(
-                                agent: mainAgent,
-                                agentsByID: agentsByID,
-                                visited: [],
-                                selectedAgentID: selectedAgentID,
-                                modelLabel: modelLabel,
-                                activeTask: activeTask,
-                                delegatableTasks: delegatableTasks,
-                                delegateTask: delegate,
-                                createTask: createTask,
-                                createLoop: { createLoop(for: $0) },
-                                select: { selectedAgentID = $0 }
-                            )
-                        } else {
-                            ContentUnavailableView("No main agent", systemImage: "person.3")
-                        }
-
-                        TeamGridMCPSection(servers: activity.servers)
-
-                        if !independentTeam.isEmpty {
-                            VStack(spacing: 14) {
-                                Label("Independent team agents", systemImage: "person.3.fill")
-                                    .font(.headline)
-                                    .foregroundStyle(teamPrimary(colorScheme))
-                                HStack(alignment: .top, spacing: 16) {
-                                    ForEach(independentTeam) { agent in
-                                        TeamGridNode(
-                                            agent: agent,
-                                            kind: .team,
-                                            isSelected: selectedAgentID == agent.id,
-                                            modelLabel: modelLabel(for: agent),
-                                            activeTask: activeTask(for: agent),
-                                            delegatableTasks: delegatableTasks,
-                                            delegateTask: { delegate($0, to: agent) },
-                                            createTask: { createTask(for: agent) },
-                                            createLoop: { createLoop(for: agent) },
-                                            select: { selectedAgentID = agent.id }
-                                        )
-                                    }
-                                }
-                            }
-                            .padding(.top, 8)
-                        }
-
-                        if let permissions = activity.permissions {
-                            TeamGridModificationSection(
-                                permissions: permissions,
-                                artifacts: activity.artifacts
-                            )
-                        }
-
-                        TeamGridFileSection(files: activity.files)
-
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        teamPicture
                         if !activity.error.isEmpty {
                             Label(activity.error, systemImage: "exclamationmark.triangle")
                                 .font(.caption)
@@ -5797,13 +5932,9 @@ private struct TeamGridView: View {
                                 .foregroundStyle(JameBrand.orange)
                         }
                     }
-                        .padding(36)
-                        .frame(minWidth: 440, minHeight: 400)
-                        }
-                    }
-                    .scrollIndicators(.visible)
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .scrollIndicators(.visible)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Rectangle().fill(teamRule(colorScheme)).frame(width: 1)
@@ -5816,25 +5947,24 @@ private struct TeamGridView: View {
                     } ?? [],
                     sources: activity.sources,
                     files: activity.files,
+                    servers: activity.servers,
                     initiative: activity.initiative,
                     permissions: activity.permissions,
-                    spawnSubagent: {
-                        creationMode = .subagent
-                        showingCreate = true
-                    },
-                    addTeamAgent: {
+                    onNewTask: { beginNewTask(ownerID: selectedAgentID) },
+                    onNewTeammate: {
                         creationMode = .team
                         showingCreate = true
-                    }
+                    },
+                    act: perform
                 )
-                .frame(minWidth: 220, idealWidth: 250, maxWidth: 280)
+                .frame(minWidth: 240, idealWidth: 280, maxWidth: 320)
                 .frame(maxHeight: .infinity)
                 .background(teamPanel(colorScheme))
             }
         }
         .foregroundStyle(teamPrimary(colorScheme))
         .background(teamPageBackground(colorScheme))
-        .frame(minWidth: 760, idealWidth: 1240, minHeight: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await refreshGrid()
             if agentsByID[selectedAgentID] == nil { selectedAgentID = mainAgent?.id ?? agents.first?.id ?? "" }
@@ -5940,8 +6070,8 @@ private struct TeamOperationsBoard: View {
                         Text(goal.title).font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(primary)
                         Text(goal.outcome).font(.caption).foregroundStyle(muted).lineLimit(3)
                     } else {
-                        Text("No operating goal yet").font(.headline).foregroundStyle(primary)
-                        Text("Set a measurable goal, then assign dependency-aware tasks to the team.")
+                        Text("Set a goal to start assigning work").font(.headline).foregroundStyle(primary)
+                        Text("The goal is what the team is trying to finish. Tasks come after it.")
                             .font(.caption).foregroundStyle(muted)
                     }
                 }
@@ -6172,19 +6302,14 @@ private struct TeamTaskEditor: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
-                HStack {
-                    Text(task == nil ? (nodeKind == "loop" ? "Create loop node" : "Create team task") : "Edit node contract")
-                        .font(.title2.weight(.semibold))
-                    if nodeKind == "loop" {
-                        Label("LOOP", systemImage: "repeat")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(JameBrand.orange)
-                    }
-                }
-                Text(nodeKind == "loop"
-                     ? "This checkpoint repeats until its evidence is verified. Every next node is automatically blocked behind it."
-                     : "Define one owner, completion evidence, dependencies, scope, and budget before work starts.")
+                Text(task == nil ? "New task" : "Edit task")
+                    .font(.title2.weight(.semibold))
+                Text("Give it an owner and say what finished looks like.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Repeat until finished", isOn: Binding(
+                    get: { nodeKind == "loop" },
+                    set: { nodeKind = $0 ? "loop" : "task" }
+                ))
                 TextField("Task title", text: $title)
                 TextField("Deliverable", text: $taskDescription, axis: .vertical).lineLimit(2...5)
                 Picker("Owner", selection: $ownerAgentID) {
@@ -6211,7 +6336,7 @@ private struct TeamTaskEditor: View {
                 HStack {
                     Spacer()
                     Button("Cancel") { dismiss() }
-                    Button(saving ? "Saving…" : (task == nil ? (nodeKind == "loop" ? "Create loop" : "Create task") : "Save contract")) {
+                    Button(saving ? "Saving…" : (task == nil ? "Create task" : "Save task")) {
                         saving = true
                         Task {
                             await save(nodeKind, title, taskDescription, ownerAgentID, Array(dependencyIDs), lines(criteriaText), lines(scopesText), timeBudgetMinutes, tokenBudget)
@@ -6878,12 +7003,10 @@ private struct AgentTreeBranch: View {
     let agentsByID: [String: NativeAgentSummary]
     let visited: Set<String>
     let selectedAgentID: String
-    let modelLabel: (NativeAgentSummary) -> String
-    let activeTask: (NativeAgentSummary) -> TeamOperationsTask?
+    let openTasks: (NativeAgentSummary) -> [TeamOperationsTask]
     let delegatableTasks: [TeamOperationsTask]
     let delegateTask: (TeamOperationsTask, NativeAgentSummary) -> Void
     let createTask: (NativeAgentSummary) -> Void
-    let createLoop: (NativeAgentSummary) -> Void
     let select: (String) -> Void
 
     private var children: [NativeAgentSummary] {
@@ -6892,41 +7015,34 @@ private struct AgentTreeBranch: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
             TeamGridNode(
                 agent: agent,
-                kind: agent.id == "main" ? .main : .spawned,
+                kind: .spawned,
                 isSelected: selectedAgentID == agent.id,
-                modelLabel: modelLabel(agent),
-                activeTask: activeTask(agent),
+                openTasks: openTasks(agent),
                 delegatableTasks: delegatableTasks,
                 delegateTask: { delegateTask($0, agent) },
                 createTask: { createTask(agent) },
-                createLoop: { createLoop(agent) },
                 select: { select(agent.id) }
             )
             if !children.isEmpty {
-                TeamGridFlowLine(length: 28)
-                HStack(alignment: .top, spacing: 18) {
+                HStack(alignment: .top, spacing: 12) {
                     ForEach(children) { child in
-                        VStack(spacing: 0) {
-                            TeamGridFlowLine(length: 20)
-                            AgentTreeBranch(
-                                agent: child,
-                                agentsByID: agentsByID,
-                                visited: visited.union([agent.id]),
-                                selectedAgentID: selectedAgentID,
-                                modelLabel: modelLabel,
-                                activeTask: activeTask,
-                                delegatableTasks: delegatableTasks,
-                                delegateTask: delegateTask,
-                                createTask: createTask,
-                                createLoop: createLoop,
-                                select: select
-                            )
-                        }
+                        AgentTreeBranch(
+                            agent: child,
+                            agentsByID: agentsByID,
+                            visited: visited.union([agent.id]),
+                            selectedAgentID: selectedAgentID,
+                            openTasks: openTasks,
+                            delegatableTasks: delegatableTasks,
+                            delegateTask: delegateTask,
+                            createTask: createTask,
+                            select: select
+                        )
                     }
                 }
+                .padding(.leading, 16)
             }
         }
     }
@@ -6937,22 +7053,22 @@ private struct TeamGridNode: View {
     let agent: NativeAgentSummary
     let kind: Kind
     let isSelected: Bool
-    let modelLabel: String
-    let activeTask: TeamOperationsTask?
+    let openTasks: [TeamOperationsTask]
     let delegatableTasks: [TeamOperationsTask]
     let delegateTask: (TeamOperationsTask) -> Void
     let createTask: () -> Void
-    let createLoop: () -> Void
     let select: () -> Void
     @AppStorage("launcher.design.teamGlow") private var teamGlow = true
     @Environment(\.colorScheme) private var colorScheme
     private var label: String {
         switch kind {
-        case .main: return "JAMECLAW"
-        case .spawned: return "SPAWNED"
-        case .team: return "TEAM"
+        case .main: return "Jame"
+        case .spawned: return "This task"
+        case .team: return "On the team"
         }
     }
+
+    private var leadTask: TeamOperationsTask? { openTasks.first }
 
     private var identitySymbol: String {
         agentIdentitySymbol(agent)
@@ -6975,43 +7091,18 @@ private struct TeamGridNode: View {
                     .font(.headline)
                     .foregroundStyle(isSelected ? JameBrand.ink : teamPrimary(colorScheme))
                     .lineLimit(1)
-                if agent.human?.persona?.isEmpty == false {
-                    Text(agent.human!.persona!)
+                if openTasks.isEmpty {
+                    Text("No task yet")
                         .font(.caption)
-                        .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.64) : teamMuted(colorScheme))
-                        .lineLimit(2)
+                        .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.72) : teamMuted(colorScheme))
+                } else if openTasks.count == 1, let leadTask {
+                    taskLine(leadTask)
+                } else {
+                    Text("\(openTasks.count) tasks")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isSelected ? JameBrand.ink : JameBrand.orange)
+                    if let leadTask { taskLine(leadTask) }
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "cpu")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(modelLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .lineLimit(2)
-                }
-                .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.78) : JameBrand.orange)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 5)
-                .background(
-                    isSelected ? JameBrand.ink.opacity(0.08) : JameBrand.orange.opacity(0.10),
-                    in: Rectangle()
-                )
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 5) {
-                        Image(systemName: activeTask == nil ? "tray" : activeTask?.nodeKind == "loop" ? "repeat" : "flag.fill")
-                        Text(activeTask == nil ? "NO ACTIVE TASK" : (activeTask?.nodeKind == "loop" ? "LOOP · " : "") + activeTask!.status.uppercased())
-                    }
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    Text(activeTask?.title ?? "Right-click to delegate work")
-                        .font(.caption2.weight(activeTask == nil ? .regular : .semibold))
-                        .lineLimit(2)
-                }
-                .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.72) : teamMuted(colorScheme))
-                HStack(spacing: 8) {
-                    Label("\(agent.sessionCount ?? 0)", systemImage: "bubble.left")
-                    Label("\(agent.toolCalls ?? 0)", systemImage: "wrench.and.screwdriver")
-                }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.64) : teamMuted(colorScheme))
             }
             .padding(14)
             .frame(width: 230, alignment: .leading)
@@ -7024,25 +7115,31 @@ private struct TeamGridNode: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Select agent") { select() }
-            Divider()
-            if delegatableTasks.isEmpty {
-                Button("No planned tasks available") { }
-                    .disabled(true)
-            } else {
-                Menu("Delegate existing task") {
+            Button("New task", action: createTask)
+            if !delegatableTasks.isEmpty {
+                Menu("Assign to this person") {
                     ForEach(delegatableTasks) { task in
                         Button(task.title) { delegateTask(task) }
                     }
                 }
             }
-            Button("Create task for \(agent.name.isEmpty ? agent.id : agent.name)…") {
-                createTask()
-            }
-            Button("Create loop for \(agent.name.isEmpty ? agent.id : agent.name)…", systemImage: "repeat") {
-                createLoop()
-            }
         }
+    }
+
+    @ViewBuilder
+    private func taskLine(_ task: TeamOperationsTask) -> some View {
+        HStack(spacing: 5) {
+            if task.nodeKind == "loop" {
+                Image(systemName: "repeat")
+            }
+            Text(task.title)
+                .lineLimit(2)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(isSelected ? JameBrand.ink : teamPrimary(colorScheme))
+        Text(teamTaskStateLabel(task.status))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(isSelected ? JameBrand.ink.opacity(0.72) : JameBrand.orange)
     }
 }
 
@@ -7080,10 +7177,17 @@ private enum AgentCreationMode {
 }
 
 private struct CreateAgentView: View {
-    let mode: AgentCreationMode
+    @State private var mode: AgentCreationMode
     let parent: NativeAgentSummary?
     @ObservedObject var store: NativeAgentStore
     let created: (String) -> Void
+
+    init(mode: AgentCreationMode, parent: NativeAgentSummary?, store: NativeAgentStore, created: @escaping (String) -> Void) {
+        _mode = State(initialValue: mode)
+        self.parent = parent
+        self._store = ObservedObject(wrappedValue: store)
+        self.created = created
+    }
     @Environment(\.dismiss) private var dismiss
     @State private var id = ""
     @State private var name = ""
@@ -7126,12 +7230,17 @@ private struct CreateAgentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-            Text("Hire agent").font(.title2.weight(.semibold))
+            Text("New teammate").font(.title2.weight(.semibold))
+            Picker("Kind", selection: $mode) {
+                Text("Keeps working").tag(AgentCreationMode.team)
+                Text("This task only").tag(AgentCreationMode.subagent)
+            }
+            .pickerStyle(.segmented)
             Text(mode == .team
-                ? "A persistent specialist that appears in the team directory and owns an ongoing responsibility."
-                : "A task-scoped worker managed by \(parent?.name.isEmpty == false ? parent!.name : parent?.id ?? "main").")
+                ? "Stays on the team and keeps this responsibility."
+                : "Helps with one task, then stops. \(parent?.name.isEmpty == false ? parent!.name : "Jame") manages the work.")
                 .foregroundStyle(.secondary)
-            GroupBox("Hiring contract") {
+            GroupBox("How this teammate works") {
                 VStack(alignment: .leading, spacing: 8) {
                     TextField("Measurable outcome *", text: $outcome, axis: .vertical).lineLimit(2...4)
                     Picker("Access", selection: $accessLevel) {
@@ -7219,7 +7328,7 @@ private struct CreateAgentView: View {
                     .foregroundStyle(JameBrand.orange)
                 TextField("Required — for example, releases, product research, or customer support", text: $manages, axis: .vertical)
                     .lineLimit(2...4)
-                Text("Saved in this agent's memory and shown in Team Grid.")
+                Text("Saved with this teammate and shown on the team map.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -7239,7 +7348,7 @@ private struct CreateAgentView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button(store.isCreating ? "Creating…" : (mode == .team ? "Create team agent" : "Spawn subagent")) {
+                Button(store.isCreating ? "Creating…" : "Create teammate") {
                     Task {
                         let didCreate = await store.createAgent(
                             id: id,
@@ -7783,7 +7892,6 @@ private enum AgentPersonalityPreset: String, CaseIterable, Identifiable {
 
 struct QuickSettingsView: View {
     @ObservedObject var settings: LauncherSettingsStore
-    let openArchivedChats: () -> Void
     let listenForPrompt: () -> Void
     @StateObject private var providers = NativeProviderStore()
     @StateObject private var researchProviders = NativeResearchProviderStore()
@@ -7798,10 +7906,6 @@ struct QuickSettingsView: View {
     @AppStorage("launcher.safety.documentApprovalPolicy") private var documentApprovalPolicy = DocumentApprovalPolicy.outsideWorkspace.rawValue
     @AppStorage("launcher.voice.autoSendPrompt") private var autoSendVoicePrompt = false
     @AppStorage("jame.notifications.taskCompletion") private var taskCompletionNotifications = true
-    @AppStorage("jame.team.defaultHireType") private var defaultHireType = "team"
-    @AppStorage("jame.team.defaultAccess") private var defaultHireAccess = "propose"
-    @AppStorage("jame.team.defaultBudget") private var defaultHireBudget = "45 minutes, 20k tokens"
-    @AppStorage("jame.team.defaultModel") private var defaultHireModel = ""
     @State private var showingBackgroundPicker = false
     @State private var showingProviderSetup = false
     @State private var providerSetupPurpose = ProviderSetupPurpose.primary
@@ -7811,14 +7915,6 @@ struct QuickSettingsView: View {
     @State private var documentSafetyStatus = ""
     @State private var approvedDocumentRoots = storedApprovedDocumentRoots()
     @State private var researchAPIKey = ""
-    @State private var personalityPreset: AgentPersonalityPreset = .custom
-    @State private var personalityInstructions = ""
-    @State private var personalityAgentName = ""
-    @State private var personalityTone = ""
-    @State private var personalityDiscussionMode = ""
-    @State private var personalityMemoryNotes = ""
-    @State private var personalityStatusStyle = ""
-    @State private var personalityStatus = ""
     @State private var agentUpdateStatus = ""
     @State private var agentCurrentVersion = ""
     @State private var agentLatestVersion = ""
@@ -7855,15 +7951,7 @@ struct QuickSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Conversation history") {
-                Button(action: openArchivedChats) {
-                    Label("Archived chats", systemImage: "archivebox.fill")
-                }
-                Text("Open chats removed from the active Sessions timeline. You can restore any chat from there.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Section("Voice prompt") {
+            Section("Voice and notifications") {
                 Button("Listen and act", action: listenForPrompt)
                     .buttonStyle(.borderedProminent)
                 Toggle("Send voice prompts automatically", isOn: $autoSendVoicePrompt)
@@ -7872,8 +7960,6 @@ struct QuickSettingsView: View {
                     : "Starts JameClaw if needed, opens Chat, and records. Review the transcription before Jame acts.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            Section("Notifications") {
                 Toggle("Notify me when Jame finishes a task", isOn: $taskCompletionNotifications)
                     .onChange(of: taskCompletionNotifications) { _, enabled in
                         guard enabled else { return }
@@ -7883,7 +7969,7 @@ struct QuickSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("JameClaw AI agent") {
+            Section("Updates") {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Desktop agent version")
@@ -7933,7 +8019,7 @@ struct QuickSettingsView: View {
                 }
                 Label(
                     documentApprovalPolicy == DocumentApprovalPolicy.yolo.rawValue
-                        ? "YOLO removes the workspace restriction for file tools."
+                        ? "File tools can work outside the active workspace."
                         : "File tools stay restricted to Jame's active workspace.",
                     systemImage: documentApprovalPolicy == DocumentApprovalPolicy.yolo.rawValue
                         ? "exclamationmark.triangle.fill"
@@ -7974,22 +8060,7 @@ struct QuickSettingsView: View {
                     }
                 }
             }
-            Section("Team defaults") {
-                Picker("Default hire", selection: $defaultHireType) {
-                    Text("Persistent team agent").tag("team")
-                    Text("Task-scoped subagent").tag("subagent")
-                }
-                Picker("Default access", selection: $defaultHireAccess) {
-                    Text("Read-only").tag("read")
-                    Text("Propose changes").tag("propose")
-                    Text("Modify workspace").tag("write")
-                }
-                TextField("Default model alias", text: $defaultHireModel)
-                TextField("Default budget", text: $defaultHireBudget)
-                Text("Applied to the Hire Agent review. Higher access should be confirmed before work begins.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Web Console") {
+            Section("Advanced") {
                 TextField("Port", text: $settings.port)
                 Toggle("Allow devices on my local network", isOn: $settings.lanAccess)
             }
@@ -8002,44 +8073,11 @@ struct QuickSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Section("Personality") {
-                Picker("Personality style", selection: $personalityPreset) {
-                    ForEach(AgentPersonalityPreset.allCases) { preset in
-                        Text(preset.label).tag(preset)
-                    }
-                }
-                .onChange(of: personalityPreset) { _, preset in
-                    if preset != .custom {
-                        personalityInstructions = preset.instructions
-                    }
-                }
-                if personalityPreset == .custom {
-                    TextEditor(text: $personalityInstructions)
-                        .font(.system(.body, design: .rounded))
-                        .frame(minHeight: 105)
-                    Text("Write custom instructions for how the main agent should speak and make decisions.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Jame will automatically use the built-in \(personalityPreset.label) personality.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button("Save personality") {
-                        savePersonality()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    if !personalityStatus.isEmpty {
-                        Text(personalityStatus).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
             Section {
                 Button("Save settings") { settings.save() }
                 if !settings.saveStatus.isEmpty { Text(settings.saveStatus).font(.caption).foregroundStyle(.secondary) }
             }
-            Section("AI Provider") {
+            Section("Model") {
                 if providers.models.isEmpty {
                     Text(providers.isLoading ? "Loading configured providers…" : "No configured AI providers.")
                         .foregroundStyle(.secondary)
@@ -8209,7 +8247,7 @@ struct QuickSettingsView: View {
                     }
                 }
             }
-            Section("Design") {
+            Section("Appearance") {
                 Picker("Full design theme", selection: designPresetSelection) {
                     ForEach(NativeDesignPreset.allCases) { preset in
                         Text(preset.label).tag(preset.rawValue)
@@ -8269,7 +8307,7 @@ struct QuickSettingsView: View {
                         Button("Use default background") { backgroundPath = "" }
                     }
                 }
-                Text("Chat uses the Creation of Adam artwork across the full canvas by default. Choose an image if you want a custom local background.")
+                Text("A chosen image sits behind Chat. With no image, the artwork appears only before the first message.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -8287,7 +8325,6 @@ struct QuickSettingsView: View {
             await providers.load(port: port)
             await researchProviders.load(port: port)
             await loadMusicPlaylistPermission(port: port)
-            await loadPersonality(port: port)
         }
         .fileImporter(
             isPresented: $showingBackgroundPicker,
@@ -8356,61 +8393,6 @@ struct QuickSettingsView: View {
         }
     }
 
-    private func loadPersonality(port: Int) async {
-        do {
-            let (data, response) = try await URLSession.shared.data(
-                from: authenticatedConsoleURL(port: port, path: "/api/agents")
-            )
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                throw URLError(.badServerResponse)
-            }
-            let main = try JSONDecoder().decode(NativeAgentsResponse.self, from: data)
-                .agents.first(where: { $0.id == "main" })
-            let human = main?.human
-            personalityAgentName = human?.agentName ?? ""
-            personalityInstructions = human?.persona ?? ""
-            personalityTone = human?.tone ?? ""
-            personalityDiscussionMode = human?.discussionMode ?? ""
-            personalityMemoryNotes = human?.memoryNotes ?? ""
-            personalityStatusStyle = human?.statusStyle ?? ""
-            personalityPreset = AgentPersonalityPreset.allCases.first {
-                $0 != .custom && $0.instructions == personalityInstructions
-            } ?? .custom
-        } catch {
-            personalityStatus = "Could not load the agent personality."
-        }
-    }
-
-    private func savePersonality() {
-        personalityStatus = "Saving…"
-        Task {
-            do {
-                let port = Int(settings.port) ?? 18800
-                var request = authenticatedConsoleRequest(port: port, path: "/api/agents/main", method: "PATCH")
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.httpBody = try JSONEncoder().encode(
-                    NativeUpdateAgentRequest(
-                        human: NativeUpdateAgentHuman(
-                            agentName: personalityAgentName,
-                            persona: personalityInstructions,
-                            tone: personalityTone,
-                            discussionMode: personalityDiscussionMode,
-                            memoryNotes: personalityMemoryNotes,
-                            statusStyle: personalityStatusStyle
-                        )
-                    )
-                )
-                let (_, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                    throw URLError(.badServerResponse)
-                }
-                personalityStatus = "Personality saved."
-            } catch {
-                personalityStatus = "Could not save the agent personality."
-            }
-        }
-    }
-
     private func applyDesignPreset(_ preset: NativeDesignPreset) {
         guard let configuration = preset.configuration else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
@@ -8447,7 +8429,7 @@ struct QuickSettingsView: View {
                     throw URLError(.badServerResponse)
                 }
                 documentSafetyStatus = documentApprovalPolicy == DocumentApprovalPolicy.yolo.rawValue
-                    ? "YOLO saved. Document prompts and workspace restriction are off."
+                    ? "Saved. File tools can work outside the workspace."
                     : "Saved. Workspace restriction is active."
             } catch {
                 documentSafetyStatus = "Could not save safety settings."
@@ -9581,38 +9563,37 @@ private struct NativeActivityRail: View {
 	let activity: [String]
 	let accent: Color
 	let fontScale: CGFloat
-	@State private var isExpanded = true
+	@State private var isExpanded = false
 
 	var body: some View {
 		if !activity.isEmpty {
 			VStack(alignment: .leading, spacing: 6) {
-				HStack(spacing: 7) {
-					Button { isExpanded.toggle() } label: {
+				Button { isExpanded.toggle() } label: {
+					HStack(spacing: 7) {
 						Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
 							.font(.system(size: 9 * fontScale, weight: .bold))
 						Circle().fill(accent).frame(width: 6, height: 6)
-						Text("LIVE ACTIVITY")
+						Text(activity.last ?? "Working")
+							.lineLimit(1)
+						Spacer(minLength: 0)
 					}
-					.buttonStyle(.plain)
-						.font(.system(size: 10 * fontScale, weight: .semibold, design: .monospaced))
-						.foregroundStyle(accent)
-					Spacer()
-					Text("latest")
-						.font(.system(size: 10 * fontScale, design: .monospaced))
-						.foregroundStyle(.secondary)
 				}
+				.buttonStyle(.plain)
+				.font(.system(size: 12 * fontScale, weight: .medium, design: .rounded))
+				.foregroundStyle(accent)
+				.help(isExpanded ? "Hide activity" : "Show recent activity")
 				if isExpanded {
 					ForEach(Array(activity.suffix(3).enumerated()), id: \.offset) { _, item in
 						Text(item)
-							.font(.system(size: 11 * fontScale, design: .monospaced))
+							.font(.system(size: 12 * fontScale, design: .rounded))
 							.foregroundStyle(.secondary)
 							.lineLimit(1)
 					}
 				}
 			}
-			.padding(10)
-			.background(accent.opacity(0.07), in: Rectangle())
-			.overlay(alignment: .leading) { Rectangle().fill(accent).frame(width: 2) }
+			.padding(.horizontal, 14)
+			.padding(.vertical, 8)
+			.background(accent.opacity(0.07))
 		}
 	}
 }
@@ -10395,7 +10376,6 @@ struct ChatView: View {
     @State private var isTranscribingVoice = false
     @State private var autoSendVoicePrompt = false
     @AppStorage("launcher.voice.autoSendPrompt") private var autoSendVoicePrompts = false
-    @State private var thinkingButtonGlow = false
     @State private var recorder: AVAudioRecorder?
     @State private var recordingURL: URL?
     @State private var suggestions: [ChatComposerSuggestion] = []
@@ -10416,13 +10396,20 @@ struct ChatView: View {
     private var density: ChatDensity { ChatDensity(rawValue: savedDensity) ?? .comfortable }
     private var messageSurface: MessageSurface { MessageSurface(rawValue: savedSurface) ?? .cards }
     private var backgroundImage: NSImage? {
-        if !backgroundPath.isEmpty {
-            return NSImage(contentsOf: URL(fileURLWithPath: backgroundPath))
-        }
-        guard let bundledURL = Bundle.main.url(forResource: "creation-of-adam", withExtension: "jpg") else {
-            return nil
-        }
+        guard !backgroundPath.isEmpty else { return nil }
+        return NSImage(contentsOf: URL(fileURLWithPath: backgroundPath))
+    }
+    private var emptyStateArtwork: NSImage? {
+        guard backgroundPath.isEmpty,
+              let bundledURL = Bundle.main.url(forResource: "creation-of-adam", withExtension: "jpg") else { return nil }
         return NSImage(contentsOf: bundledURL)
+    }
+    private var chatStarters: [(title: String, symbol: String, draft: String)] {
+        [
+            ("Search my files", "magnifyingglass", "Search my files for "),
+            ("Draft something", "square.and.pencil", "Draft "),
+            ("Set up a repeating task", "calendar.badge.clock", "Set up a repeating task that "),
+        ]
     }
     private var isConnectingToJame: Bool {
         chat.status != "Ready" && chat.messages.isEmpty && chat.lastError == nil
@@ -10458,12 +10445,49 @@ struct ChatView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Chat").font(.headline)
-                    Text(chat.isResponseInProgress ? "Jame is working" : "Start a fresh conversation anytime")
+                    Text(chat.activeProfileName).font(.headline)
+                    Text(chat.isResponseInProgress ? "Jame is working" : "Ready when you are")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
+                Spacer(minLength: 8)
+                Menu {
+                    ForEach(chat.availableProfiles) { profile in
+                        Button {
+                            chat.selectProfile(profile.id)
+                        } label: {
+                            Label(
+                                profile.name.isEmpty ? profile.id : profile.name,
+                                systemImage: profile.id == chat.activeProfileID ? "checkmark" : "person.crop.circle"
+                            )
+                        }
+                    }
+                } label: {
+                    Label(chat.activeProfileName, systemImage: "person.crop.circle")
+                        .lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Choose the profile for this chat")
+                if discussionProviders.selectedFallbackModel.isEmpty == false {
+                    JameDropdownPicker(
+                        label: "Model",
+                        options: discussionProviderOptions,
+                        selection: $discussionModelOverride,
+                        minWidth: 150
+                    )
+                    .help("Choose the model for the next message. Auto failover uses the primary model, then the fallback.")
+                } else if !discussionProviders.selectedModel.isEmpty {
+                    Text(discussionProviders.providerNames[discussionProviders.selectedModel] ?? discussionProviders.selectedModel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if chat.isResponseInProgress {
+                    Button("Stop", systemImage: "stop.fill") { chat.sendControlCommand("/stop") }
+                        .tint(.red)
+                        .help("Stop the current task. The chat stays in Chats.")
+                }
                 Button {
                     chat.startNewChat()
                 } label: {
@@ -10471,8 +10495,7 @@ struct ChatView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(accent)
-                .disabled(chat.isResponseInProgress)
-                .help(chat.isResponseInProgress ? "Stop the active task before starting a new chat" : "Start a new conversation; this chat remains available in Sessions")
+                .help("Start a new conversation. This chat stays in Chats.")
                 .accessibilityLabel("Start new chat")
             }
             .padding(.horizontal, 18)
@@ -10480,46 +10503,28 @@ struct ChatView: View {
             .background(theme.panel.opacity(0.92))
             .overlay(alignment: .bottom) { Rectangle().fill(composerBorder).frame(height: 1) }
             if chat.showsTaskFiles {
-            Button {
-                chooseWorkspace()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(accent)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Task files")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                Button {
+                    chooseWorkspace()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder.fill").foregroundStyle(accent)
                         Text(chat.workspaceName)
                             .font(.subheadline.weight(.medium))
                             .lineLimit(1)
-                        Text(chat.workspacePath)
-                            .font(.caption2.monospaced())
+                        Text("Files for this task")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        Spacer()
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help("Choose where Jame saves files for this task")
+                .background(theme.panel.opacity(0.9))
             }
-            .buttonStyle(.plain)
-            .help("Choose agent workspace")
-            .background(theme.panel.opacity(0.9))
-            }
-			NativeAgentControlBar(
-				chat: chat,
-				accent: accent,
-				fontScale: displayFontScale,
-				modelName: discussionProviders.selectedModel,
-				providerName: discussionProviders.providerNames[discussionProviders.selectedModel] ?? ""
-			)
-			NativeActivityRail(activity: chat.activity, accent: accent, fontScale: displayFontScale)
+            NativeActivityRail(activity: chat.activity, accent: accent, fontScale: displayFontScale)
 			if let error = chat.lastError {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -10567,6 +10572,30 @@ struct ChatView: View {
                 HStack(spacing: 0) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: density.messageSpacing) {
+                        if chat.messages.isEmpty && !chat.isResponseInProgress {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text("What should Jame do?")
+                                    .font(.system(size: 26 * displayFontScale, weight: .semibold, design: .rounded))
+                                Text("Ask in the box below, or start from one of these.")
+                                    .font(.body)
+                                    .foregroundStyle(.secondary)
+                                ForEach(chatStarters, id: \.title) { starter in
+                                    Button {
+                                        chat.draft = starter.draft
+                                    } label: {
+                                        Label(starter.title, systemImage: starter.symbol)
+                                            .font(.body.weight(.medium))
+                                            .frame(maxWidth: 420, alignment: .leading)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 10)
+                                            .background(composerSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.top, 28)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         ForEach(chat.messages) { message in
                             Group {
                                 if message.role == "memory" {
@@ -10576,30 +10605,27 @@ struct ChatView: View {
                                         fontScale: displayFontScale
                                     )
                                 } else {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(message.role == "user" ? "you >" : message.role == "error" ? "error >" : "jame >")
-                                            .font(.system(size: 10 * displayFontScale, weight: .semibold, design: .monospaced))
-                                            .foregroundStyle(message.role == "user" ? accent : message.role == "error" ? .red : JameBrand.orangeSoft)
+                                    VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 6) {
                                         if let planSteps = nativePlanSteps(from: message.content), message.role == "assistant" {
                                             NativePlanCard(steps: planSteps, accent: accent, fontScale: displayFontScale)
                                         } else {
                                             Text(message.content).textSelection(.enabled)
                                         }
                                     }
-                                    .font(.system(size: 14 * displayFontScale, design: .monospaced))
-                                    .foregroundStyle(theme.text)
+                                    .font(.system(size: 15 * displayFontScale))
+                                    .foregroundStyle(message.role == "user" ? JameBrand.ink : message.role == "error" ? Color.red : theme.text)
                                     .padding(density.messagePadding)
-                                    .frame(maxWidth: message.role == "user" ? 520 : .infinity, alignment: .leading)
-                                    .background(messageSurface == .cards ? (message.role == "user" ? accent.opacity(theme == .light ? 0.14 : 0.22) : message.role == "error" ? Color.red.opacity(0.18) : Color.white.opacity(theme == .light ? 0.82 : 0.06)) : .clear)
-                                    .clipShape(Rectangle())
+                                    .frame(maxWidth: message.role == "user" ? 520 : .infinity, alignment: message.role == "user" ? .trailing : .leading)
+                                    .background(messageSurface == .cards ? (message.role == "user" ? accent.opacity(theme == .light ? 0.18 : 0.28) : message.role == "error" ? Color.red.opacity(0.14) : Color.white.opacity(theme == .light ? 0.9 : 0.06)) : .clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: messageSurface == .cards ? 14 : 0, style: .continuous))
                                 }
                             }
                                 .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
                                 .id(message.id)
                         }
                         if chat.isResponseInProgress {
-                            Text("Thinking... 💭")
-                                .font(.system(size: 12 * displayFontScale, weight: .semibold, design: .monospaced))
+                            Text("Jame is working")
+                                .font(.system(size: 13 * displayFontScale, weight: .semibold, design: .rounded))
                                 .foregroundStyle(JameBrand.orange)
                         }
                         }.padding(density.contentPadding)
@@ -10634,46 +10660,8 @@ struct ChatView: View {
                 .padding(.vertical, 8)
                 .background(composerBackground)
             }
-            if chat.showsTaskFiles {
-            HStack(spacing: 7) {
-                Image(systemName: isFolderDropTargeted ? "folder.badge.plus" : "folder.fill")
-                    .foregroundStyle(isFolderDropTargeted ? JameBrand.orange : accent)
-                Text(isFolderDropTargeted ? "Release to organize Jame's task files here" : "Drop Desktop, Documents, Downloads, or a project folder here")
-                    .font(.caption.weight(isFolderDropTargeted ? .semibold : .regular))
-                    .foregroundStyle(isFolderDropTargeted ? JameBrand.orange : .secondary)
-                Spacer()
-                Text(chat.workspacePath)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 320, alignment: .trailing)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(composerBackground)
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(composerBorder)
-                    .frame(height: 1)
-                    .allowsHitTesting(false)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            }
             ZStack(alignment: .bottomLeading) {
                 HStack(alignment: .bottom) {
-                    Button {
-                        chooseWorkspace()
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 34, height: 34)
-                    .background(composerSurface)
-                    .overlay(Rectangle().stroke(composerBorder))
-                    .help("Choose agent workspace")
-                    .disabled(chat.isResponseInProgress)
-
                     Button {
                         uploadItem()
                     } label: {
@@ -10699,8 +10687,8 @@ struct ChatView: View {
                     .help(isRecording ? "Stop and transcribe recording" : isTranscribingVoice ? "Transcribing voice into the message box" : "Record a voice message")
                     .disabled((chat.isResponseInProgress || isTranscribingVoice) && !isRecording)
 
-                    TextField("type a message…", text: $chat.draft, axis: .vertical)
-                        .font(.system(size: 14 * displayFontScale, design: .monospaced))
+                    TextField("Message Jame…", text: $chat.draft, axis: .vertical)
+                        .font(.system(size: 15 * displayFontScale))
                         .lineLimit(1...5)
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 11)
@@ -10712,7 +10700,7 @@ struct ChatView: View {
                         }
                         .onChange(of: chat.draft) { _, value in updateSuggestions(for: value) }
                     Button { sendComposer() } label: {
-                        Text(chat.isResponseInProgress ? "Queue" : "Send")
+                        Text(chat.isResponseInProgress ? "Send next" : "Send")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .frame(minWidth: 36)
                     }
@@ -10720,36 +10708,11 @@ struct ChatView: View {
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 16)
                         .frame(height: 34)
-                        .background(chat.isResponseInProgress ? accent.opacity(0.78) : accent)
-                        .overlay(Rectangle().stroke(accent.opacity(chat.isResponseInProgress ? 1 : 0.85), lineWidth: chat.isResponseInProgress ? 1.5 : 1))
-                        .shadow(
-                            color: chat.isResponseInProgress ? accent.opacity(thinkingButtonGlow ? 0.92 : 0.28) : .clear,
-                            radius: chat.isResponseInProgress ? (thinkingButtonGlow ? 13 : 4) : 0
-                        )
-                        .scaleEffect(chat.isResponseInProgress && thinkingButtonGlow ? 1.035 : 1)
-                        .animation(
-                            chat.isResponseInProgress
-                                ? .easeInOut(duration: 0.68).repeatForever(autoreverses: true)
-                                : .easeOut(duration: 0.18),
-                            value: thinkingButtonGlow
-                        )
-                        .onAppear { thinkingButtonGlow = chat.isResponseInProgress }
-                        .onChange(of: chat.isResponseInProgress) { _, isInProgress in
-                            thinkingButtonGlow = isInProgress
-                        }
+                        .background(accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .disabled(chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityLabel(chat.isResponseInProgress ? "Queue message" : "Send")
-                        .help(chat.isResponseInProgress ? "Queue this message for Jame" : "Send message")
+                        .accessibilityLabel(chat.isResponseInProgress ? "Send next" : "Send")
+                        .help(chat.isResponseInProgress ? "Send this after Jame finishes the current task" : "Send message")
                         .keyboardShortcut(.defaultAction)
-                    if discussionProviders.selectedFallbackModel.isEmpty == false {
-                        JameDropdownPicker(
-                            label: "Discussion provider",
-                            options: discussionProviderOptions,
-                            selection: $discussionModelOverride,
-                            minWidth: 168
-                        )
-                        .help("Choose the provider for this discussion. Auto failover uses the global primary and fallback pair.")
-                    }
                 }
                 .padding(14)
 
@@ -10959,7 +10922,7 @@ struct ChatView: View {
     private var chatBackground: some View {
         ZStack {
             theme.background
-            if let image = backgroundImage {
+            if let image = backgroundImage ?? (chat.messages.isEmpty ? emptyStateArtwork : nil) {
                 GeometryReader { geometry in
                     Image(nsImage: image)
                         .resizable()
@@ -10967,7 +10930,8 @@ struct ChatView: View {
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
                 }
-                .opacity(theme == .light ? 0.28 : 0.20)
+                .opacity(backgroundImage == nil ? 0.12 : (theme == .light ? 0.28 : 0.20))
+                .allowsHitTesting(false)
             }
         }
     }

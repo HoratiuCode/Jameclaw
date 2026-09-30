@@ -463,6 +463,16 @@ func (t *CronTool) enableJob(args map[string]any, enable bool) *ToolResult {
 
 // ExecuteJob executes a cron job through the agent
 func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
+	output, err := t.RunJob(ctx, job)
+	if err != nil && output == "" {
+		return "Error: " + err.Error()
+	}
+	return output
+}
+
+// RunJob executes a scheduled job and reports failures as errors so the cron
+// service can record them, retry them, and show them in the desktop app.
+func (t *CronTool) RunJob(ctx context.Context, job *cron.CronJob) (string, error) {
 	// Get channel/chatID from job payload
 	channel := job.Payload.Channel
 	chatID := job.Payload.To
@@ -486,7 +496,7 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 				ChatID:  chatID,
 				Content: output,
 			})
-			return "ok"
+			return "ok", fmt.Errorf("command execution is disabled")
 		}
 
 		args := map[string]any{
@@ -502,8 +512,12 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		} else {
 			output = fmt.Sprintf("Scheduled command '%s' executed:\n%s", job.Payload.Command, result.ForLLM)
 		}
+		var runErr error
+		if result.IsError {
+			runErr = fmt.Errorf("scheduled command failed: %s", result.ForLLM)
+		}
 		if cron.IsSilentResponse(result.ForLLM) {
-			return "[SILENT]"
+			return "[SILENT]", runErr
 		}
 
 		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -513,14 +527,14 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			ChatID:  chatID,
 			Content: output,
 		})
-		return "ok"
+		return "ok", runErr
 	}
 
 	// Literal reminders can be delivered as-is. Agent-backed jobs must generate
 	// their result before that result is sent to the approved destination.
 	if !job.Payload.RunAgent && cron.DeliveryAllowed(job) {
 		if cron.IsSilentResponse(job.Payload.Message) {
-			return "[SILENT]"
+			return "[SILENT]", nil
 		}
 		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer pubCancel()
@@ -529,10 +543,10 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			ChatID:  chatID,
 			Content: job.Payload.Message,
 		})
-		return "ok"
+		return "ok", nil
 	}
 	if job.Payload.Deliver {
-		return "Error: proactive delivery was requested but not approved by the user"
+		return "", fmt.Errorf("proactive delivery was requested but not approved by the user")
 	}
 
 	agentID := strings.TrimSpace(job.Payload.AgentID)
@@ -553,10 +567,10 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		response, err = t.executor.ProcessDirectWithChannel(ctx, job.Payload.Message, sessionKey, channel, chatID)
 	}
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return "", err
 	}
 	if cron.IsSilentResponse(response) {
-		return "[SILENT]"
+		return "[SILENT]", nil
 	}
 	if cron.DeliveryAllowed(job) {
 		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -564,7 +578,7 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		t.msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{Channel: job.Payload.Channel, ChatID: job.Payload.To, Content: response})
 	}
 
-	return response
+	return response, nil
 }
 
 func mapStringValues(value any) map[string]string {

@@ -92,9 +92,17 @@ type CronStore struct {
 type JobHandler func(job *CronJob) (string, error)
 
 const (
-	storeVersion              = 2
-	defaultParallelJobs       = 4
-	runClaimTTL               = 30 * time.Minute
+	storeVersion        = 2
+	defaultParallelJobs = 4
+	runClaimTTL         = 30 * time.Minute
+	// JobTimeout bounds a single run. It is shorter than runClaimTTL so a hung
+	// run fails cleanly instead of being recovered and started a second time.
+	JobTimeout = 25 * time.Minute
+	// maxSleep caps how long the loop sleeps between checks. The desktop app
+	// writes jobs.json from another process, and Go timers on macOS do not
+	// advance while the Mac is asleep, so long sleeps would miss both.
+	maxSleep                  = 30 * time.Second
+	eventKeyMaxAge            = 7 * 24 * time.Hour
 	tickerHeartbeatFilename   = "ticker_heartbeat"
 	tickerLastSuccessFilename = "ticker_last_success"
 )
@@ -115,6 +123,10 @@ type CronService struct {
 	gronx             *gronx.Gronx
 	parallelSem       chan struct{}
 	parallelWaitGroup sync.WaitGroup
+	// Size and mtime of jobs.json when this process last read or wrote it,
+	// used to pick up changes written by another process.
+	storeModTime time.Time
+	storeSize    int64
 }
 
 func NewCronService(storePath string, onJob JobHandler) *CronService {
@@ -130,6 +142,7 @@ func NewCronService(storePath string, onJob JobHandler) *CronService {
 		gronx:           gronx.New(),
 		wakeChan:        make(chan struct{}),
 		parallelSem:     make(chan struct{}, defaultParallelJobs),
+		store:           &CronStore{Version: storeVersion, Jobs: []CronJob{}},
 	}
 	// Initialize and load store on creation
 	cs.loadStore()
@@ -199,8 +212,9 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 		now := time.Now().UnixMilli()
 
 		if nextWake == nil {
-			// no jobs, sleep for a long time (or until a new job is added)
-			delay = time.Hour
+			// No scheduled jobs; still wake periodically to see jobs added
+			// by the desktop app.
+			delay = maxSleep
 		} else {
 			diff := *nextWake - now
 			if diff <= 0 {
@@ -209,6 +223,7 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 				delay = time.Duration(diff) * time.Millisecond
 			}
 		}
+		delay = min(delay, maxSleep)
 
 		timer.Reset(delay)
 
@@ -238,19 +253,25 @@ func (cs *CronService) checkJobs() {
 		return
 	}
 
+	cs.syncFromDiskUnsafe()
 	now := time.Now().UnixMilli()
 	var dueJobIDs []string
-	cs.recoverStaleRunningJobs(now)
+	changed := cs.recoverStaleRunningJobs(now)
 
 	// Collect jobs that are due (we need to copy them to execute outside lock)
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
 		if job.Enabled && job.State.RunningAtMS == nil && job.State.NextRunAtMS != nil && *job.State.NextRunAtMS <= now {
+			changed = true
 			if !cs.admitRun(job, now) {
 				continue
 			}
 			dueJobIDs = append(dueJobIDs, job.ID)
 		}
+	}
+	if !changed {
+		cs.mu.Unlock()
+		return
 	}
 
 	// Reset next run for due jobs before unlocking to avoid duplicate execution.
@@ -319,6 +340,7 @@ func (cs *CronService) executeJobByID(jobID string) {
 	// Now acquire lock to update state
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	cs.syncFromDiskUnsafe()
 
 	var job *CronJob
 	for i := range cs.store.Jobs {
@@ -367,22 +389,27 @@ func (cs *CronService) executeJobByID(jobID string) {
 		job.State.NextRunAtMS = &next
 		nextRunStr = "retry in " + delay.String()
 		job.State.LastStatus = "retrying"
-	} else if job.Schedule.Kind == "at" {
-		if job.DeleteAfterRun {
-			cs.removeJobUnsafe(job.ID)
-			nextRunStr = "(deleted)"
-		} else {
-			job.Enabled = false
-			job.State.NextRunAtMS = nil
-			nextRunStr = "(disabled)"
-		}
 	} else {
-		nextRun := cs.computeNextRun(&job.Schedule, time.Now().UnixMilli())
-		job.State.NextRunAtMS = nextRun
-		if nextRun != nil {
-			nextRunStr = time.UnixMilli(*nextRun).Format("2006-01-02 15:04:05")
+		// Reset so the next scheduled run gets a fresh set of retries, even
+		// when this run used them all up.
+		job.State.RetryCount = 0
+		if job.Schedule.Kind == "at" {
+			if job.DeleteAfterRun {
+				cs.removeJobUnsafe(job.ID)
+				nextRunStr = "(deleted)"
+			} else {
+				job.Enabled = false
+				job.State.NextRunAtMS = nil
+				nextRunStr = "(disabled)"
+			}
 		} else {
-			nextRunStr = "(none)"
+			nextRun := cs.computeNextRun(&job.Schedule, time.Now().UnixMilli())
+			job.State.NextRunAtMS = nextRun
+			if nextRun != nil {
+				nextRunStr = time.UnixMilli(*nextRun).Format("2006-01-02 15:04:05")
+			} else {
+				nextRunStr = "(none)"
+			}
 		}
 	}
 
@@ -431,6 +458,9 @@ func (cs *CronService) computeNextRun(schedule *CronSchedule, nowMS int64) *int6
 
 		nextMS := nextTime.UnixMilli()
 		return &nextMS
+	case "event":
+		// Event jobs run only when TriggerEvent is called.
+		return nil
 	default:
 		log.Printf("[cron] unknown schedule kind '%s'", schedule.Kind)
 		return nil
@@ -452,9 +482,16 @@ func (cs *CronService) TriggerEventOnce(event, key string) int {
 		return 0
 	}
 	cs.mu.Lock()
+	cs.syncFromDiskUnsafe()
 	if key = strings.TrimSpace(key); key != "" {
 		if cs.store.EventKeys == nil {
 			cs.store.EventKeys = map[string]int64{}
+		}
+		cutoff := time.Now().Add(-eventKeyMaxAge).UnixMilli()
+		for k, seenAt := range cs.store.EventKeys {
+			if seenAt < cutoff {
+				delete(cs.store.EventKeys, k)
+			}
 		}
 		if _, exists := cs.store.EventKeys[event+":"+key]; exists {
 			cs.mu.Unlock()
@@ -554,17 +591,26 @@ func (cs *CronService) notify() {
 	}
 }
 
+// recomputeNextRuns fills in next run times at startup. A saved next run is
+// kept, so restarting the gateway does not push "every" jobs back, and a run
+// missed while JameClaw was closed or the Mac was asleep runs once on startup.
 func (cs *CronService) recomputeNextRuns() {
 	now := time.Now().UnixMilli()
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
-		if job.Enabled && job.State.RunningAtMS == nil {
-			job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, now)
+		if !job.Enabled || job.State.RunningAtMS != nil || job.State.NextRunAtMS != nil {
+			continue
 		}
+		if job.Schedule.Kind == "at" && job.Schedule.AtMS != nil && *job.Schedule.AtMS <= now && job.State.LastRunAtMS == nil {
+			job.State.NextRunAtMS = cronInt64Ptr(now)
+			continue
+		}
+		job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, now)
 	}
 }
 
-func (cs *CronService) recoverStaleRunningJobs(now int64) {
+func (cs *CronService) recoverStaleRunningJobs(now int64) bool {
+	recovered := false
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
 		if job.State.RunningAtMS == nil {
@@ -573,6 +619,7 @@ func (cs *CronService) recoverStaleRunningJobs(now int64) {
 		if job.State.RunClaimExpiresAtMS != nil && *job.State.RunClaimExpiresAtMS > now {
 			continue
 		}
+		recovered = true
 		job.State.RunningAtMS = nil
 		job.State.RunClaimExpiresAtMS = nil
 		job.State.LastStatus = "stale_recovered"
@@ -585,6 +632,7 @@ func (cs *CronService) recoverStaleRunningJobs(now int64) {
 			}
 		}
 	}
+	return recovered
 }
 
 func (cs *CronService) getNextWakeMS() *int64 {
@@ -612,7 +660,7 @@ func (cs *CronService) SetOnJob(handler JobHandler) {
 }
 
 func (cs *CronService) loadStore() error {
-	cs.store = &CronStore{
+	store := &CronStore{
 		Version: storeVersion,
 		Jobs:    []CronJob{},
 	}
@@ -626,21 +674,44 @@ func (cs *CronService) loadStore() error {
 			return err
 		}
 
-		if err := json.Unmarshal(data, cs.store); err != nil {
+		if err := json.Unmarshal(data, store); err != nil {
 			return err
 		}
-		if cs.store.Version == 0 {
-			cs.store.Version = 1
+		if store.Version == 0 {
+			store.Version = 1
 		}
-		if cs.store.Jobs == nil {
-			cs.store.Jobs = []CronJob{}
+		if store.Jobs == nil {
+			store.Jobs = []CronJob{}
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
+	cs.store = store
+	cs.recordStoreStat()
 	return nil
+}
+
+func (cs *CronService) recordStoreStat() {
+	if info, err := os.Stat(cs.storePath); err == nil {
+		cs.storeModTime, cs.storeSize = info.ModTime(), info.Size()
+	} else {
+		cs.storeModTime, cs.storeSize = time.Time{}, 0
+	}
+}
+
+// syncFromDiskUnsafe reloads jobs.json when another process (the desktop app
+// or CLI) changed it, so this process does not overwrite those changes with
+// its stale in-memory copy. Callers must hold cs.mu.
+func (cs *CronService) syncFromDiskUnsafe() {
+	info, err := os.Stat(cs.storePath)
+	if err != nil || (info.ModTime().Equal(cs.storeModTime) && info.Size() == cs.storeSize) {
+		return
+	}
+	if err := cs.loadStore(); err != nil {
+		log.Printf("[cron] failed to reload store changed on disk: %v", err)
+	}
 }
 
 func (cs *CronService) saveStoreUnsafe() error {
@@ -651,9 +722,13 @@ func (cs *CronService) saveStoreUnsafe() error {
 	}
 
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
-	return withCronFileLock(cs.lockPath, func() error {
+	err = withCronFileLock(cs.lockPath, func() error {
 		return fileutil.WriteFileAtomic(cs.storePath, data, 0o600)
 	})
+	if err == nil {
+		cs.recordStoreStat()
+	}
+	return err
 }
 
 func (cs *CronService) AddJob(
@@ -666,6 +741,7 @@ func (cs *CronService) AddJob(
 ) (*CronJob, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	cs.syncFromDiskUnsafe()
 
 	now := time.Now().UnixMilli()
 
@@ -706,6 +782,7 @@ func (cs *CronService) AddJob(
 func (cs *CronService) UpdateJob(job *CronJob) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	cs.syncFromDiskUnsafe()
 
 	for i := range cs.store.Jobs {
 		if cs.store.Jobs[i].ID == job.ID {
@@ -723,6 +800,7 @@ func (cs *CronService) UpdateJob(job *CronJob) error {
 func (cs *CronService) RemoveJob(jobID string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	cs.syncFromDiskUnsafe()
 
 	return cs.removeJobUnsafe(jobID)
 }
@@ -752,6 +830,7 @@ func (cs *CronService) removeJobUnsafe(jobID string) bool {
 func (cs *CronService) EnableJob(jobID string, enabled bool) *CronJob {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	cs.syncFromDiskUnsafe()
 
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
@@ -779,8 +858,9 @@ func (cs *CronService) EnableJob(jobID string, enabled bool) *CronJob {
 }
 
 func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
-	cs.mu.RLock()
-	defer cs.mu.RUnlock()
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.syncFromDiskUnsafe()
 
 	if includeDisabled {
 		return append([]CronJob(nil), cs.store.Jobs...)
@@ -800,6 +880,7 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 // configured handler. The caller can read the job state to follow completion.
 func (cs *CronService) RunNow(jobID string) error {
 	cs.mu.Lock()
+	cs.syncFromDiskUnsafe()
 
 	var job *CronJob
 	for i := range cs.store.Jobs {

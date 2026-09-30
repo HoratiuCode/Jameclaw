@@ -204,6 +204,7 @@ func (h *Handler) registerToolRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/tools/{name}/state", h.handleUpdateToolState)
 	mux.HandleFunc("GET /api/tools/mcp/servers", h.handleListMCPServers)
 	mux.HandleFunc("POST /api/tools/mcp/servers", h.handleSaveMCPServer)
+	mux.HandleFunc("DELETE /api/tools/mcp/servers/{name}", h.handleDeleteMCPServer)
 }
 
 func (h *Handler) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
@@ -276,6 +277,11 @@ func (h *Handler) handleSaveMCPServer(w http.ResponseWriter, r *http.Request) {
 		Enabled: req.Enabled, Type: req.Transport, Command: req.Command,
 		Args: req.Args, URL: req.URL,
 	}
+	// Updating a server from the desktop switch does not resend the key.
+	// Keep the saved Authorization header unless a new key is provided.
+	if existing, ok := cfg.Tools.MCP.Servers[req.Name]; ok && req.APIKey == "" {
+		server.Headers = existing.Headers
+	}
 	// The desktop connection form accepts a server/API key for remote MCP
 	// endpoints. Keep it out of API responses and use the standard HTTP
 	// Authorization header when the gateway connects to the server.
@@ -292,6 +298,34 @@ func (h *Handler) handleSaveMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	restarted := false
+	if _, err := h.RestartGateway(); err == nil {
+		restarted = true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "gateway_restarted": restarted})
+}
+
+func (h *Handler) handleDeleteMCPServer(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		http.Error(w, "server name is required", http.StatusBadRequest)
+		return
+	}
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if _, ok := cfg.Tools.MCP.Servers[name]; !ok {
+		http.Error(w, "server not found", http.StatusNotFound)
+		return
+	}
+	delete(cfg.Tools.MCP.Servers, name)
+	if err := config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
 	restarted := false
 	if _, err := h.RestartGateway(); err == nil {
 		restarted = true

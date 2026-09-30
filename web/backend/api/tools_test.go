@@ -240,4 +240,39 @@ func TestHandleSaveMCPServerWithAPIKey(t *testing.T) {
 	if bytes.Contains(list.Body.Bytes(), []byte("secret-key")) {
 		t.Fatalf("MCP server list must not expose an API key: %s", list.Body.String())
 	}
+
+	toggle := httptest.NewRecorder()
+	toggleReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/tools/mcp/servers",
+		bytes.NewBufferString(`{"name":"linear","enabled":false,"transport":"http","url":"https://mcp.example.com"}`),
+	)
+	toggleReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(toggle, toggleReq)
+	if toggle.Code != http.StatusOK {
+		t.Fatalf("toggle status = %d, body=%s", toggle.Code, toggle.Body.String())
+	}
+	toggled, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig(toggled) error = %v", err)
+	}
+	if toggled.Tools.MCP.Servers["linear"].Enabled {
+		t.Fatal("MCP server should be disabled after toggle")
+	}
+	if toggled.Tools.MCP.Servers["linear"].Headers["Authorization"] != "Bearer secret-key" {
+		t.Fatalf("toggle dropped Authorization header: %#v", toggled.Tools.MCP.Servers["linear"].Headers)
+	}
+
+	deleted := httptest.NewRecorder()
+	mux.ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/api/tools/mcp/servers/linear", nil))
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body=%s", deleted.Code, deleted.Body.String())
+	}
+	afterDelete, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig(deleted) error = %v", err)
+	}
+	if _, ok := afterDelete.Tools.MCP.Servers["linear"]; ok {
+		t.Fatal("deleted MCP server is still configured")
+	}
 }

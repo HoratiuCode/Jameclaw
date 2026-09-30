@@ -271,8 +271,14 @@ func automationFromCronJob(job cron.CronJob) automationItem {
 			status = "waiting"
 		}
 	}
-	if job.State.LastStatus == "error" {
-		status = "error"
+	switch job.State.LastStatus {
+	case "error", "retrying", "quiet_hours", "budget_limited":
+		if job.Enabled || job.State.LastStatus == "error" {
+			status = job.State.LastStatus
+		}
+	}
+	if job.State.RunningAtMS != nil {
+		status = "running"
 	}
 
 	return automationItem{
