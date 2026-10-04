@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/constants"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/constants"
 )
 
 type macCommandRunner func(ctx context.Context, command string, args ...string) (string, error)

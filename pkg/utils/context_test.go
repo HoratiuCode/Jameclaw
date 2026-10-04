@@ -8,7 +8,7 @@ package utils
 import (
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 func TestCalculateDefaultMaxContextRunes(t *testing.T) {

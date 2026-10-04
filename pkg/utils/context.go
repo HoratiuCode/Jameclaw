@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 // CalculateDefaultMaxContextRunes computes a default context limit based on the model's context window.

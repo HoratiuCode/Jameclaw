@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sipeed/jameclaw/pkg/providers/protocoltypes"
+	"github.com/HoratiuCode/jameclaw/pkg/providers/protocoltypes"
 )
 
 type (

@@ -1,6 +1,6 @@
 package session
 
-import "github.com/sipeed/jameclaw/pkg/providers"
+import "github.com/HoratiuCode/jameclaw/pkg/providers"
 
 // SessionStore defines the persistence operations used by the agent loop.
 // Both SessionManager (legacy JSON backend) and JSONLBackend satisfy this

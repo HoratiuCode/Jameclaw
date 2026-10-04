@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
 )
 
 func TestRecoverableToolFailureClassification(t *testing.T) {

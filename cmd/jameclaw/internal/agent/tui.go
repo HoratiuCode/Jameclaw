@@ -23,16 +23,16 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
-	agentcore "github.com/sipeed/jameclaw/pkg/agent"
-	"github.com/sipeed/jameclaw/pkg/commands"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/extensions"
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/skills"
-	"github.com/sipeed/jameclaw/pkg/voice"
-	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw/internal"
+	agentcore "github.com/HoratiuCode/jameclaw/pkg/agent"
+	"github.com/HoratiuCode/jameclaw/pkg/commands"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/extensions"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/skills"
+	"github.com/HoratiuCode/jameclaw/pkg/voice"
+	"github.com/HoratiuCode/jameclaw/web/backend/launcherconfig"
 )
 
 type terminalEntry struct {

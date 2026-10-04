@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 type ProviderAuthMethod struct {

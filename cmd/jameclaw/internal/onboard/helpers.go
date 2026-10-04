@@ -17,11 +17,11 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/credential"
-	"github.com/sipeed/jameclaw/pkg/extensions"
-	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw/internal"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/credential"
+	"github.com/HoratiuCode/jameclaw/pkg/extensions"
+	"github.com/HoratiuCode/jameclaw/web/backend/launcherconfig"
 )
 
 const (

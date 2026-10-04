@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"unicode/utf8"
 
-	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 // parseTurnBoundaries returns the starting index of each Turn in the history.

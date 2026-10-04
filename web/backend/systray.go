@@ -16,8 +16,8 @@ import (
 
 	"fyne.io/systray"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/web/backend/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/web/backend/utils"
 )
 
 const githubRepoURL = "https://github.com/HoratiuCode/Jameclaw"

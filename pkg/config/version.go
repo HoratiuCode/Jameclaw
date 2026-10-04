@@ -8,10 +8,10 @@ import (
 // Build-time variables injected via ldflags during build process.
 // These are set by the Makefile or .goreleaser.yaml using the -X flag:
 //
-//	-X github.com/sipeed/jameclaw/pkg/config.Version=<version>
-//	-X github.com/sipeed/jameclaw/pkg/config.GitCommit=<commit>
-//	-X github.com/sipeed/jameclaw/pkg/config.BuildTime=<timestamp>
-//	-X github.com/sipeed/jameclaw/pkg/config.GoVersion=<go-version>
+//	-X github.com/HoratiuCode/jameclaw/pkg/config.Version=<version>
+//	-X github.com/HoratiuCode/jameclaw/pkg/config.GitCommit=<commit>
+//	-X github.com/HoratiuCode/jameclaw/pkg/config.BuildTime=<timestamp>
+//	-X github.com/HoratiuCode/jameclaw/pkg/config.GoVersion=<go-version>
 var (
 	Version   = "108D" // Default value when not built with ldflags
 	GitCommit string  // Git commit SHA (short)

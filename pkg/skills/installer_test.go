@@ -25,47 +25,47 @@ func TestParseGitHubRef(t *testing.T) {
 	}{
 		{
 			name:         "simple owner/repo",
-			repo:         "sipeed/jameclaw",
-			wantOwner:    "sipeed",
+			repo:         "HoratiuCode/jameclaw",
+			wantOwner:    "HoratiuCode",
 			wantRepoName: "jameclaw",
 			wantRef:      "main",
 			wantSubPath:  "",
 		},
 		{
 			name:         "owner/repo with subpath",
-			repo:         "sipeed/jameclaw/skills/test",
-			wantOwner:    "sipeed",
+			repo:         "HoratiuCode/jameclaw/skills/test",
+			wantOwner:    "HoratiuCode",
 			wantRepoName: "jameclaw",
 			wantRef:      "main",
 			wantSubPath:  "skills/test",
 		},
 		{
 			name:         "full URL with tree",
-			repo:         "https://github.com/sipeed/jameclaw/tree/dev/skills/test",
-			wantOwner:    "sipeed",
+			repo:         "https://github.com/HoratiuCode/jameclaw/tree/dev/skills/test",
+			wantOwner:    "HoratiuCode",
 			wantRepoName: "jameclaw",
 			wantRef:      "dev",
 			wantSubPath:  "skills/test",
 		},
 		{
 			name:         "full URL with blob",
-			repo:         "https://github.com/sipeed/jameclaw/blob/main/README.md",
-			wantOwner:    "sipeed",
+			repo:         "https://github.com/HoratiuCode/jameclaw/blob/main/README.md",
+			wantOwner:    "HoratiuCode",
 			wantRepoName: "jameclaw",
 			wantRef:      "main",
 			wantSubPath:  "README.md",
 		},
 		{
 			name:         "full URL without ref",
-			repo:         "https://github.com/sipeed/jameclaw",
-			wantOwner:    "sipeed",
+			repo:         "https://github.com/HoratiuCode/jameclaw",
+			wantOwner:    "HoratiuCode",
 			wantRepoName: "jameclaw",
 			wantRef:      "main",
 			wantSubPath:  "",
 		},
 		{
 			name:           "invalid format - single part",
-			repo:           "sipeed",
+			repo:           "HoratiuCode",
 			wantErr:        true,
 			wantErrContain: "expected 'owner/repo'",
 		},
@@ -77,14 +77,14 @@ func TestParseGitHubRef(t *testing.T) {
 		},
 		{
 			name:           "invalid GitHub URL - only one path part",
-			repo:           "https://github.com/sipeed",
+			repo:           "https://github.com/HoratiuCode",
 			wantErr:        true,
 			wantErrContain: "invalid GitHub URL",
 		},
 		{
 			name:         "with whitespace",
-			repo:         "  sipeed/jameclaw  ",
-			wantOwner:    "sipeed",
+			repo:         "  HoratiuCode/jameclaw  ",
+			wantOwner:    "HoratiuCode",
 			wantRepoName: "jameclaw",
 			wantRef:      "main",
 			wantSubPath:  "",
@@ -436,7 +436,7 @@ func TestSkillInstaller_InstallFromGitHub_SkillAlreadyExists(t *testing.T) {
 	os.WriteFile(filepath.Join(existingSkill, "SKILL.md"), []byte("existing"), 0o644)
 
 	// Try to install the same skill - should fail
-	err = installer.InstallFromGitHub(context.Background(), "sipeed/jameclaw")
+	err = installer.InstallFromGitHub(context.Background(), "HoratiuCode/jameclaw")
 	if err == nil {
 		t.Error("InstallFromGitHub() expected error for existing skill, got nil")
 	}

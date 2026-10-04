@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	agentpkg "github.com/sipeed/jameclaw/pkg/agent"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/heartbeat"
+	agentpkg "github.com/HoratiuCode/jameclaw/pkg/agent"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/heartbeat"
 )
 
 func TestHandleAgentInitiativeReturnsDurableAutonomousActivity(t *testing.T) {

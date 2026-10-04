@@ -10,7 +10,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 //go:embed all:dist

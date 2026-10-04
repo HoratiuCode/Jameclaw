@@ -11,7 +11,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	tuicfg "github.com/sipeed/jameclaw/cmd/jameclaw-launcher-tui/config"
+	tuicfg "github.com/HoratiuCode/jameclaw/cmd/jameclaw-launcher-tui/config"
 )
 
 func (a *App) newUsersPage(schemeName string) tview.Primitive {

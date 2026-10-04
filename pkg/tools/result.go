@@ -3,7 +3,7 @@ package tools
 import (
 	"encoding/json"
 
-	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 // ToolResult represents the structured return value from tool execution.

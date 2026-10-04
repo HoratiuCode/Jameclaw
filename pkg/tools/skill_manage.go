@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/skills"
+	"github.com/HoratiuCode/jameclaw/pkg/skills"
 )
 
 // SkillManageTool is the agent-facing local skill authoring surface. All

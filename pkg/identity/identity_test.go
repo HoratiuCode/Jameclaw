@@ -3,7 +3,7 @@ package identity
 import (
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
 )
 
 func TestBuildCanonicalID(t *testing.T) {

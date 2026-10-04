@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/cron"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/cron"
 )
 
 type dashboardCard struct {

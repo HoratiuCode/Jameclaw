@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	tuicfg "github.com/sipeed/jameclaw/cmd/jameclaw-launcher-tui/config"
-	"github.com/sipeed/jameclaw/cmd/jameclaw-launcher-tui/ui"
+	tuicfg "github.com/HoratiuCode/jameclaw/cmd/jameclaw-launcher-tui/config"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw-launcher-tui/ui"
 )
 
 func main() {

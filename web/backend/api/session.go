@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/memory"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 	"github.com/google/uuid"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/memory"
-	"github.com/sipeed/jameclaw/pkg/providers"
 )
 
 // registerSessionRoutes binds session list and detail endpoints to the ServeMux.

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/sipeed/jameclaw/pkg/extensions"
+	"github.com/HoratiuCode/jameclaw/pkg/extensions"
 )
 
 type channelCatalogItem struct {

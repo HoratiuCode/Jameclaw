@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const OWNER = process.env.JAMECLAW_NPM_REPO_OWNER || "sipeed";
+const OWNER = process.env.JAMECLAW_NPM_REPO_OWNER || "HoratiuCode";
 const REPO = process.env.JAMECLAW_NPM_REPO_NAME || "jameclaw";
 const VERSION = process.env.JAMECLAW_NPM_VERSION || process.env.npm_package_version || "latest";
 const ROOT_DIR = path.resolve(__dirname, "..");

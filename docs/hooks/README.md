@@ -199,8 +199,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/agent"
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/agent"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 type ExampleLoggerHookOptions struct {
@@ -366,8 +366,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/sipeed/jameclaw/pkg/agent"
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/agent"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func init() {

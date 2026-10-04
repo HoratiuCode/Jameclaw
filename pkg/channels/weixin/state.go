@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	basechannels "github.com/sipeed/jameclaw/pkg/channels"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/fileutil"
-	"github.com/sipeed/jameclaw/pkg/logger"
+	basechannels "github.com/HoratiuCode/jameclaw/pkg/channels"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 const (

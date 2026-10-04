@@ -47,7 +47,7 @@ For substantial new features, please open an issue first to discuss the design b
    ```
 3. Add the upstream remote:
    ```bash
-   git remote add upstream https://github.com/sipeed/jameclaw.git
+   git remote add upstream https://github.com/HoratiuCode/jameclaw.git
    ```
 
 ---

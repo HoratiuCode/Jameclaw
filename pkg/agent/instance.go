@@ -8,14 +8,14 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/media"
-	"github.com/sipeed/jameclaw/pkg/memory"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/routing"
-	"github.com/sipeed/jameclaw/pkg/session"
-	"github.com/sipeed/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/media"
+	"github.com/HoratiuCode/jameclaw/pkg/memory"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/routing"
+	"github.com/HoratiuCode/jameclaw/pkg/session"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
 )
 
 // AgentInstance represents a fully configured agent with its own workspace,

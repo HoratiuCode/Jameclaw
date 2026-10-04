@@ -10,10 +10,10 @@ import (
 
 	"github.com/caarlos0/env/v11"
 
-	"github.com/sipeed/jameclaw/pkg"
-	"github.com/sipeed/jameclaw/pkg/credential"
-	"github.com/sipeed/jameclaw/pkg/fileutil"
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg"
+	"github.com/HoratiuCode/jameclaw/pkg/credential"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 // rrCounter is a global counter for round-robin load balancing across models.

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/routing"
-	"github.com/sipeed/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/routing"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
 )
 
 // SteeringMode controls how queued steering messages are dequeued.

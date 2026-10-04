@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/sipeed/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
 )
 
 // MemoryStore manages persistent memory for the agent.

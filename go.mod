@@ -1,4 +1,4 @@
-module github.com/sipeed/jameclaw
+module github.com/HoratiuCode/jameclaw
 
 go 1.25.8
 

@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sipeed/jameclaw/pkg"
+	"github.com/HoratiuCode/jameclaw/pkg"
 )
 
 // DefaultConfig returns the default configuration for JameClaw.

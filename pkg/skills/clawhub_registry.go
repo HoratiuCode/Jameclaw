@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 const (

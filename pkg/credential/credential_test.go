@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/credential"
+	"github.com/HoratiuCode/jameclaw/pkg/credential"
 )
 
 func TestResolve_PlainKey(t *testing.T) {

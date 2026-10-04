@@ -3,7 +3,7 @@ package voice
 import (
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func TestDetectTranscriber(t *testing.T) {

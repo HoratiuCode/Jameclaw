@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	anthropicmessages "github.com/sipeed/jameclaw/pkg/providers/anthropic_messages"
-	"github.com/sipeed/jameclaw/pkg/providers/azure"
-	"github.com/sipeed/jameclaw/pkg/providers/bedrock"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	anthropicmessages "github.com/HoratiuCode/jameclaw/pkg/providers/anthropic_messages"
+	"github.com/HoratiuCode/jameclaw/pkg/providers/azure"
+	"github.com/HoratiuCode/jameclaw/pkg/providers/bedrock"
 )
 
 // createClaudeAuthProvider creates a Claude provider using OAuth credentials from auth store.

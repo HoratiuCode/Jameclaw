@@ -3,7 +3,7 @@ package channels
 import (
 	"context"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
 )
 
 // MediaSender is an optional interface for channels that can send

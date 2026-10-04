@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func TestEnsureJameChannel_FreshConfig(t *testing.T) {

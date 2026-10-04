@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 var keepAwake = struct {

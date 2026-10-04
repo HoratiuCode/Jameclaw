@@ -15,7 +15,7 @@ import (
 
 	"github.com/rivo/tview"
 
-	tuicfg "github.com/sipeed/jameclaw/cmd/jameclaw-launcher-tui/config"
+	tuicfg "github.com/HoratiuCode/jameclaw/cmd/jameclaw-launcher-tui/config"
 )
 
 type modelsAPIResponse struct {

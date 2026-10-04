@@ -8,11 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/session"
-	"github.com/sipeed/jameclaw/pkg/tools"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/session"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 type TurnPhase string

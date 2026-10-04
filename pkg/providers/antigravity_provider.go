@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/auth"
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/auth"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 const (

@@ -18,7 +18,7 @@ import (
 	"github.com/tencent-connect/botgo/log"
 	"gopkg.in/yaml.v3"
 
-	"github.com/sipeed/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
 )
 
 const (
