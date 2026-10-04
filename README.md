@@ -25,7 +25,7 @@
 
 ---
 
-> **JameClaw** is a local-first AI assistant written in **Go** with a browser launcher, terminal launcher, and multi-channel gateway.
+> **JameClaw** is the agent runtime of **[Jame](https://jameclaw.xyz/jame)**, the open-source operating system for AI agents. It is a local-first AI assistant written in **Go** with a browser launcher, terminal launcher, and multi-channel gateway.
 
 > **New to this repository?** Read [START_HERE.md](START_HERE.md) for a short guide to what each folder contains and where to begin.
 
@@ -61,8 +61,9 @@ All of those entry points share the same local runtime state under `~/.jameclaw`
 > [!CAUTION]
 > **Security Notice**
 >
-> * **NO CRYPTO:** JameClaw has **not** issued any official tokens or cryptocurrency. All claims on `pump.fun` or other trading platforms are **scams**.
-> * **OFFICIAL DOMAIN:** The **ONLY** official website is **[jameclaw.xyz](https://jameclaw.xyz/)**
+> * **NO OFFICIAL TOKEN:** JameClaw and Jame have **not** issued any token or cryptocurrency. Any coin on `pump.fun` or other trading platforms that uses our name is a **scam**.
+> * **CRYPTO WORK LIVES IN SAMSON:** Compute and on-chain work in the Jame ecosystem is done under **[Samson](https://samsonresearch.xyz/)**, a separate project.
+> * **OFFICIAL DOMAINS:** The **ONLY** official websites are **[jameclaw.xyz](https://jameclaw.xyz/)** and **[samsonresearch.xyz](https://samsonresearch.xyz/)**
 > * **BEWARE:** Many `.ai/.org/.com/.net/...` domains have been registered by third parties. Do not trust them.
 > * **NOTE:** JameClaw is in early rapid development. There may be unresolved security issues. Do not deploy to production before v1.0.
 > * **NOTE:** JameClaw has recently merged many PRs. Recent builds may use 10-20MB RAM. Resource optimization is planned after feature stabilization.
