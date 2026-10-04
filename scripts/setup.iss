@@ -4,7 +4,7 @@
 #define MyAppName "JameClaw Launcher"
 #define MyAppVersion "1.0"
 #define MyAppPublisher "JameClaw"
-#define MyAppURL "https://github.com/sipeed/jameclaw"
+#define MyAppURL "https://github.com/HoratiuCode/jameclaw"
 #define MyAppExeName "jameclaw-launcher.exe"
 
 [Setup]

@@ -16,12 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/constants"
-	"github.com/sipeed/jameclaw/pkg/fileutil"
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/state"
-	"github.com/sipeed/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/constants"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/state"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
 )
 
 const (

@@ -12,9 +12,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 // ToolLoopConfig configures the tool execution loop.

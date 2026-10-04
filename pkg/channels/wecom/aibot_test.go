@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/channels"
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/channels"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 // ---- Webhook mode tests ----

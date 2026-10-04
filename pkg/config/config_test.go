@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 
-	"github.com/sipeed/jameclaw/pkg/credential"
+	"github.com/HoratiuCode/jameclaw/pkg/credential"
 )
 
 // mustSetupSSHKey generates a temporary Ed25519 SSH key in t.TempDir() and sets

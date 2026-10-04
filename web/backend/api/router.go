@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/web/backend/launcherconfig"
 )
 
 // Handler serves HTTP API requests.

@@ -1,7 +1,7 @@
 package providers
 
 import (
-	"github.com/sipeed/jameclaw/pkg/auth"
+	"github.com/HoratiuCode/jameclaw/pkg/auth"
 )
 
 var getCredential = auth.GetCredential

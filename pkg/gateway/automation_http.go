@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/cron"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/cron"
 )
 
 // createAutomationRegistrar exposes a local, token-protected trigger used by

@@ -14,13 +14,13 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gorilla/websocket"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/channels"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/identity"
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/media"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/channels"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/identity"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/media"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 const (

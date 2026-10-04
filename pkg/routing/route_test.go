@@ -3,7 +3,7 @@ package routing
 import (
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func testConfig(agents []config.AgentConfig, bindings []config.AgentBinding) *config.Config {

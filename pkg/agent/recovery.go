@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/tools"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 // MaxRecoveryAttempts is the total number of tool strategies allowed for one

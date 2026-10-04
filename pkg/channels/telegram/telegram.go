@@ -23,14 +23,14 @@ import (
 	th "github.com/mymmrac/telego/telegohandler"
 	tu "github.com/mymmrac/telego/telegoutil"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/channels"
-	"github.com/sipeed/jameclaw/pkg/commands"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/identity"
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/media"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/channels"
+	"github.com/HoratiuCode/jameclaw/pkg/commands"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/identity"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/media"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 var (

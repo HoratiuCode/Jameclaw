@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 const (

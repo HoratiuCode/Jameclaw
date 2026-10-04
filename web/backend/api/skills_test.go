@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func TestHandleListLearnedSkills(t *testing.T) {

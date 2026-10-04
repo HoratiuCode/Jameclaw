@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/sipeed/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
 )
 
 type SkillBundle struct {

@@ -14,7 +14,7 @@ import (
 
 	"github.com/adhocore/gronx"
 
-	"github.com/sipeed/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
 )
 
 type CronSchedule struct {

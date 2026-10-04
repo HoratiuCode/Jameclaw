@@ -161,19 +161,19 @@ Using Telegram as an example, the main changes are:
 package channels
 
 import (
-    "github.com/sipeed/jameclaw/pkg/bus"
-    "github.com/sipeed/jameclaw/pkg/config"
+    "github.com/HoratiuCode/jameclaw/pkg/bus"
+    "github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 // New code (refactored branch)
 package telegram
 
 import (
-    "github.com/sipeed/jameclaw/pkg/bus"
-    "github.com/sipeed/jameclaw/pkg/channels"     // Reference parent package
-    "github.com/sipeed/jameclaw/pkg/config"
-    "github.com/sipeed/jameclaw/pkg/identity"      // New
-    "github.com/sipeed/jameclaw/pkg/media"          // New (if media support needed)
+    "github.com/HoratiuCode/jameclaw/pkg/bus"
+    "github.com/HoratiuCode/jameclaw/pkg/channels"     // Reference parent package
+    "github.com/HoratiuCode/jameclaw/pkg/config"
+    "github.com/HoratiuCode/jameclaw/pkg/identity"      // New
+    "github.com/HoratiuCode/jameclaw/pkg/media"          // New (if media support needed)
 )
 ```
 
@@ -320,9 +320,9 @@ Create `init.go` for your channel:
 package telegram
 
 import (
-    "github.com/sipeed/jameclaw/pkg/bus"
-    "github.com/sipeed/jameclaw/pkg/channels"
-    "github.com/sipeed/jameclaw/pkg/config"
+    "github.com/HoratiuCode/jameclaw/pkg/bus"
+    "github.com/HoratiuCode/jameclaw/pkg/channels"
+    "github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func init() {
@@ -337,9 +337,9 @@ func init() {
 ```go
 // cmd/jameclaw/internal/gateway/helpers.go
 import (
-    _ "github.com/sipeed/jameclaw/pkg/channels/telegram"   // Triggers init() registration
-    _ "github.com/sipeed/jameclaw/pkg/channels/discord"
-    _ "github.com/sipeed/jameclaw/pkg/channels/your_new_channel"  // New addition
+    _ "github.com/HoratiuCode/jameclaw/pkg/channels/telegram"   // Triggers init() registration
+    _ "github.com/HoratiuCode/jameclaw/pkg/channels/discord"
+    _ "github.com/HoratiuCode/jameclaw/pkg/channels/your_new_channel"  // New addition
 )
 ```
 
@@ -420,9 +420,9 @@ To add a new chat platform (e.g., `matrix`), you need to:
 package matrix
 
 import (
-    "github.com/sipeed/jameclaw/pkg/bus"
-    "github.com/sipeed/jameclaw/pkg/channels"
-    "github.com/sipeed/jameclaw/pkg/config"
+    "github.com/HoratiuCode/jameclaw/pkg/bus"
+    "github.com/HoratiuCode/jameclaw/pkg/channels"
+    "github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func init() {
@@ -441,11 +441,11 @@ import (
     "context"
     "fmt"
 
-    "github.com/sipeed/jameclaw/pkg/bus"
-    "github.com/sipeed/jameclaw/pkg/channels"
-    "github.com/sipeed/jameclaw/pkg/config"
-    "github.com/sipeed/jameclaw/pkg/identity"
-    "github.com/sipeed/jameclaw/pkg/logger"
+    "github.com/HoratiuCode/jameclaw/pkg/bus"
+    "github.com/HoratiuCode/jameclaw/pkg/channels"
+    "github.com/HoratiuCode/jameclaw/pkg/config"
+    "github.com/HoratiuCode/jameclaw/pkg/identity"
+    "github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 // MatrixChannel implements channels.Channel for the Matrix protocol.
@@ -811,7 +811,7 @@ if m.config.Channels.Matrix.Enabled && m.config.Channels.Matrix.Token != "" {
 ```go
 // cmd/jameclaw/internal/gateway/helpers.go
 import (
-    _ "github.com/sipeed/jameclaw/pkg/channels/matrix"
+    _ "github.com/HoratiuCode/jameclaw/pkg/channels/matrix"
 )
 ```
 

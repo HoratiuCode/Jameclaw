@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 type macCommandCall struct {

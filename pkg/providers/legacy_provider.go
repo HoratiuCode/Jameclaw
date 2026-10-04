@@ -8,7 +8,7 @@ package providers
 import (
 	"fmt"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 // CreateProvider creates a provider based on the configuration.

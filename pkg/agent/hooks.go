@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
 )
 
 const (

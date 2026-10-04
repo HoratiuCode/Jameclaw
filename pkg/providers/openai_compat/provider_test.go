@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/providers/common"
-	"github.com/sipeed/jameclaw/pkg/providers/protocoltypes"
+	"github.com/HoratiuCode/jameclaw/pkg/providers/common"
+	"github.com/HoratiuCode/jameclaw/pkg/providers/protocoltypes"
 )
 
 func TestProviderChat_UsesMaxCompletionTokensForGLM(t *testing.T) {

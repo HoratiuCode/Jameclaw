@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
 	"gopkg.in/yaml.v3"
 )
 

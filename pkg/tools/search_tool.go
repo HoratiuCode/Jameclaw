@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 const (

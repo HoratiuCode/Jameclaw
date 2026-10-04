@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/constants"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/constants"
 )
 
 type ExecTool struct {

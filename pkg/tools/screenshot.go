@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/media"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/media"
 )
 
 const (

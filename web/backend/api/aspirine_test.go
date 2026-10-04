@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 func TestRecentConversationRecoveryIssuesDetectsCorrectiveFeedback(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/cron"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/cron"
 )
 
 func newTestCronToolWithConfig(t *testing.T, cfg *config.Config) *CronTool {

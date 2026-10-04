@@ -36,7 +36,7 @@ This repository is tuned around the workflow that exists in the code today:
 - keep runtime state under `~/.jameclaw`
 - use the TUI launcher when working over SSH or on headless machines
 
-If you are using this fork day to day, the launcher experience is the main entry point, not the older promo-heavy hardware/demo copy.
+If you are using JameClaw day to day, the launcher experience is the main entry point, not the older promo-heavy hardware/demo copy.
 
 ## 🧭 How JameClaw Works
 
@@ -68,7 +68,7 @@ All of those entry points share the same local runtime state under `~/.jameclaw`
 > * **NOTE:** JameClaw is in early rapid development. There may be unresolved security issues. Do not deploy to production before v1.0.
 > * **NOTE:** JameClaw has recently merged many PRs. Recent builds may use 10-20MB RAM. Resource optimization is planned after feature stabilization.
 
-## ✨ What This Fork Focuses On
+## ✨ What JameClaw Focuses On
 
 - **Web console first**: local browser UI for chat, configuration, and day-to-day operations
 - **Real terminal/TUI workflow**: multiline input, slash autocomplete, interrupt/redirect, streaming tool output, and resumable sessions for direct shell work
@@ -422,7 +422,7 @@ jameclaw gateway
 
 The agent runs on whichever default model you configure in `config.json`.
 
-In this fork, the practical setup paths are:
+In JameClaw, the practical setup paths are:
 
 - add API-key-based models from the Web Console credentials and models pages
 - pick a local model such as Ollama for offline or self-hosted use
@@ -474,7 +474,7 @@ Typical flow:
 - start the gateway
 - talk to the same agent through that channel using the same local model and workspace
 
-This fork is most clearly tuned around Telegram-first setup in onboarding, but the codebase also includes broader channel support. For the full channel list and setup guides, see [Chat Apps Configuration](docs/chat-apps.md).
+JameClaw is most clearly tuned around Telegram-first setup in onboarding, but the codebase also includes broader channel support. For the full channel list and setup guides, see [Chat Apps Configuration](docs/chat-apps.md).
 
 ## 🔧 Tools
 

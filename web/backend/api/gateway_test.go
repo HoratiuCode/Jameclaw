@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/auth"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/web/backend/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/auth"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/web/backend/utils"
 )
 
 func startLongRunningProcess(t *testing.T) *exec.Cmd {

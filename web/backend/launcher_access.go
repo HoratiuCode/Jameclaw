@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sipeed/jameclaw/web/backend/utils"
+	"github.com/HoratiuCode/jameclaw/web/backend/utils"
 )
 
 var launcherAccessToken string

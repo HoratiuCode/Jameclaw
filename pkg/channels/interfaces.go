@@ -3,8 +3,8 @@ package channels
 import (
 	"context"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/commands"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/commands"
 )
 
 // TypingCapable — channels that can show a typing/thinking indicator.

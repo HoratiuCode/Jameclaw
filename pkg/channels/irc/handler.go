@@ -9,9 +9,9 @@ import (
 	"github.com/ergochat/irc-go/ircevent"
 	"github.com/ergochat/irc-go/ircmsg"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/identity"
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/identity"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 // onConnect is called after a successful connection (and on reconnect).

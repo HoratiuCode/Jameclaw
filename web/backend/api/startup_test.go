@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
+	"github.com/HoratiuCode/jameclaw/web/backend/launcherconfig"
 )
 
 func TestResolveLaunchCommandUsesConfigFileDefaults(t *testing.T) {

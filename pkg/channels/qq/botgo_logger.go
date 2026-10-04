@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 // botGoLogger preserves useful SDK info logs while demoting noisy heartbeat

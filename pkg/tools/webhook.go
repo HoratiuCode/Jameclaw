@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 const webhookTimeout = 30 * time.Second

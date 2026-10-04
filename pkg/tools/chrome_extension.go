@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/browserbridge"
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/browserbridge"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 type ChromeExtensionTool struct {

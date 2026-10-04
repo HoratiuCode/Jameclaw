@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/fileutil"
-	"github.com/sipeed/jameclaw/pkg/skills"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/skills"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 const (

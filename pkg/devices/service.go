@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/constants"
-	"github.com/sipeed/jameclaw/pkg/devices/events"
-	"github.com/sipeed/jameclaw/pkg/devices/sources"
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/state"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/constants"
+	"github.com/HoratiuCode/jameclaw/pkg/devices/events"
+	"github.com/HoratiuCode/jameclaw/pkg/devices/sources"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/state"
 )
 
 type Service struct {

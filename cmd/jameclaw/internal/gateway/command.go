@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
-	"github.com/sipeed/jameclaw/pkg/gateway"
-	"github.com/sipeed/jameclaw/pkg/logger"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw/internal"
+	"github.com/HoratiuCode/jameclaw/pkg/gateway"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 func NewGatewayCommand() *cobra.Command {

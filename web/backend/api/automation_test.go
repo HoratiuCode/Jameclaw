@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/cron"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/cron"
 )
 
 func TestHandleAutomationListReturnsCronJobs(t *testing.T) {

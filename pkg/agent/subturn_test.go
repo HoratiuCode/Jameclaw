@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/bus"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/tools"
+	"github.com/HoratiuCode/jameclaw/pkg/bus"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/tools"
 )
 
 // Test constants (use defaults from subturn.go)

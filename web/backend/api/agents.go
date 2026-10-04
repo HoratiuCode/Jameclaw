@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	agentpkg "github.com/sipeed/jameclaw/pkg/agent"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/fileutil"
-	"github.com/sipeed/jameclaw/pkg/heartbeat"
-	"github.com/sipeed/jameclaw/pkg/providers"
+	agentpkg "github.com/HoratiuCode/jameclaw/pkg/agent"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/fileutil"
+	"github.com/HoratiuCode/jameclaw/pkg/heartbeat"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 type agentSummary struct {

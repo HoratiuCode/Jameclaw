@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/skills"
-	"github.com/sipeed/jameclaw/pkg/utils"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw/internal"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/skills"
+	"github.com/HoratiuCode/jameclaw/pkg/utils"
 )
 
 const skillsSearchMaxResults = 20

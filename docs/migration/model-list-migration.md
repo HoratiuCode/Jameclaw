@@ -216,5 +216,5 @@ api_key or api_base is required for HTTP-based protocol "xxx"
 
 ## Need Help?
 
-- [GitHub Issues](https://github.com/sipeed/jameclaw/issues)
-- [Discussion #122](https://github.com/sipeed/jameclaw/discussions/122): Original proposal
+- [GitHub Issues](https://github.com/HoratiuCode/jameclaw/issues)
+- [Discussion #122](https://github.com/HoratiuCode/jameclaw/discussions/122): Original proposal

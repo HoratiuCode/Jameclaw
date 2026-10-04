@@ -8,7 +8,7 @@ You can also run JameClaw using Docker Compose without installing anything local
 
 ```bash
 # 1. Clone this repo
-git clone https://github.com/sipeed/jameclaw.git
+git clone https://github.com/HoratiuCode/jameclaw.git
 cd jameclaw
 
 # 2. First run — auto-generates docker/data/config.json then exits

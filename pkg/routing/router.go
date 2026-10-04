@@ -1,7 +1,7 @@
 package routing
 
 import (
-	"github.com/sipeed/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
 )
 
 // defaultThreshold is used when the config threshold is zero or negative.

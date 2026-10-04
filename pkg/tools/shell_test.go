@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 // TestShellTool_Success verifies successful command execution
@@ -640,7 +640,7 @@ func TestShellTool_URLsNotBlocked(t *testing.T) {
 		"wget http://example.com/file",
 		"browser open https://github.com/user/repo",
 		"fetch ftp://ftp.example.com/file.txt",
-		"git clone https://github.com/sipeed/jameclaw.git",
+		"git clone https://github.com/HoratiuCode/jameclaw.git",
 	}
 
 	for _, cmd := range commands {

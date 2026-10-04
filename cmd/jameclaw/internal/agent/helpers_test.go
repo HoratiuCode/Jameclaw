@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw/internal"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func TestResolveAgentEmojiUsesWorkspaceSignature(t *testing.T) {

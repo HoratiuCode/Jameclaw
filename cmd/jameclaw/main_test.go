@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw/internal"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func TestNewJameclawCommand(t *testing.T) {

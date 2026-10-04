@@ -12,10 +12,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/media"
-	"github.com/sipeed/jameclaw/pkg/providers"
-	"github.com/sipeed/jameclaw/pkg/providers/common"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/media"
+	"github.com/HoratiuCode/jameclaw/pkg/providers"
+	"github.com/HoratiuCode/jameclaw/pkg/providers/common"
 )
 
 // ImageGenerationTool generates an image with the configured image model and

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/jameclaw/cmd/jameclaw/internal"
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/web/backend/launcherconfig"
+	"github.com/HoratiuCode/jameclaw/cmd/jameclaw/internal"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/web/backend/launcherconfig"
 )
 
 func TestCopyEmbeddedToTargetUsesStructuredAgentFiles(t *testing.T) {

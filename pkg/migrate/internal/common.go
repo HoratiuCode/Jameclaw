@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sipeed/jameclaw/pkg"
-	"github.com/sipeed/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
 )
 
 func ResolveTargetHome(override string) (string, error) {

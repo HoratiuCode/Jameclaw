@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sipeed/jameclaw/pkg/config"
-	"github.com/sipeed/jameclaw/pkg/logger"
+	"github.com/HoratiuCode/jameclaw/pkg/config"
+	"github.com/HoratiuCode/jameclaw/pkg/logger"
 )
 
 // registerConfigRoutes binds configuration management endpoints to the ServeMux.

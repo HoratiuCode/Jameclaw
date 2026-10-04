@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/jameclaw/pkg/media"
+	"github.com/HoratiuCode/jameclaw/pkg/media"
 )
 
 func TestCreatePDFToolCreatesAndRegistersPDF(t *testing.T) {
