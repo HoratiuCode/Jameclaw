@@ -30,6 +30,8 @@ final class NativeLaunchCoordinator: ObservableObject {
         let bundleURL = Bundle.main.bundleURL
         let contentsURL = bundleURL.deletingLastPathComponent()
         let candidates = [
+            bundleURL.appendingPathComponent("Contents/Helpers/jameclaw-launcher"),
+            contentsURL.appendingPathComponent("Helpers/jameclaw-launcher"),
             bundleURL.appendingPathComponent("Contents/MacOS/jameclaw-launcher"),
             contentsURL.appendingPathComponent("MacOS/jameclaw-launcher"),
         ]

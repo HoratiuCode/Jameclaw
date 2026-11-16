@@ -16,6 +16,7 @@ APP_NAME="JameClaw Desktop"
 APP_PATH="./build/${APP_NAME}.app"
 APP_CONTENTS="${APP_PATH}/Contents"
 APP_MACOS="${APP_CONTENTS}/MacOS"
+APP_HELPERS="${APP_CONTENTS}/Helpers"
 APP_RESOURCES="${APP_CONTENTS}/Resources"
 LAUNCHER_EXECUTABLE="jameclaw-launcher"
 NATIVE_EXECUTABLE="Jame"
@@ -41,12 +42,13 @@ fi
 # Create directory structure
 echo "Creating .app bundle structure..."
 mkdir -p "$APP_MACOS"
+mkdir -p "$APP_HELPERS"
 mkdir -p "$APP_RESOURCES"
 
 # Copy executable
 echo "Copying executable..."
 if [ -f "./build/${LAUNCHER_EXECUTABLE}" ]; then
-    cp "./build/${LAUNCHER_EXECUTABLE}" "${APP_MACOS}/"
+    cp "./build/${LAUNCHER_EXECUTABLE}" "${APP_HELPERS}/"
 else
     echo "Error: ./build/${LAUNCHER_EXECUTABLE} not found. Please build the web launcher first."
     echo "Run: make build-launcher"
@@ -55,13 +57,13 @@ fi
 echo "Building native desktop executable..."
 swiftc -parse-as-library "${NATIVE_SOURCES[@]}" -o "${APP_MACOS}/${NATIVE_EXECUTABLE}" -framework SwiftUI -framework AppKit -framework UserNotifications -framework PDFKit
 if [ -f "./build/jameclaw" ]; then
-    cp "./build/jameclaw" "${APP_MACOS}/"
+    cp "./build/jameclaw" "${APP_HELPERS}/"
 else
     echo "Error: ./build/jameclaw not found. Please build the main file first."
     echo "Run: make build"
     exit 1
 fi
-chmod +x "${APP_MACOS}/"*
+chmod +x "${APP_MACOS}/"* "${APP_HELPERS}/"*
 
 # Create Info.plist
 echo "Creating Info.plist..."
@@ -132,8 +134,8 @@ cp $ICON_SOURCE "${APP_RESOURCES}/icon.icns"
 cp "./macos/JameClawHome/creation-of-adam.jpg" "${APP_RESOURCES}/creation-of-adam.jpg"
 
 # JameClaw Desktop is now the native SwiftUI application itself. The Go
-# launcher and agent binary are ordinary helper executables in Contents/MacOS,
-# so they cannot create a second macOS app or Dock identity.
+# launcher and agent binary live in the standard Contents/Helpers directory,
+# keeping them outside the app's visible executable directory and Dock identity.
 codesign --force --deep --sign - "$APP_PATH"
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"

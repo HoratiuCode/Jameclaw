@@ -243,6 +243,10 @@ private final class JameMainWindowRegistry {
 }
 
 private let jameMainWindowTitle = "JameClaw Desktop"
+private let jameMainWindowDefaultSize = NSSize(width: 920, height: 840)
+private let jameMainWindowShapeVersionKey = "launcher.mainWindowShapeVersion"
+private let jameMainWindowShapeVersion = 4
+private let jameMainWindowSquareAppliedKey = "launcher.mainWindowSquareApplied"
 
 @MainActor
 private func selectDesktopSection(
@@ -309,18 +313,19 @@ private struct WindowBehaviorConfigurator: NSViewRepresentable {
             if registry.preferredFrame == nil {
                 let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame
                     ?? NSRect(x: 0, y: 0, width: 1120, height: 720)
+                let forceSquareLaunch = !UserDefaults.standard.bool(forKey: jameMainWindowSquareAppliedKey)
                 let savedFrame = UserDefaults.standard.string(forKey: "launcher.mainWindowFrame")
                     .map(NSRectFromString)
                 let savedFrameIsUsable = savedFrame.map {
-                    $0.width >= 660 && $0.height >= 440 && $0.intersects(visibleFrame)
+                    !forceSquareLaunch && $0.width >= 660 && $0.height >= 440 && $0.intersects(visibleFrame)
                 } ?? false
                 var launchFrame = savedFrameIsUsable
                     ? savedFrame!
                     : NSRect(
-                        x: visibleFrame.midX - 560,
-                        y: visibleFrame.midY - 360,
-                        width: min(1120, visibleFrame.width),
-                        height: min(720, visibleFrame.height)
+                        x: visibleFrame.midX - jameMainWindowDefaultSize.width / 2,
+                        y: visibleFrame.midY - jameMainWindowDefaultSize.height / 2,
+                        width: min(jameMainWindowDefaultSize.width, visibleFrame.width),
+                        height: min(jameMainWindowDefaultSize.height, visibleFrame.height)
                     )
                 launchFrame.size.width = min(launchFrame.width, visibleFrame.width)
                 launchFrame.size.height = min(launchFrame.height, visibleFrame.height)
@@ -328,6 +333,7 @@ private struct WindowBehaviorConfigurator: NSViewRepresentable {
                 launchFrame.origin.y = min(max(launchFrame.minY, visibleFrame.minY), visibleFrame.maxY - launchFrame.height)
                 registry.preferredFrame = launchFrame
                 window.setFrame(launchFrame, display: true, animate: false)
+                UserDefaults.standard.set(true, forKey: jameMainWindowSquareAppliedKey)
                 for delay in [0.25, 0.8, 1.5, 2.5] {
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                         guard registry.window === window,
@@ -378,7 +384,7 @@ private func bootstrapJameMainWindow() {
 
     let controller = NSHostingController(rootView: JameStandaloneRootView())
     let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 1120, height: 720),
+        contentRect: NSRect(origin: .zero, size: jameMainWindowDefaultSize),
         styleMask: [.titled, .closable, .miniaturizable, .resizable],
         backing: .buffered,
         defer: false
@@ -404,13 +410,64 @@ private func bootstrapJameMainWindow() {
 
 final class HomeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var visibilityTimer: Timer?
+    private let dockMaintenanceQueue = DispatchQueue(label: "com.jameclaw.dock-maintenance", qos: .background)
+
+    private func runDockUtility(_ executable: String, _ arguments: [String]) -> String? {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            return String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
+    }
+
+    private func removeJameClawDockRecentOnce() {
+        guard let cached = runDockUtility("/usr/bin/defaults", ["read", "com.apple.dock", "recent-apps"]),
+              cached.contains("com.jameclaw.launcher") else { return }
+        _ = runDockUtility("/usr/bin/killall", ["cfprefsd"])
+        let plist = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Preferences/com.apple.dock.plist").path
+        guard let countText = runDockUtility("/usr/bin/plutil", ["-extract", "recent-apps", "raw", "-o", "-", plist]),
+              let count = Int(countText), count > 0 else { return }
+        var changed = false
+        for index in stride(from: count - 1, through: 0, by: -1) {
+            let identifierKey = ":recent-apps:\(index):tile-data:bundle-identifier"
+            guard runDockUtility("/usr/libexec/PlistBuddy", ["-c", "Print \(identifierKey)", plist]) == "com.jameclaw.launcher" else { continue }
+            changed = runDockUtility("/usr/libexec/PlistBuddy", ["-c", "Delete :recent-apps:\(index)", plist]) != nil || changed
+        }
+        guard changed else { return }
+        _ = runDockUtility("/usr/bin/killall", ["cfprefsd"])
+        _ = runDockUtility("/usr/bin/killall", ["Dock"])
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // JameClaw Desktop is the visible application. Its Go server and
         // gateway run as helper executables inside this same app bundle.
         let activationChanged = NSApp.setActivationPolicy(.regular)
         NSLog("[JameWindow] did finish launching; regular activation=%@", activationChanged.description)
-        NativeLaunchCoordinator.shared.startIfNeeded()
+        // Render and activate the window before starting the bundled server.
+        // Process creation is short, but keeping it out of the first frame
+        // makes a cold launch feel immediate even on a busy Mac.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            NativeLaunchCoordinator.shared.startIfNeeded()
+        }
+
+        // Cleanup is deliberately one-shot, delayed, and fully off the UI
+        // thread. It preserves a single Dock icon without slowing app launch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) { [weak self] in
+            self?.dockMaintenanceQueue.async { [weak self] in
+                self?.removeJameClawDockRecentOnce()
+            }
+        }
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -874,15 +931,25 @@ private func migrateLegacyNativeDefaultsIfNeeded() {
           bundleID == "com.jameclaw.launcher" else { return }
     let marker = "jameclaw.defaults.migrated-from-home"
     let defaults = UserDefaults.standard
-    guard !defaults.bool(forKey: marker) else { return }
-
-    let legacy = defaults.persistentDomain(forName: "com.jameclaw.home") ?? [:]
-    var current = defaults.persistentDomain(forName: bundleID) ?? [:]
-    for (key, value) in legacy where current[key] == nil {
-        current[key] = value
+    if !defaults.bool(forKey: marker) {
+        let legacy = defaults.persistentDomain(forName: "com.jameclaw.home") ?? [:]
+        var current = defaults.persistentDomain(forName: bundleID) ?? [:]
+        for (key, value) in legacy where current[key] == nil {
+            current[key] = value
+        }
+        current[marker] = true
+        defaults.setPersistentDomain(current, forName: bundleID)
     }
-    current[marker] = true
-    defaults.setPersistentDomain(current, forName: bundleID)
+
+    // The Desktop used to launch in a broad landscape frame. Reset that
+    // legacy autosaved geometry once so this version starts as a square;
+    // later user resizing remains preserved as usual.
+    if defaults.integer(forKey: jameMainWindowShapeVersionKey) < jameMainWindowShapeVersion {
+        defaults.removeObject(forKey: "launcher.mainWindowFrame")
+        defaults.removeObject(forKey: "NSWindow Frame JameClawMainWindow")
+        defaults.removeObject(forKey: jameMainWindowSquareAppliedKey)
+        defaults.set(jameMainWindowShapeVersion, forKey: jameMainWindowShapeVersionKey)
+    }
 }
 
 @main
@@ -916,7 +983,7 @@ struct JameClawHomeApp: App {
             // NavigationSplitView updates, which AppKit treats as a fatal
             // invalid-geometry error.
             .windowResizability(.automatic)
-            .defaultSize(width: 1120, height: 720)
+            .defaultSize(width: jameMainWindowDefaultSize.width, height: jameMainWindowDefaultSize.height)
             .commands {
                 CommandGroup(after: .newItem) {
                     Button("Quick Actions…") {
@@ -1181,9 +1248,11 @@ struct JameRootView: View {
                 selectedSection: stableSectionSelection,
                 isAgentWorking: chat.isResponseInProgress,
                 messagingPlatformLabel: navigationContext.messagingPlatformLabel,
+                hasAutomations: navigationContext.hasAutomations,
                 profileName: chat.activeProfileName,
                 openCommandPalette: { showingCommandPalette = true },
                 openProfile: { openSection(.profile) },
+                openAutomations: { openSection(.automations) },
                 createProfile: {
                     openSection(.profile)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1213,7 +1282,7 @@ struct JameRootView: View {
             .frame(width: 0, height: 0)
         }
         .navigationSplitViewStyle(.balanced)
-        .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 290)
+        .navigationSplitViewColumnWidth(min: 160, ideal: 190, max: 220)
         .overlay {
             if showingCommandPalette {
                 ZStack {
@@ -1297,50 +1366,55 @@ private struct DesktopSidebar: View {
     @Binding var selectedSection: DesktopSection?
     let isAgentWorking: Bool
     let messagingPlatformLabel: String
+    let hasAutomations: Bool
     let profileName: String
     let openCommandPalette: () -> Void
     let openProfile: () -> Void
+    let openAutomations: () -> Void
     let createProfile: () -> Void
     let openTerminal: () -> Void
     @AppStorage("launcher.design.theme") private var savedTheme = LauncherTheme.light.rawValue
     @AppStorage("launcher.design.accent") private var savedAccent = LauncherAccent.theme.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
-    private var background: Color { colorScheme == .light ? Color(red: 0.965, green: 0.965, blue: 0.955) : JameBrand.ink }
+    private var background: Color { colorScheme == .light ? Color(red: 0.955, green: 0.953, blue: 0.935) : JameBrand.ink }
     private var panel: Color { colorScheme == .light ? .white : JameBrand.elevated }
     private var primary: Color { colorScheme == .light ? JameBrand.ink : JameBrand.paper }
     private var rule: Color { colorScheme == .light ? JameBrand.ink.opacity(0.14) : JameBrand.rule }
+    private var subdued: Color { colorScheme == .light ? JameBrand.ink.opacity(0.56) : JameBrand.paper.opacity(0.58) }
     private var theme: LauncherTheme { launcherThemePreference(from: savedTheme).resolved(for: colorScheme) }
     private var accent: Color { launcherAccentPreference(from: savedAccent, theme: theme) }
+    private var isMessagingConnected: Bool { messagingPlatformLabel != "No messaging connected" }
+
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 2) {
+            LazyVStack(alignment: .leading, spacing: 4) {
                 ForEach(DesktopSection.sidebar) { section in
                     navigationButton(section)
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 9)
         }
         .background(background)
         .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    HStack(spacing: 9) {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(accent)
-                            .frame(width: 5, height: 28)
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 0) {
-                                Text("JameClaw").foregroundStyle(primary)
-                                Text(".").foregroundStyle(accent)
-                            }
-                            .font(.system(size: 15, weight: .regular, design: .rounded))
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 0) {
+                            Text("JameClaw").foregroundStyle(primary)
+                            Text(".").foregroundStyle(accent)
                         }
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        Text("Desktop")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(subdued)
                     }
                     Spacer()
                     Button(action: openTerminal) {
                         Image(systemName: "terminal")
-                            .frame(width: 28, height: 24)
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 26, height: 26)
                             .foregroundStyle(primary)
                             .background(panel, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(rule))
@@ -1348,54 +1422,75 @@ private struct DesktopSidebar: View {
                     }
                     .buttonStyle(.plain)
                     .help("Open terminal and choose where Jame works")
-                    Button {
-                        selectedSection = .settings
-                    } label: {
-                        Image(systemName: selectedSection == .settings ? "gearshape.fill" : "gearshape")
-                            .frame(width: 28, height: 24)
-                            .foregroundStyle(selectedSection == .settings ? JameBrand.ink : primary)
-                            .background(selectedSection == .settings ? accent : panel, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(rule))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open JameClaw Settings")
                 }
                 Button(action: openCommandPalette) {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass")
                         Text("Quick actions")
                         Spacer()
-                        Text("⌘K").font(.caption.monospaced()).foregroundStyle(.tertiary)
+                        Text("⌘K")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .foregroundStyle(subdued)
+                            .background(background, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 9).padding(.vertical, 7)
-                    .foregroundStyle(primary)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .padding(.horizontal, 8)
+                    .frame(height: 29)
+                    .foregroundStyle(subdued)
                     .background(panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(rule))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 14)
-            .background(background.opacity(0.97))
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 9)
+            .background(background)
+            .overlay(alignment: .bottom) { Rectangle().fill(rule).frame(height: 1) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    Circle().fill(accent).frame(width: 7, height: 7)
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(isMessagingConnected ? accent : subdued.opacity(0.55))
+                        .frame(width: 7, height: 7)
                     Text(messagingPlatformLabel)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(subdued)
                         .lineLimit(1)
                     Spacer(minLength: 0)
+                    if hasAutomations {
+                        Button(action: openAutomations) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "calendar.badge.clock")
+                                Text("Automations")
+                            }
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(selectedSection == .automations ? accent : subdued)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open automations")
+                    }
                 }
                 HStack(spacing: 8) {
                     Button(action: openProfile) {
-                        Label(profileName, systemImage: "person.crop.circle")
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 8) {
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.system(size: 17))
+                                .foregroundStyle(accent)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(profileName)
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .lineLimit(1)
+                                Text("Agent profile")
+                                    .font(.system(size: 9, weight: .regular, design: .rounded))
+                                    .foregroundStyle(subdued)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .help("Open this profile")
@@ -1413,10 +1508,16 @@ private struct DesktopSidebar: View {
                     .frame(width: 22, height: 22)
                     .help("Profile actions")
                 }
+                .padding(.horizontal, 8)
+                .frame(height: 36)
+                .background(panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(rule))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .background(background.opacity(0.97))
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 9)
+            .background(background)
+            .overlay(alignment: .top) { Rectangle().fill(rule).frame(height: 1) }
         }
         .navigationTitle("")
     }
@@ -1426,21 +1527,30 @@ private struct DesktopSidebar: View {
         return Button {
             selectedSection = section
         } label: {
-            DesktopNavigationRow(section: section, accent: accent, isWorking: showWorking)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
+            DesktopNavigationRow(
+                section: section,
+                accent: accent,
+                isSelected: selectedSection == section,
+                isWorking: showWorking
+            )
+                .padding(.horizontal, 8)
+                .frame(height: 34)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .foregroundStyle(primary)
                 .background(
                     selectedSection == section
-                        ? panel
+                        ? accent.opacity(colorScheme == .light ? 0.13 : 0.16)
                         : showWorking ? accent.opacity(0.14) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(selectedSection == section ? accent.opacity(0.24) : Color.clear)
                 )
                 .overlay(alignment: .leading) {
                     if selectedSection == section {
-                        Rectangle().fill(accent).frame(width: 3)
+                        Capsule().fill(accent).frame(width: 3, height: 18)
                     }
                 }
         }
@@ -1478,7 +1588,6 @@ private struct QuickActionPalette: View {
         Action(id: "files", title: "Open files", detail: "Projects and images Jame made", symbol: "folder.fill", keywords: "artifacts files projects images", section: .artifacts, createsChat: false, opensHiring: false, opensTerminal: false),
         Action(id: "team", title: "Open team", detail: "Teammates and the work map", symbol: "person.3.fill", keywords: "agents team grid", section: .agent, createsChat: false, opensHiring: false, opensTerminal: false),
         Action(id: "hire", title: "New teammate", detail: "Someone who keeps working, or help for one task", symbol: "person.badge.plus", keywords: "hire agent spawn subagent", section: .agent, createsChat: false, opensHiring: true, opensTerminal: false),
-        Action(id: "memory", title: "Review memory", detail: "See and edit what Jame remembers", symbol: "brain.head.profile", keywords: "remember notes", section: .memory, createsChat: false, opensHiring: false, opensTerminal: false),
         Action(id: "skills", title: "Skills and connections", detail: "Skills and connected tools", symbol: "wand.and.stars.inverse", keywords: "capabilities skills mcp connectors tools", section: .capabilities, createsChat: false, opensHiring: false, opensTerminal: false),
         Action(id: "automation", title: "Open automations", detail: "Work Jame runs on a schedule", symbol: "calendar.badge.clock", keywords: "schedule cron", section: .automations, createsChat: false, opensHiring: false, opensTerminal: false),
         Action(id: "profile", title: "Open profile", detail: "Voice, style, and what Jame knows about you", symbol: "person.crop.circle", keywords: "persona soul profile", section: .profile, createsChat: false, opensHiring: false, opensTerminal: false),
@@ -1575,27 +1684,29 @@ private struct DesktopNavigationHeader: View {
 private struct DesktopNavigationRow: View {
     let section: DesktopSection
     let accent: Color
+    let isSelected: Bool
     let isWorking: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            Label {
-                Text(section.title).font(.system(.body, design: .rounded).weight(.medium))
-            } icon: {
-                Image(systemName: section.symbol)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(accent)
-                    .frame(width: 18)
-            }
+        HStack(spacing: 9) {
+            Image(systemName: section.symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(accent.opacity(isSelected || isWorking ? 1 : 0.58))
+                .frame(width: 20, height: 20)
+            Text(section.title)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .medium, design: .rounded))
             Spacer(minLength: 4)
             if isWorking {
-                Text("Working")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                HStack(spacing: 4) {
+                    Circle().fill(accent).frame(width: 5, height: 5)
+                    Text("Working")
+                }
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(accent)
                     .accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 2)
     }
 }
 
@@ -1629,7 +1740,7 @@ enum DesktopSection: String, CaseIterable, Identifiable {
         }
     }
 
-    static let sidebar: [DesktopSection] = [.chat, .sessions, .artifacts, .agent, .memory, .capabilities, .automations, .settings]
+    static let sidebar: [DesktopSection] = [.chat, .sessions, .artifacts, .agent, .capabilities]
     static let workspace: [DesktopSection] = sidebar
     static let agentTools: [DesktopSection] = [.agent, .memory, .capabilities, .automations]
 
@@ -5294,6 +5405,7 @@ private struct AgentDetailView: View {
             }
             .padding(24)
         }
+        .scrollIndicators(.visible)
     }
 }
 
@@ -5909,15 +6021,13 @@ private struct TeamGridView: View {
             Rectangle().fill(teamRule(colorScheme)).frame(height: 1)
 
             HStack(spacing: 0) {
-                ScrollView {
+                ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 28) {
                         TeamOperationsBoard(
                             snapshot: activity.operations,
                             agents: agents,
-                            selectedAgentID: selectedAgentID,
                             editTask: editTask,
-                            act: perform,
-                            assign: delegate
+                            act: perform
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                         teamPicture
@@ -5935,6 +6045,7 @@ private struct TeamGridView: View {
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .scrollIndicators(.visible)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Rectangle().fill(teamRule(colorScheme)).frame(width: 1)
@@ -5947,15 +6058,16 @@ private struct TeamGridView: View {
                     } ?? [],
                     sources: activity.sources,
                     files: activity.files,
-                    servers: activity.servers,
                     initiative: activity.initiative,
                     permissions: activity.permissions,
-                    onNewTask: { beginNewTask(ownerID: selectedAgentID) },
-                    onNewTeammate: {
-                        creationMode = .team
+                    spawnSubagent: {
+                        creationMode = .subagent
                         showingCreate = true
                     },
-                    act: perform
+                    addTeamAgent: {
+                        creationMode = .team
+                        showingCreate = true
+                    }
                 )
                 .frame(minWidth: 240, idealWidth: 280, maxWidth: 320)
                 .frame(maxHeight: .infinity)
@@ -6663,6 +6775,7 @@ private struct TeamGridInspector: View {
                 }
                 .padding(22)
             }
+            .scrollIndicators(.visible)
         } else {
             ContentUnavailableView("Select an agent", systemImage: "person.crop.circle.badge.questionmark")
         }
@@ -7375,6 +7488,7 @@ private struct CreateAgentView: View {
             }
             .padding(24)
         }
+        .scrollIndicators(.visible)
         .frame(width: 520, height: 640)
     }
 
@@ -7907,6 +8021,7 @@ struct QuickSettingsView: View {
     @AppStorage("launcher.voice.autoSendPrompt") private var autoSendVoicePrompt = false
     @AppStorage("jame.notifications.taskCompletion") private var taskCompletionNotifications = true
     @State private var showingBackgroundPicker = false
+    @State private var showingMemoryEditor = false
     @State private var showingProviderSetup = false
     @State private var providerSetupPurpose = ProviderSetupPurpose.primary
     @State private var allowOpenMacApps = false
@@ -7968,6 +8083,13 @@ struct QuickSettingsView: View {
                 Text("When JameClaw is in the background, send a macOS notification with a short result preview when an agent turn completes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Memory") {
+                Text("Edit the durable context Jame carries into future conversations.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Edit memory") { showingMemoryEditor = true }
+                    .buttonStyle(.bordered)
             }
             Section("Updates") {
                 HStack {
@@ -8344,6 +8466,10 @@ struct QuickSettingsView: View {
             ) {
                 showingProviderSetup = false
             }
+        }
+        .sheet(isPresented: $showingMemoryEditor) {
+            AgentMemoryView(port: Int(settings.port) ?? 18800)
+                .frame(minWidth: 760, minHeight: 600)
         }
     }
 
